@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>莫酱移动端</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        :root {
+            font-size: 16px;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #e3f2fd;
+            color: #333;
+            overflow-x: hidden;
+            overflow-y: auto;
+            min-height: 100vh;
+        }
+        .login-container {
+            width: 90%;
+            max-width: 500px;
+            min-height: 300px;
+            margin: 50px auto;
+            background-color: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        h1 {
+            text-align: center;
+            color: #1976D2;
+            margin: 0 0 20px 0;
+            font-size: 2rem;
+            width: 100%;
+        }
+        h2 {
+            color: #1976D2;
+            margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #bbdefb;
+            padding-bottom: 8px;
+            font-size: 1.2rem;
+        }
+        .section {
+            padding: 15px;
+            border: 2px solid #1976D2;
+            border-radius: 8px;
+            background-color: #f5f9ff;
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            margin-bottom: 12px;
+        }
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        input[type="text"], input[type="password"], select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        .button {
+            background-color: #1976D2;
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .button:hover {
+            background-color: #1565C0;
+        }
+        .button-danger {
+            background-color: #f44336;
+        }
+        .button-danger:hover {
+            background-color: #da190b;
+        }
+        .button-secondary {
+            background-color: #64B5F6;
+        }
+        .button-secondary:hover {
+            background-color: #42A5F5;
+        }
+        .button-success {
+            background-color: #4CAF50;
+        }
+        .button-success:hover {
+            background-color: #45a049;
+        }
+        .button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 15px;
+        }
+        .hidden {
+            display: none;
+        }
+        .error-message {
+            color: red;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+        .success-message {
+            color: green;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+        .control-panel {
+            background-color: #f0f8ff;
+            border: 2px solid #1976D2;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .mobile-nav-btn {
+            padding: 10px 16px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 14px;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            margin-right: 8px;
+            font-weight: 500;
+        }
+        .mobile-nav-btn:hover {
+            color: #1976D2;
+            background-color: #e3f2fd;
+        }
+        .mobile-nav-btn.active {
+            color: #1976D2;
+            border-bottom-color: #1976D2;
+            font-weight: bold;
+            background-color: white;
+        }
+        .mobile-tab-content {
+            min-height: 150px;
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #bbdefb;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+        }
+        .mobile-tab-content.hidden {
+            display: none;
+        }
+        .rooms-container {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .points-ranking-container {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .connection-selector {
+            margin-bottom: 15px;
+        }
+        .connection-list {
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            background-color: white;
+            margin-top: 10px;
+        }
+        .connection-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e3f2fd;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+        .connection-item:last-child {
+            border-bottom: none;
+        }
+        .connection-item:hover {
+            background-color: #e3f2fd;
+        }
+        .connection-item.selected {
+            background-color: #bbdefb;
+        }
+        .schedule-item:hover {
+            background-color: #e3f2fd;
+        }
+        .schedule-item.selected {
+            background-color: #bbdefb;
+        }
+        .schedule-item {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+        }
+        .schedule-item:last-child {
+            border-bottom: none;
+        }
+        .nav-tabs {
+            display: flex;
+            border-bottom: 1px solid #bbdefb;
+            margin-bottom: 15px;
+        }
+        .nav-tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-size: 0.9rem;
+        }
+        .nav-tab:hover {
+            background-color: #f5f9ff;
+        }
+        .nav-tab.active {
+            border-bottom-color: #1976D2;
+            color: #1976D2;
+            font-weight: bold;
+        }
+        .command-panel {
+            min-height: 200px;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-top: 5px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        .online-user-list {
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            background-color: white;
+            margin-top: 10px;
+        }
+        .online-user-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e3f2fd;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+        .online-user-item:last-child {
+            border-bottom: none;
+        }
+        .online-user-item:hover {
+            background-color: #e3f2fd;
+        }
+        .online-user-item.selected {
+            background-color: #bbdefb;
+        }
+        .mobile-container {
+            width: 90%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #1976D2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .no-connection {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div class="login-container" id="login-box">
+        <h1>莫酱妙妙屋</h1>
+        <div class="form-group">
+            <label>账户ID</label>
+            <input type="text" id="login-account" placeholder="请输入账户ID">
+        </div>
+        <div class="form-group">
+            <label>密码</label>
+            <input type="password" id="login-password" placeholder="请输入密码">
+        </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="remember-password">
+            <label for="remember-password">记住密码</label>
+        </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="auto-login">
+            <label for="auto-login">自动登录</label>
+        </div>
+        <div class="button-row">
+            <button class="button button-primary" id="login-btn" onclick="startConnection()">连接</button>
+        </div>
+        <div id="message" class="error-message" style="display: none;"></div>
+    </div>
+
+    <!-- 主界面 -->
+    <div class="mobile-container hidden" id="main-container">
+        <!-- 控制面板 -->
+        <div class="section control-panel">
+            <!-- 连接选择器 -->
+            <div class="connection-selector">
+                <h2>选择控制连接</h2>
+                <div id="connection-loading" class="loading">
+                    <div class="spinner"></div>
+                    <div>正在获取连接列表...</div>
+                </div>
+                <div id="connection-list" class="connection-list hidden"></div>
+                <div id="no-connection" class="no-connection hidden">
+                    暂无可用连接
+                </div>
+                <div class="button-row" style="margin-top: 10px;">
+                    <button class="button button-danger" onclick="mobileLogout()">退出登录</button>
+                </div>
+            </div>
+
+            <!-- 命令导航 -->
+            <div class="nav-tabs">
+                <div class="nav-tab active" data-tab="online" onclick="switchTab('online')">上线</div>
+                <div class="nav-tab" data-tab="offline" onclick="switchTab('offline')">下线</div>
+                <div class="nav-tab" data-tab="process" onclick="switchTab('process')">关闭进程</div>
+                <div class="nav-tab" data-tab="yjl" onclick="switchTab('yjl')">启动一条龙</div>
+                <div class="nav-tab" data-tab="schedule" onclick="switchTab('schedule')">触发调度</div>
+            </div>
+
+            <!-- 命令面板 -->
+            <div class="command-panel">
+            <!-- 上线面板 -->
+            <div id="online-panel">
+                <h2>手动上线管理</h2>
+                <div class="form-group">
+                    <label>游戏名称:</label>
+                    <input type="text" id="online-username" placeholder="请输入游戏名称">
+                </div>
+                <div class="form-group">
+                    <label>UID:</label>
+                    <input type="text" id="online-uid" placeholder="请输入UID">
+                </div>
+                <div class="form-group">
+                    <label>选择房间:</label>
+                    <select id="online-room">
+                        <option value="大澡堂">大澡堂</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="online-not-host">
+                        <label for="online-not-host">不当房主</label>
+                    </div>
+                </div>
+                <div class="button-row">
+                    <button class="button button-success" onclick="sendOnlineCommand()">上线</button>
+                </div>
+            </div>
+
+            <!-- 下线面板 -->
+            <div id="offline-panel" class="hidden">
+                <h2>下线管理</h2>
+                <div id="offline-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <div>正在获取已上线用户...</div>
+                </div>
+                <div id="online-user-list" class="online-user-list hidden"></div>
+                <div id="no-online-user" class="no-connection hidden">
+                    暂无已上线用户
+                </div>
+                <div class="button-row">
+                    <button class="button button-danger" onclick="sendOfflineCommand()">下线</button>
+                </div>
+            </div>
+
+            <!-- 关闭进程面板 -->
+            <div id="process-panel" class="hidden">
+                <h2>关闭进程</h2>
+                <div class="form-group">
+                    <label>选择操作:</label>
+                    <select id="process-action">
+                        <option value="close-bgi">关闭BGI</option>
+                        <option value="close-game">关闭原神</option>
+                    </select>
+                </div>
+                <div class="button-row">
+                    <button class="button button-danger" onclick="sendProcessCommand()">执行</button>
+                </div>
+            </div>
+
+            <!-- 启动一条龙面板 -->
+            <div id="yjl-panel" class="hidden">
+                <h2>启动一条龙</h2>
+                <div class="form-group">
+                    <label>一条龙名称:</label>
+                    <input type="text" id="yjl-name" placeholder="请输入一条龙名称">
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="yjl-close-game">
+                        <label for="yjl-close-game">启动一条龙时关闭原神</label>
+                    </div>
+                </div>
+                <div class="button-row">
+                    <button class="button button-success" onclick="sendYJLCommand()">启动一条龙</button>
+                </div>
+            </div>
+
+            <!-- 触发调度面板 -->
+            <div id="schedule-panel" class="hidden">
+                <h2>触发调度</h2>
+                <div class="form-group">
+                    <label>选择调度:</label>
+                    <div id="schedule-loading" class="loading hidden">
+                        <div class="spinner"></div>
+                        <div>正在获取调度列表...</div>
+                    </div>
+                    <div id="schedule-list" class="connection-list hidden"></div>
+                    <div id="no-schedule" class="no-connection hidden">
+                        暂无可用调度
+                    </div>
+                </div>
+                <div class="button-row">
+                    <button class="button button-success" onclick="sendScheduleCommand()">触发调度</button>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- 集成功能面板 -->
+        <div class="section">
+            <!-- 导航栏 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
+                <div style="display: flex;">
+                    <button onclick="mobileShowTab('rooms')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 8px; font-weight: bold;" class="mobile-nav-btn active">房间信息</button>
+                    <button onclick="mobileShowTab('points')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">积分排行榜</button>
+                    <button onclick="mobileShowTab('ride')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">发车记录</button>
+                    <button onclick="mobileShowTab('gain')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">收益排行</button>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="button button-secondary" onclick="mobileRefreshCurrentTab()">刷新</button>
+                </div>
+            </div>
+
+            <!-- 房间信息 -->
+            <div id="mobile-rooms" class="mobile-tab-content">
+                <div class="rooms-container" id="mobile-my-ride-records-container">
+                    <p style="color: #999; text-align: center; margin-top: 30px;">暂无数据</p>
+                </div>
+            </div>
+
+            <!-- 积分排行榜 -->
+            <div id="mobile-points" class="mobile-tab-content hidden">
+                <div class="points-ranking-container" id="mobile-points-ranking-container" style="height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
+                    <p style="color: #999; text-align: center; margin-top: 30px;">暂无积分数据</p>
+                </div>
+            </div>
+
+            <!-- 发车记录 -->
+            <div id="mobile-ride" class="mobile-tab-content hidden">
+                <div style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: nowrap;">
+                    <select id="mobile-my-ride-filter-status" style="padding: 5px; flex: 1; min-width: 100px;" onchange="filterMyRideRecords()">
+                        <option value="all">所有状态</option>
+                        <option value="completed">已完成</option>
+                        <option value="waiting">等待中</option>
+                        <option value="crashed">已炸车</option>
+                        <option value="cancelled">已取消</option>
+                    </select>
+                    <select id="mobile-my-ride-filter-room" style="padding: 5px; flex: 1; min-width: 100px;" onchange="filterMyRideRecords()">
+                        <option value="all">所有房间</option>
+                    </select>
+                </div>
+                <div id="mobile-ride-records-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
+                    <p style="color: #999; text-align: center; margin-top: 30px;">暂无发车记录</p>
+                </div>
+            </div>
+
+            <!-- 收益排行 -->
+            <div id="mobile-gain" class="mobile-tab-content hidden">
+                <div style="margin-bottom: 10px;">
+                    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                        <button class="button button-secondary" id="mobile-gain-tab-day" onclick="switchMobileGainTab('day')" style="background-color: #1976D2; color: white; flex: 1;">日榜</button>
+                        <button class="button button-secondary" id="mobile-gain-tab-week" onclick="switchMobileGainTab('week')" style="flex: 1;">周榜</button>
+                        <button class="button button-secondary" id="mobile-gain-tab-version" onclick="switchMobileGainTab('version')" style="flex: 1;">版榜</button>
+                    </div>
+                    <div id="mobile-gain-date-section" style="display: flex; gap: 10px;">
+                        <input type="date" id="mobile-gain-date-input" style="padding: 5px; flex: 1; min-width: 120px;">
+                        <button class="button button-secondary" onclick="loadMobileGainRecords()">查询</button>
+                    </div>
+                </div>
+                <div id="mobile-gain-records-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
+                    <p style="color: #999; text-align: center; margin-top: 30px;">请选择日期查询收益排行榜</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息区域 -->
+        <div id="cmd-message" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script>
+        const SERVER_URL = 'http://121.41.2.163:41013';
+        let socket = null;
+        let savedPassword = '';
+        let connectionId = '移动连接';
+        let socketId = '';
+        let isLoggingIn = false;
+        let isLoggedIn = false;
+        let selectedConnectionId = null;
+        let connections = [];
+        let onlineUsers = [];
+        let selectedUser = null;
+        let loggedInAccountId = '';
+        let userRooms = [];
+        let schedules = [];
+        let selectedScheduleId = null;
+
+        // 页面加载时检查自动登录
+        window.addEventListener('load', function() {
+            const savedAccount = localStorage.getItem('mobileAccount');
+            const savedPassword = localStorage.getItem('mobilePassword');
+            const autoLogin = localStorage.getItem('mobileAutoLogin') === 'true';
+            
+            if (savedAccount && savedPassword && autoLogin) {
+                document.getElementById('login-account').value = savedAccount;
+                document.getElementById('login-password').value = savedPassword;
+                document.getElementById('auto-login').checked = true;
+                document.getElementById('remember-password').checked = true;
+                startConnection();
+            }
+        });
+
+        function showMessage(text, type = 'error') {
+            const msgEl = document.getElementById('message');
+            msgEl.textContent = text;
+            msgEl.className = type === 'error' ? 'error-message' : 'success-message';
+            msgEl.style.display = 'block';
+            setTimeout(() => {
+                msgEl.style.display = 'none';
+            }, 3000);
+        }
+
+        function showCmdMessage(text, type = 'error') {
+            const msgEl = document.getElementById('cmd-message');
+            msgEl.textContent = text;
+            msgEl.className = type === 'error' ? 'error-message' : 'success-message';
+            msgEl.style.display = 'block';
+            setTimeout(() => {
+                msgEl.style.display = 'none';
+            }, 3000);
+        }
+
+        function mobileLogout() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            isLoggedIn = false;
+            isLoggingIn = false;
+            loggedInAccountId = '';
+            selectedConnectionId = null;
+            connections = [];
+            onlineUsers = [];
+            
+            document.getElementById('main-container').classList.add('hidden');
+            document.getElementById('login-box').classList.remove('hidden');
+            document.getElementById('login-password').value = '';
+        }
+
+        function startConnection() {
+            if (isLoggingIn || (socket && socket.connected)) {
+                return;
+            }
+
+            const account = document.getElementById('login-account').value.trim();
+            const password = document.getElementById('login-password').value;
+
+            if (!account || !password) {
+                showMessage('请输入账户ID和密码');
+                return;
+            }
+
+            isLoggingIn = true;
+            const loginBtn = document.getElementById('login-btn');
+            loginBtn.disabled = true;
+            loginBtn.textContent = '连接中...';
+
+            if (socket) {
+                try {
+                    socket.off();
+                    socket.disconnect();
+                } catch (error) {
+                    console.error('关闭连接失败:', error);
+                } finally {
+                    socket = null;
+                }
+            }
+
+            const loginSocket = io(SERVER_URL, {
+                reconnection: false,
+                reconnectionAttempts: 0,
+                timeout: 20000,
+                forceNew: true,
+                transports: ['websocket', 'polling']
+            });
+
+            loginSocket.on('connect', function() {
+                console.log('Mobile connected to server');
+
+                loginSocket.emit('message', {
+                    type: 'login',
+                    accountId: account,
+                    isAdminLogin: false,
+                    connectionName: '移动连接',
+                    isMobile: true
+                });
+                console.log('发送登录请求（获取密钥）');
+            });
+
+            loginSocket.on('connect_error', function(error) {
+                console.error('连接错误:', error);
+                showMessage('连接失败，请检查网络');
+                isLoggingIn = false;
+                loginBtn.disabled = false;
+                loginBtn.textContent = '连接';
+            });
+
+            loginSocket.on('disconnect', function(reason) {
+                console.log('断开连接:', reason);
+                isLoggedIn = false;
+                isLoggingIn = false;
+            });
+
+            loginSocket.on('message', function(data) {
+                if (data.type === 'login-key') {
+                    const key = data.key;
+                    const hashedPassword = CryptoJS.SHA256(password + key).toString();
+
+                    loginSocket.emit('message', {
+                        type: 'login',
+                        accountId: account,
+                        password: hashedPassword,
+                        key: key,
+                        isAdminLogin: false,
+                        connectionName: '移动连接',
+                        isMobile: true
+                    });
+                    console.log('发送登录请求（密钥已验证）');
+                } else if (data.type === 'login-success') {
+                    isLoggedIn = true;
+                    isLoggingIn = false;
+                    savedPassword = password;
+                    socket = loginSocket;
+                    socketId = socket.id;
+                    connectionId = data.connectionId;
+                    loggedInAccountId = data.accountId || account;
+
+                    // 保存登录信息
+                    const account = document.getElementById('login-account').value.trim();
+                    const rememberPassword = document.getElementById('remember-password').checked;
+                    const autoLogin = document.getElementById('auto-login').checked;
+                    
+                    localStorage.setItem('mobileAccount', account);
+                    if (rememberPassword) {
+                        localStorage.setItem('mobilePassword', password);
+                    } else {
+                        localStorage.removeItem('mobilePassword');
+                    }
+                    localStorage.setItem('mobileRememberPassword', rememberPassword);
+                    localStorage.setItem('mobileAutoLogin', autoLogin);
+
+                    loginBtn.textContent = '连接';
+                    loginBtn.disabled = false;
+
+                    document.getElementById('login-box').classList.add('hidden');
+                    document.getElementById('main-container').classList.remove('hidden');
+
+                    // 设置收益排行榜日期选择的默认值为今天
+                    const today = new Date();
+                    const todayStr = today.toISOString().split('T')[0];
+                    const dateInput = document.getElementById('mobile-gain-date-input');
+                    if (dateInput) {
+                        dateInput.value = todayStr;
+                    }
+
+                    socket.on('message', function(data) {
+                        handleMessage(data);
+                    });
+
+                    loadConnections();
+                    loadUserRooms();
+                    loadMobilePointsRanking();
+                    loadMobileMyRideRecords();
+                    socket.emit('message', {
+                        type: 'get-current-user-info'
+                    });
+                } else if (data.type === 'login-error') {
+                    console.error('登录失败:', data.message);
+                    showMessage(data.message || '登录失败');
+                    isLoggingIn = false;
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = '连接';
+                }
+            });
+        }
+
+        function handleMessage(data) {
+            console.log('收到消息:', data);
+
+            if (data.type === 'mobile-connections-list') {
+                connections = data.data.connections || [];
+                renderConnections();
+            } else if (data.type === 'mobile-command-result') {
+                if (data.data.success) {
+                    showCmdMessage(data.data.message || '命令执行成功', 'success');
+                    loadConnections();
+                    if (selectedConnectionId) {
+                        loadOnlineUsers();
+                    }
+                } else {
+                    showCmdMessage(data.data.message || '命令执行失败');
+                }
+            } else if (data.type === 'rooms-status') {
+                const rooms = data.data || {};
+                const allOnlineItems = data.allOnlineItems || [];
+                if (selectedConnectionId) {
+                    onlineUsers = allOnlineItems.filter(user => user.connectionId === selectedConnectionId);
+                } else {
+                    onlineUsers = [];
+                }
+                renderOnlineUsers();
+                updateMobileRoomsDisplay(rooms);
+            } else if (data.type === 'available-rooms') {
+                const roomSelect = document.getElementById('online-room');
+                roomSelect.innerHTML = '';
+                data.data.forEach(room => {
+                    const option = document.createElement('option');
+                    option.value = room;
+                    option.textContent = room;
+                    roomSelect.appendChild(option);
+                });
+            } else if (data.type === 'user-online-success' || data.type === 'user-offline-success') {
+                loadConnections();
+                if (selectedConnectionId) {
+                    loadOnlineUsers();
+                }
+            } else if (data.type === 'points-ranking') {
+                updateMobilePointsRanking(data.data || []);
+            } else if (data.type === 'my-ride-records') {
+                handleMyRideRecords(data);
+            } else if (data.type === 'gain-records') {
+                handleMobileGainRecords(data);
+            } else if (data.type === 'user-info') {
+                if (data.data) {
+                    userRooms = data.data.rooms || [];
+                    loadMobileRooms();
+                }
+            } else if (data.type === 'schedules-list') {
+                schedules = data.data.schedules || [];
+                renderSchedules();
+            }
+        }
+
+        function updateMobileRoomsDisplay(rooms) {
+            const container = document.getElementById('mobile-my-ride-records-container');
+            if (!container) return;
+
+            if (Object.keys(rooms).length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无在线用户</p>';
+                return;
+            }
+
+            const sortedRooms = Object.entries(rooms).sort(([roomNameA], [roomNameB]) => {
+                const hasPermissionA = userRooms.includes(roomNameA);
+                const hasPermissionB = userRooms.includes(roomNameB);
+                if (hasPermissionA && !hasPermissionB) return -1;
+                if (!hasPermissionA && hasPermissionB) return 1;
+                return 0;
+            });
+
+            container.innerHTML = '';
+            for (const [roomName, roomInfo] of sortedRooms) {
+                const card = document.createElement('div');
+                card.style.cssText = 'border: 1px solid #bbdefb; border-radius: 4px; padding: 10px; margin-bottom: 10px; background-color: white;';
+
+                const roomHeader = document.createElement('div');
+                roomHeader.style.display = 'flex';
+                roomHeader.style.justifyContent = 'space-between';
+                roomHeader.style.alignItems = 'center';
+                roomHeader.style.marginBottom = '10px';
+
+                const roomTitle = document.createElement('h3');
+                roomTitle.textContent = roomName;
+                roomTitle.style.margin = '0';
+                roomTitle.style.fontSize = '16px';
+                roomHeader.appendChild(roomTitle);
+
+                const roomProperties = document.createElement('div');
+                roomProperties.style.display = 'flex';
+                roomProperties.style.gap = '10px';
+                roomProperties.style.color = '#1976d2';
+                roomProperties.style.fontSize = '12px';
+
+                const modeText = {
+                    'random': '顺序发车',
+                    'points': '积分优先',
+                    'none': '不发车'
+                }[roomInfo.mode] || '顺序发车';
+
+                const hasPermission = userRooms.includes(roomName);
+                const permissionText = hasPermission ? '有权限' : '无权限';
+                const permissionColor = hasPermission ? '#4caf50' : '#f44336';
+
+                let roomPropertiesHTML = `<span>${modeText}</span>`;
+                if (roomInfo.mode !== 'none') {
+                    roomPropertiesHTML += `<span>${roomInfo.count}人发车</span>`;
+                }
+                roomPropertiesHTML += `<span style="color: ${permissionColor};">${permissionText}</span>`;
+
+                roomProperties.innerHTML = roomPropertiesHTML;
+                roomHeader.appendChild(roomProperties);
+
+                card.appendChild(roomHeader);
+
+                const divider = document.createElement('div');
+                divider.style.height = '1px';
+                divider.style.backgroundColor = '#1976d2';
+                divider.style.margin = '8px 0';
+                card.appendChild(divider);
+
+                const usersDiv = document.createElement('div');
+                usersDiv.style.fontSize = '12px';
+
+                if (!roomInfo.users || roomInfo.users.length === 0) {
+                    usersDiv.innerHTML = '<div style="color: #999;">暂无用户</div>';
+                } else {
+                    roomInfo.users.forEach(user => {
+                        const item = document.createElement('div');
+                        item.style.marginBottom = '4px';
+
+                        const hostIcon = user.notHost ? '' : ' 👑';
+                        const maskedUid = maskUid(user.uid);
+
+                        item.textContent = `${user.username} (UID: ${maskedUid})${hostIcon}`;
+                        usersDiv.appendChild(item);
+                    });
+                }
+
+                card.appendChild(usersDiv);
+                container.appendChild(card);
+            }
+        }
+
+        function maskUid(uid) {
+            if (!uid || uid.length <= 6) {
+                return uid;
+            }
+            const firstThree = uid.substring(0, 3);
+            const lastThree = uid.substring(uid.length - 3);
+            const masked = '*'.repeat(uid.length - 6);
+            return firstThree + masked + lastThree;
+        }
+
+        function updateMobilePointsRanking(pointsData) {
+            const container = document.getElementById('mobile-points-ranking-container');
+            if (!container) return;
+
+            if (!pointsData || pointsData.length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无积分数据</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            pointsData.forEach((item, index) => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #e3f2fd;';
+                const isSelf = item.accountId === loggedInAccountId;
+                row.innerHTML = `
+                    <span style="color: #1976D2; font-weight: bold;">${index + 1}. ${item.accountId}${isSelf ? ' (自己)' : ''}</span>
+                    <span style="color: #666;">${item.points || 0} 积分</span>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function loadConnections() {
+            document.getElementById('connection-loading').classList.remove('hidden');
+            document.getElementById('connection-list').classList.add('hidden');
+            document.getElementById('no-connection').classList.add('hidden');
+
+            socket.emit('message', {
+                type: 'get-user-connections-for-mobile'
+            });
+        }
+
+        function renderConnections() {
+            const loadingEl = document.getElementById('connection-loading');
+            const listEl = document.getElementById('connection-list');
+            const noConEl = document.getElementById('no-connection');
+
+            loadingEl.classList.add('hidden');
+
+            if (connections.length === 0) {
+                listEl.classList.add('hidden');
+                noConEl.classList.remove('hidden');
+            } else {
+                listEl.classList.remove('hidden');
+                noConEl.classList.add('hidden');
+
+                listEl.innerHTML = connections.map(conn => `
+                    <div class="connection-item" data-id="${conn.connectionId}" onclick="selectConnection('${conn.connectionId}')">
+                        <div>
+                            <div>${conn.connectionName}</div>
+                            <div style="font-size: 0.8rem; color: #666;">
+                                ${conn.uid || '未设置UID'} - ${conn.roomName || '未设置房间'}
+                            </div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: ${conn.status === 'online' ? '#4CAF50' : '#f44336'};">
+                            ${conn.status === 'online' ? '已上线' : '空闲'}
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function selectConnection(connectionId) {
+            selectedConnectionId = connectionId;
+            document.querySelectorAll('.connection-item').forEach(item => {
+                if (item.dataset.id === connectionId) {
+                    item.classList.add('selected');
+                } else {
+                    item.classList.remove('selected');
+                }
+            });
+        }
+
+        function loadSchedules() {
+            if (!selectedConnectionId) return;
+
+            document.getElementById('schedule-loading').classList.remove('hidden');
+            document.getElementById('schedule-list').classList.add('hidden');
+            document.getElementById('no-schedule').classList.add('hidden');
+
+            socket.emit('message', {
+                type: 'mobile-command',
+                data: {
+                    targetConnectionId: selectedConnectionId,
+                    command: 'get-schedules'
+                }
+            });
+        }
+
+        function renderSchedules() {
+            const loadingEl = document.getElementById('schedule-loading');
+            const listEl = document.getElementById('schedule-list');
+            const noSchEl = document.getElementById('no-schedule');
+
+            loadingEl.classList.add('hidden');
+
+            if (schedules.length === 0) {
+                listEl.classList.add('hidden');
+                noSchEl.classList.remove('hidden');
+            } else {
+                listEl.classList.remove('hidden');
+                noSchEl.classList.add('hidden');
+
+                listEl.innerHTML = schedules.map(schedule => {
+                    let triggerDesc = '';
+                    if (schedule.trigger.type === 'file-watch') {
+                        triggerDesc = `文件监听: ${schedule.trigger.config.filePath}`;
+                    } else if (schedule.trigger.type === 'cron') {
+                        triggerDesc = `定时启动: ${schedule.trigger.config.expression}`;
+                    } else if (schedule.trigger.type === 'trigger-ride') {
+                        triggerDesc = `触发发车: ${schedule.trigger.config.username} (${schedule.trigger.config.uid})`;
+                    } else if (schedule.trigger.type === 'file-command') {
+                        triggerDesc = `文件指令: ${schedule.trigger.config.filePath}`;
+                    }
+                    
+                    let actionDesc = '';
+                    if (schedule.action.type === 'start-dragon') {
+                        actionDesc = `启动一条龙: ${schedule.action.config.configName}`;
+                    } else if (schedule.action.type === 'auto-online') {
+                        actionDesc = `自动上线: ${schedule.action.config.username} (${schedule.action.config.uid})`;
+                    } else if (schedule.action.type === 'start-online-dragon') {
+                        actionDesc = `启动联机一条龙: ${schedule.action.config.configName}`;
+                    } else if (schedule.action.type === 'execute-file') {
+                        actionDesc = `执行文件: ${schedule.action.config.filePath}`;
+                    }
+                    
+                    return `
+                        <div class="schedule-item" data-id="${schedule.id}" onclick="selectSchedule('${schedule.id}')">
+                            <div>
+                                <div style="font-weight: bold; margin-bottom: 5px;">${schedule.name}</div>
+                                <div style="font-size: 0.8rem; color: #666; margin-bottom: 3px;">
+                                    ${triggerDesc}
+                                </div>
+                                <div style="font-size: 0.8rem; color: #666;">
+                                    ${actionDesc}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        function selectSchedule(scheduleId) {
+            selectedScheduleId = scheduleId;
+            document.querySelectorAll('.schedule-item').forEach(item => {
+                if (item.dataset.id === scheduleId) {
+                    item.classList.add('selected');
+                } else {
+                    item.classList.remove('selected');
+                }
+            });
+        }
+
+        function sendScheduleCommand() {
+            if (!selectedConnectionId) {
+                showCmdMessage('请先选择一个连接');
+                return;
+            }
+
+            if (!selectedScheduleId) {
+                showCmdMessage('请选择一个调度');
+                return;
+            }
+
+            socket.emit('message', {
+                type: 'mobile-command',
+                data: {
+                    targetConnectionId: selectedConnectionId,
+                    command: 'execute-schedule',
+                    params: {
+                        scheduleId: selectedScheduleId
+                    }
+                }
+            });
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`.nav-tab[data-tab="${tabName}"]`).classList.add('active');
+
+            document.querySelectorAll('[id$="-panel"]').forEach(panel => {
+                panel.classList.add('hidden');
+            });
+            document.getElementById(`${tabName}-panel`).classList.remove('hidden');
+
+            if (tabName === 'offline' && selectedConnectionId) {
+                loadOnlineUsers();
+            } else if (tabName === 'schedule' && selectedConnectionId) {
+                loadSchedules();
+            }
+        }
+
+        function mobileShowTab(tabId) {
+            // 隐藏所有标签内容
+            document.querySelectorAll('.mobile-tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            // 更新所有导航按钮的样式
+            document.querySelectorAll('.mobile-nav-btn').forEach(button => {
+                button.style.color = '#666';
+                button.style.borderBottom = '2px solid transparent';
+                button.style.fontWeight = '500';
+            });
+
+            // 显示选中的标签内容
+            document.getElementById('mobile-' + tabId).classList.remove('hidden');
+
+            // 更新点击按钮的样式
+            event.target.style.color = '#1976D2';
+            event.target.style.borderBottom = '2px solid #1976D2';
+            event.target.style.fontWeight = 'bold';
+
+            // 加载对应标签的数据
+            if (tabId === 'rooms') {
+                loadMobileRooms();
+            } else if (tabId === 'points') {
+                loadMobilePointsRanking();
+            } else if (tabId === 'ride') {
+                loadMobileMyRideRecords();
+            } else if (tabId === 'gain') {
+                loadMobileGainRecords();
+            }
+        }
+
+        function mobileRefreshCurrentTab() {
+            // 检查哪个标签是可见的
+            if (!document.getElementById('mobile-rooms').classList.contains('hidden')) {
+                loadMobileRooms();
+            } else if (!document.getElementById('mobile-points').classList.contains('hidden')) {
+                loadMobilePointsRanking();
+            } else if (!document.getElementById('mobile-ride').classList.contains('hidden')) {
+                loadMobileMyRideRecords();
+            } else if (!document.getElementById('mobile-gain').classList.contains('hidden')) {
+                loadMobileGainRecords();
+            }
+        }
+
+        function loadMobileRooms() {
+            if (!socket || !socket.connected) return;
+            socket.emit('message', {
+                type: 'get-rooms-status'
+            });
+        }
+
+        function loadMobilePointsRanking() {
+            if (!socket || !socket.connected) return;
+            socket.emit('message', {
+                type: 'get-points-ranking'
+            });
+        }
+
+        function loadMobileMyRideRecords() {
+            if (!socket || !socket.connected) return;
+            socket.emit('message', {
+                type: 'get-my-ride-records',
+                accountId: loggedInAccountId
+            });
+        }
+
+        // 切换收益排行榜标签
+        let currentMobileGainTab = 'day';
+
+        function switchMobileGainTab(tab) {
+            currentMobileGainTab = tab;
+
+            // 更新按钮样式
+            document.getElementById('mobile-gain-tab-day').style.backgroundColor = tab === 'day' ? '#1976D2' : '';
+            document.getElementById('mobile-gain-tab-day').style.color = tab === 'day' ? 'white' : '';
+            document.getElementById('mobile-gain-tab-week').style.backgroundColor = tab === 'week' ? '#1976D2' : '';
+            document.getElementById('mobile-gain-tab-week').style.color = tab === 'week' ? 'white' : '';
+            document.getElementById('mobile-gain-tab-version').style.backgroundColor = tab === 'version' ? '#1976D2' : '';
+            document.getElementById('mobile-gain-tab-version').style.color = tab === 'version' ? 'white' : '';
+
+            // 显示/隐藏日期选择
+            const dateSection = document.getElementById('mobile-gain-date-section');
+            if (dateSection) {
+                dateSection.style.display = tab === 'day' ? 'flex' : 'none';
+            }
+
+            // 加载对应标签的数据
+            loadMobileGainRecords();
+        }
+
+        function loadMobileGainRecords() {
+            if (!socket || !socket.connected) return;
+
+            let requestData = {
+                type: 'get-gain-records',
+                gainType: currentMobileGainTab,
+                requestAccountId: loggedInAccountId
+            };
+
+            if (currentMobileGainTab === 'day') {
+                const dateInput = document.getElementById('mobile-gain-date-input');
+                const date = dateInput.value;
+
+                if (!date) {
+                    showCmdMessage('请选择日期');
+                    return;
+                }
+
+                requestData.date = date;
+            }
+
+            socket.emit('message', requestData);
+        }
+
+        function handleMobileGainRecords(data) {
+            console.log('收到收益记录数据:', data);
+
+            const container = document.getElementById('mobile-gain-records-container');
+            if (!container) return;
+
+            if (!data.data || data.data.length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无收益排行榜</p>';
+                return;
+            }
+
+            let html = `
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed;">
+                    <thead>
+                        <tr style="background-color: #e3f2fd;">
+                            <th style="width: 45px; padding: 6px; text-align: center; border-bottom: 1px solid #bbdefb; font-size: 12px;">排行</th>
+                            <th style="flex: 1; padding: 6px; text-align: left; border-bottom: 1px solid #bbdefb; font-size: 12px;">用户-游戏账户</th>
+                            <th style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #bbdefb; font-size: 12px;">经验</th>
+                            <th style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #bbdefb; font-size: 12px;">摩拉</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.data.forEach((item, index) => {
+                const rowStyle = item.isSelf ? 'background-color: #fff9c4;' : '';
+                html += `
+                    <tr style="${rowStyle}">
+                        <td style="width: 45px; padding: 6px; text-align: center; border-bottom: 1px solid #e0e0e0; font-weight: bold; color: #1976D2;">${index + 1}</td>
+                        <td style="flex: 1; padding: 6px; text-align: left; border-bottom: 1px solid #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.displayName}</td>
+                        <td style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #e0e0e0;">${item.expGain.toLocaleString()}</td>
+                        <td style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #e0e0e0;">${item.moraGain.toLocaleString()}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        function loadOnlineUsers() {
+            if (!selectedConnectionId) return;
+
+            document.getElementById('offline-loading').classList.remove('hidden');
+            document.getElementById('online-user-list').classList.add('hidden');
+            document.getElementById('no-online-user').classList.add('hidden');
+
+            socket.emit('message', {
+                type: 'get-rooms-status'
+            });
+        }
+
+        function loadUserRooms() {
+            socket.emit('message', {
+                type: 'get-available-rooms'
+            });
+        }
+
+        function renderOnlineUsers() {
+            const loadingEl = document.getElementById('offline-loading');
+            const listEl = document.getElementById('online-user-list');
+            const noUserEl = document.getElementById('no-online-user');
+
+            loadingEl.classList.add('hidden');
+
+            if (onlineUsers.length === 0) {
+                listEl.classList.add('hidden');
+                noUserEl.classList.remove('hidden');
+            } else {
+                listEl.classList.remove('hidden');
+                noUserEl.classList.add('hidden');
+
+                listEl.innerHTML = onlineUsers.map(user => `
+                    <div class="online-user-item" data-id="${user.uid}" data-room="${user.room}" onclick="selectOnlineUser('${user.uid}', '${user.room}')">
+                        <div>
+                            <div>${user.username}</div>
+                            <div style="font-size: 0.8rem; color: #666;">UID: ${user.uid} - 房间: ${user.room}</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function selectOnlineUser(uid, room) {
+            selectedUser = onlineUsers.find(user => user.uid === uid && user.room === room);
+            document.querySelectorAll('.online-user-item').forEach(item => {
+                if (item.dataset.id === uid && item.dataset.room === room) {
+                    item.classList.add('selected');
+                } else {
+                    item.classList.remove('selected');
+                }
+            });
+        }
+
+        function handleMyRideRecords(data) {
+            console.log('收到我的发车记录数据:', data);
+
+            if (data.data && Array.isArray(data.data)) {
+                window.myRideRecordsData = data.data;
+                updateMyRideRoomFilter(window.myRideRecordsData);
+                filterMyRideRecords();
+            } else {
+                const container = document.getElementById('mobile-ride-records-container');
+                if (container) {
+                    container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无发车记录</p>';
+                }
+            }
+        }
+
+        function updateMyRideRoomFilter(records) {
+            const roomSelect = document.getElementById('mobile-my-ride-filter-room');
+            if (!roomSelect) return;
+            const currentSelection = roomSelect.value;
+
+            const rooms = [...new Set(records.map(r => r.roomName).filter(Boolean))];
+            rooms.sort();
+
+            roomSelect.innerHTML = '<option value="all">所有房间</option>';
+            rooms.forEach(room => {
+                const option = document.createElement('option');
+                option.value = room;
+                option.textContent = room;
+                roomSelect.appendChild(option);
+            });
+
+            if (rooms.includes(currentSelection)) {
+                roomSelect.value = currentSelection;
+            }
+        }
+
+        function filterMyRideRecords() {
+            const container = document.getElementById('mobile-ride-records-container');
+            if (!container) return;
+
+            if (!window.myRideRecordsData || !Array.isArray(window.myRideRecordsData)) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无发车记录</p>';
+                return;
+            }
+
+            const statusFilter = document.getElementById('mobile-my-ride-filter-status').value;
+            const roomFilter = document.getElementById('mobile-my-ride-filter-room').value;
+
+            let filteredRecords = window.myRideRecordsData.filter(record => {
+                if (statusFilter !== 'all' && record.status !== statusFilter) {
+                    return false;
+                }
+                if (roomFilter !== 'all' && record.roomName !== roomFilter) {
+                    return false;
+                }
+                return true;
+            });
+
+            if (filteredRecords.length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无发车记录</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            filteredRecords.forEach(record => {
+                const recordDiv = document.createElement('div');
+                recordDiv.style.cssText = 'border: 2px solid #bbdefb; border-radius: 8px; padding: 12px; margin-bottom: 15px; background-color: #ffffff;';
+
+                if (record.status === 'completed') {
+                    recordDiv.style.borderColor = '#1976D2';
+                } else if (record.status === 'crashed' || record.status === 'cancelled') {
+                    recordDiv.style.borderColor = '#f44336';
+                } else if (record.status === 'waiting') {
+                    recordDiv.style.borderColor = '#4CAF50';
+                }
+
+                const startTime = new Date(record.createdAt).toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+
+                const host = record.riders && record.riders.length > 0 ? record.riders[0] : null;
+                const members = record.riders && record.riders.length > 1 ? record.riders.slice(1) : [];
+                const isHost = host && host.accountId === loggedInAccountId;
+
+                recordDiv.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>${record.roomName || '未知房间'}</strong>
+                            ${isHost ? '<span style="color: #f44336; margin-left: 8px;">[房主]</span>' : '<span style="color: #4CAF50; margin-left: 8px;">[队员]</span>'}
+                        </div>
+                        <span style="color: #666; font-size: 12px;">${startTime}</span>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 13px; color: #666;">
+                        <div>房主: ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${maskUid(host.uid)})` : '无'}</div>
+                        <div>队员: ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${maskUid(m.uid)})`).join(', ') : '无'}</div>
+                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting' ? '等待中' : record.status}</div>
+                    </div>
+                `;
+                container.appendChild(recordDiv);
+            });
+        }
+
+        function sendOnlineCommand() {
+            if (!selectedConnectionId) {
+                showCmdMessage('请先选择一个连接');
+                return;
+            }
+
+            const username = document.getElementById('online-username').value.trim();
+            const uid = document.getElementById('online-uid').value.trim();
+            const roomName = document.getElementById('online-room').value;
+            const notHost = document.getElementById('online-not-host').checked;
+
+            if (!username || !uid) {
+                showCmdMessage('请填写游戏名称和UID');
+                return;
+            }
+
+            socket.emit('message', {
+                type: 'mobile-command',
+                data: {
+                    targetConnectionId: selectedConnectionId,
+                    command: 'online',
+                    params: {
+                        uid: uid,
+                        roomName: roomName,
+                        username: username,
+                        notHost: notHost
+                    }
+                }
+            });
+        }
+
+        function sendOfflineCommand() {
+            if (!selectedConnectionId) {
+                showCmdMessage('请先选择一个连接');
+                return;
+            }
+
+            if (!selectedUser) {
+                showCmdMessage('请选择要下线的用户');
+                return;
+            }
+
+            socket.emit('message', {
+                type: 'mobile-command',
+                data: {
+                    targetConnectionId: selectedConnectionId,
+                    command: 'offline',
+                    params: {
+                        uid: selectedUser.uid,
+                        roomName: selectedUser.room,
+                        username: selectedUser.username
+                    }
+                }
+            });
+        }
+
+        function sendProcessCommand() {
+            if (!selectedConnectionId) {
+                showCmdMessage('请先选择一个连接');
+                return;
+            }
+
+            const action = document.getElementById('process-action').value;
+
+            socket.emit('message', {
+                type: 'mobile-command',
+                data: {
+                    targetConnectionId: selectedConnectionId,
+                    command: action
+                }
+            });
+        }
+
+        function sendYJLCommand() {
+            if (!selectedConnectionId) {
+                showCmdMessage('请先选择一个连接');
+                return;
+            }
+
+            const dragonName = document.getElementById('yjl-name').value.trim();
+            const closeGame = document.getElementById('yjl-close-game').checked;
+
+            if (!dragonName) {
+                showCmdMessage('请填写一条龙名称');
+                return;
+            }
+
+            socket.emit('message', {
+                type: 'mobile-command',
+                data: {
+                    targetConnectionId: selectedConnectionId,
+                    command: 'yjl',
+                    params: {
+                        dragonName: dragonName,
+                        closeGame: closeGame
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

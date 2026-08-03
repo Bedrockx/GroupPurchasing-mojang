@@ -1,0 +1,3002 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>莫酱妙妙屋 - 管理员端</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #e3f2fd;
+            color: #333;
+            overflow: auto;
+        }
+        .container {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            background-color: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            text-align: center;
+            color: #1976D2;
+            margin-top: 0;
+        }
+        h2 {
+            color: #1976D2;
+            margin-top: 0;
+            border-bottom: 1px solid #bbdefb;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #1976D2;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 3px;
+            font-weight: bold;
+            color: #333;
+            font-size: 0.9em;
+        }
+        input[type="text"], input[type="password"], select {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 0.9em;
+        }
+        .button {
+            background-color: #1976D2;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        .button:hover {
+            background-color: #1565C0;
+        }
+        .button-danger {
+            background-color: #f44336;
+        }
+        .button-danger:hover {
+            background-color: #da190b;
+        }
+        .button-secondary {
+            background-color: #64B5F6;
+        }
+        .button-secondary:hover {
+            background-color: #42A5F5;
+        }
+        .button-warning {
+            background-color: #ff9800;
+        }
+        .button-warning:hover {
+            background-color: #f57c00;
+        }
+        .output {
+            background-color: #f0f8ff;
+            padding: 15px;
+            border-radius: 4px;
+            min-height: 300px;
+            border: 1px solid #bbdefb;
+            overflow-y: auto;
+        }
+        .room-card {
+            background-color: #f0f8ff;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #bbdefb;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        /* 房间容器样式优化 */
+        #rooms-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        /* 响应式设计 - 基于屏幕比例和视口单位 */
+        
+        /* 移动设备 - 竖屏 */
+        @media (max-aspect-ratio: 1/1) {
+            body {
+                padding: 1vw;
+                overflow-x: hidden;
+                font-size: 14px;
+            }
+            
+            .container {
+                padding: 1.5vw;
+                max-width: 95vw;
+                width: 92%;
+                box-sizing: border-box;
+            }
+            
+            .flex-row {
+                flex-direction: column;
+            }
+            
+            .flex-row button {
+                width: 100%;
+                margin-right: 0;
+                padding: 1vw;
+            }
+            
+            .room-management-container,
+            .user-management-container,
+            .logs-container {
+                flex-direction: column;
+            }
+            
+            .room-management-container > div,
+            .user-management-container > div,
+            .logs-container > div {
+                min-width: 100%;
+                width: 100%;
+            }
+            
+            .room-card {
+                padding: 1vw;
+                width: 100%;
+            }
+            
+            .room-user-item {
+                flex-direction: row;
+                justify-content: flex-start;
+                align-items: center;
+                gap: 0.5vw;
+                padding: 0.5vw;
+                text-align: left;
+            }
+            
+            .user-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1vw;
+                padding: 0.8vw;
+                text-align: left;
+            }
+            
+            .user-item > div {
+                text-align: left;
+                width: 100%;
+            }
+            
+            .user-item button {
+                align-self: flex-start;
+                padding: 0.8vw;
+                font-size: 3vw;
+            }
+            
+            h1 {
+                font-size: 5vw;
+                margin-bottom: 1vw;
+            }
+            
+            h2 {
+                font-size: 4vw;
+                margin-bottom: 0.8vw;
+            }
+            
+            h3 {
+                font-size: 3.2vw;
+                margin-bottom: 0.6vw;
+            }
+            
+            /* 确保所有容器在小屏幕上都能正确显示 */
+            #rooms-container,
+            #online-users-container,
+            #ride-records-container,
+            #points-ranking-container {
+                width: 100%;
+                box-sizing: border-box;
+            }
+        }
+        
+        /* 平板设备 - 横屏 */
+        @media (min-aspect-ratio: 1/1) and (max-aspect-ratio: 16/9) {
+            body {
+                padding: 0.8vw;
+                font-size: 14px;
+            }
+            
+            .container {
+                padding: 1.2vw;
+                max-width: 75vw;
+                width: 90%;
+            }
+            
+            .room-management-container,
+            .user-management-container,
+            .logs-container {
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 1vw;
+            }
+            
+            .room-management-container > div,
+            .user-management-container > div,
+            .logs-container > div {
+                min-width: 250px;
+                width: 48%;
+            }
+            
+            .room-card {
+                padding: 1vw;
+                width: 100%;
+            }
+            
+            h1 {
+                font-size: 2.2vw;
+                margin-bottom: 0.8vw;
+            }
+            
+            h2 {
+                font-size: 1.8vw;
+                margin-bottom: 0.6vw;
+            }
+            
+            h3 {
+                font-size: 1.4vw;
+                margin-bottom: 0.5vw;
+            }
+        }
+        
+        /* 电脑设备 - 16:9及以上比例 */
+        @media (min-aspect-ratio: 16/9) {
+            body {
+                padding: 0.5vw;
+                font-size: 14px;
+            }
+            
+            .container {
+                padding: 1.5vw;
+                max-width: 60vw;
+                width: 85%;
+            }
+            
+            .room-management-container,
+            .user-management-container,
+            .logs-container {
+                flex-direction: row;
+                flex-wrap: nowrap;
+                gap: 1.5vw;
+            }
+            
+            .room-management-container > div,
+            .user-management-container > div,
+            .logs-container > div {
+                min-width: 250px;
+            }
+            
+            .room-card {
+                padding: 1.2vw;
+                width: 100%;
+            }
+            
+            h1 {
+                font-size: 1.8vw;
+                margin-bottom: 1vw;
+            }
+            
+            h2 {
+                font-size: 1.4vw;
+                margin-bottom: 0.8vw;
+            }
+            
+            h3 {
+                font-size: 1.1vw;
+                margin-bottom: 0.6vw;
+            }
+        }
+        
+        /* 确保表格在小屏幕上可以横向滚动 */
+        .table-responsive {
+            overflow-x: auto;
+        }
+        
+        /* 确保卡片在不同屏幕尺寸下都能自适应 */
+        .card-responsive {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .room-card h3 {
+            margin-top: 0;
+            color: #1976D2;
+            padding-bottom: 5px;
+        }
+        .room-users {
+            margin-top: 10px;
+        }
+        .room-user-item {
+            padding: 8px;
+            border-bottom: 1px solid #e3f2fd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        .room-user-item:hover {
+            background-color: #e3f2fd;
+        }
+        .room-user-item:last-child {
+            border-bottom: none;
+        }
+        .room-user-item.online {
+            border-left: 4px solid #4CAF50;
+        }
+        .user-item {
+            padding: 10px;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            background-color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .hidden {
+            display: none;
+        }
+        /* 日志行样式 */
+        .log-line {
+            padding: 2px 0;
+            transition: background-color 0.2s ease;
+        }
+        .error-message {
+            color: red;
+            margin-top: 10px;
+        }
+        .menu {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+        }
+        .menu-item {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        .menu-item:hover {
+            background-color: #f5f5f5;
+        }
+        .flex-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .flex-row button {
+            flex: 1;
+        }
+        .panel {
+            display: none;
+        }
+        .panel.active {
+            display: block;
+        }
+        /* 积分排行榜 */
+        .points-ranking-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #bbdefb;
+            border-radius: 4px;
+            background-color: #f0f8ff;
+            padding: 15px;
+        }
+        .points-ranking-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e3f2fd;
+        }
+        .points-ranking-item:last-child {
+            border-bottom: none;
+        }
+        .points-ranking-rank {
+            font-weight: bold;
+            margin-right: 10px;
+            color: #1976D2;
+        }
+        .points-ranking-account {
+            flex: 1;
+        }
+        .points-ranking-lastride {
+            min-width: 100px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+        .points-ranking-points {
+            min-width: 60px;
+            text-align: right;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .room-permissions {
+            margin-top: 10px;
+        }
+        .permission-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .permission-item input[type="checkbox"] {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div id="login-container" class="login-container">
+        <h1>莫酱妙妙屋</h1>
+        <h2>管理员登录</h2>
+        <div class="form-group">
+            <label for="admin-login-account">账号：</label>
+            <input type="text" id="admin-login-account" placeholder="请输入账号">
+        </div>
+        <div class="form-group">
+            <label for="admin-login-password">密码：</label>
+            <input type="password" id="admin-login-password" placeholder="请输入密码">
+        </div>
+        <div class="error-message" id="admin-login-error"></div>
+        <div class="form-group" style="display: flex; gap: 20px; margin-top: 10px;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="remember-password" style="margin-right: 5px;">
+                <span>记住密码</span>
+            </label>
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="auto-login" style="margin-right: 5px;">
+                <span>自动登录</span>
+            </label>
+        </div>
+        <button class="button" onclick="adminLogin()">登录</button>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="main-container" class="container hidden">
+        <h1>莫酱妙妙屋管理</h1>
+        <div class="flex-row" style="margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+            <button class="button" onclick="switchToRoomsOverview()">房间总览</button>
+            <button class="button" onclick="switchToPointsRanking()">积分排行榜</button>
+            <button class="button" onclick="switchToGainRecords()">收益排行榜</button>
+            <button class="button" onclick="switchToRoomManagement()">房间管理</button>
+            <button class="button" onclick="switchToUserManagement()">用户管理</button>
+            <button class="button" onclick="switchToOnlineUsers()">在线用户</button>
+            <button class="button" onclick="switchToRideRecords()">发车记录</button>
+            <button class="button" onclick="switchToVersionManagement()">版本管理</button>
+            <button class="button" onclick="switchToLogs()">查看日志</button>
+            <button class="button" onclick="logout()" style="background-color: #f44336; margin-left: auto;">退出登录</button>
+        </div>
+        
+        <!-- 房间总览面板 -->
+        <div id="rooms-status-panel" class="panel active">
+            <h2>房间总览</h2>
+            <div id="rooms-container">
+                <p>正在加载房间信息...</p>
+            </div>
+        </div>
+        
+        <!-- 积分排行榜面板 -->
+        <div id="points-ranking-panel" class="panel">
+            <h2>积分排行榜</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <button class="button button-secondary" onclick="refreshPointsRanking()">刷新</button>
+            </div>
+            <div id="points-ranking-container" style="max-height: 400px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: #f0f8ff; padding: 15px;">
+                <p style="color: #999; text-align: center; margin-top: 50px;">暂无积分数据</p>
+            </div>
+        </div>
+        
+        <!-- 收益排行榜面板 -->
+        <div id="gain-records-panel" class="panel">
+            <h2>收益排行榜</h2>
+            <div style="display: flex; gap: 15px; margin-bottom: 15px; align-items: center;">
+                <div style="display: flex; gap: 5px;">
+                    <button class="button button-secondary" id="admin-gain-tab-day" onclick="switchAdminGainTab('day')" style="background-color: #1976D2; color: white; padding: 6px 16px;">日榜</button>
+                    <button class="button button-secondary" id="admin-gain-tab-week" onclick="switchAdminGainTab('week')" style="padding: 6px 16px;">周榜</button>
+                    <button class="button button-secondary" id="admin-gain-tab-version" onclick="switchAdminGainTab('version')" style="padding: 6px 16px;">版榜</button>
+                </div>
+                <div id="admin-gain-date-section" style="display: flex; align-items: center; gap: 8px;">
+                    <label for="admin-gain-date-input" style="font-size: 14px; color: #666;">选择日期：</label>
+                    <input type="date" id="admin-gain-date-input" onchange="loadGainRecords()" style="padding: 5px; font-size: 14px;">
+                </div>
+                <button class="button button-secondary" onclick="loadGainRecords()" style="margin-left: auto; padding: 6px 16px;">刷新</button>
+            </div>
+            <div id="admin-gain-records-container" style="max-height: 400px; overflow-y: auto; overflow-x: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: #f0f8ff; padding: 10px;">
+                <p style="color: #999; text-align: center; margin-top: 50px;">暂无数据</p>
+            </div>
+        </div>
+        
+        <!-- 房间管理面板 -->
+        <div id="room-management-panel" class="panel">
+            <h2>房间管理</h2>
+            <div class="room-management-container" style="display: flex; gap: 20px; flex-wrap: wrap; align-items: stretch;">
+                <div style="flex: 1; min-width: 300px;">
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        <div>
+                            <label for="admin-room-select">选择房间：</label>
+                            <select id="admin-room-select" onchange="loadRoomUsers()" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="">-- 选择房间 --</option>
+                            </select>
+                        </div>
+                        <button class="button button-success" onclick="openCreateRoomModal()" style="padding: 8px 16px;">新增房间</button>
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <button class="button" onclick="loadAllRooms()">刷新房间列表</button>
+                            <button class="button" onclick="refreshRoomsStatus()">刷新房间状态</button>
+                            <button class="button" onclick="openEditRoomModal()">编辑房间属性</button>
+                            <button class="button button-danger" onclick="deleteRoom()">删除房间</button>
+                        </div>
+                        <h3>房间属性</h3>
+                        <div id="room-properties-output" style="min-height: 200px; max-height: 200px; overflow-y: auto; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
+                            请选择房间
+                        </div>
+                    </div>
+                </div>
+                <div style="flex: 3; min-width: 400px; display: flex; flex-direction: column;">
+                    <h3>房间用户</h3>
+                    <div class="output" id="room-users-output" style="flex: 1; overflow-y: auto; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
+                        请选择房间
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 用户管理面板 -->
+        <div id="user-management-panel" class="panel">
+            <h2>用户管理</h2>
+            <div class="user-management-container" style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch;">
+                <div style="flex: 1; min-width: 300px;">
+                    <h3>注册用户</h3>
+                    <div class="form-group">
+                        <label for="new-account-id">账号：</label>
+                        <input type="text" id="new-account-id" placeholder="请输入账号" style="width: 100%;">
+                    </div>
+                    <button class="button" onclick="registerUser()">注册用户</button>
+                    <br><br>
+                    <h3>选择用户</h3>
+                    <div class="form-group">
+                        <label for="user-filter-input">筛选：</label>
+                        <input type="text" id="user-filter-input" placeholder="输入用户名进行筛选" onkeyup="filterUsers()" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-user-select">用户：</label>
+                        <select id="admin-user-select" onchange="loadUserInfo()" style="width: 100%;">
+                            <option value="">-- 选择用户 --</option>
+                        </select>
+                    </div>
+                    <div class="flex-row" style="flex-wrap: wrap; gap: 10px;">
+                        <button class="button" onclick="loadAllAccounts()">刷新列表</button>
+                        <button class="button" onclick="resetPassword()">重置密码</button>
+                        <button id="freeze-user-btn" class="button button-danger" onclick="toggleFreezeUser()">冻结用户</button>
+                        <button id="safe-user-btn" class="button" onclick="toggleSafeUser(document.getElementById('admin-user-select').value)">信任用户</button>
+                        <button class="button button-danger" onclick="deleteUser()">删除用户</button>
+                    </div>
+                    <br><br>
+                    <h3>用户信息</h3>
+                    <div id="user-info-output" style="min-height: 100px; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
+                        请选择用户
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column;">
+                    <h3>房间权限管理</h3>
+                    <div class="output" id="room-permissions-output" style="flex: 1; min-height: 300px; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
+                        请选择用户
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 在线用户面板 -->
+        <div id="online-users-panel" class="panel">
+            <h2>在线用户</h2>
+            <div id="online-users-container">
+                <p>正在加载在线用户信息...</p>
+            </div>
+        </div>
+        
+        <!-- 发车记录面板 -->
+        <div id="ride-records-panel" class="panel">
+            <h2>发车记录</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label for="ride-record-date">选择日期：</label>
+                    <input type="date" id="ride-record-date" onchange="loadRideRecords()">
+                </div>
+                <button class="button button-secondary" onclick="loadRideRecords()">刷新</button>
+            </div>
+            <!-- 筛选条件 -->
+            <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 150px;">
+                    <select id="ride-filter-room" style="width: 100%; padding: 5px;" onchange="filterRideRecords()">
+                        <option value="all">所有房间</option>
+                    </select>
+                </div>
+                <div style="flex: 1; min-width: 150px;">
+                    <select id="ride-filter-status" style="width: 100%; padding: 5px;" onchange="filterRideRecords()">
+                        <option value="all">所有状态</option>
+                        <option value="completed">已完成</option>
+                        <option value="waiting">等待中</option>
+                        <option value="crashed">已炸车</option>
+                        <option value="cancelled">已取消</option>
+                    </select>
+                </div>
+                <div style="flex: 2; min-width: 200px;">
+                    <input type="text" id="ride-filter-user" placeholder="输入用户名、游戏名称或UID筛选" style="width: 100%; padding: 5px;" oninput="filterRideRecords()">
+                </div>
+                <button class="button button-secondary" onclick="clearRideFilters()">清除筛选</button>
+            </div>
+            <div id="ride-records-container" style="max-height: 600px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: #f0f8ff; padding: 15px;">
+                <p style="color: #999; text-align: center; margin-top: 50px;">暂无发车记录</p>
+            </div>
+        </div>
+
+        <!-- 版本管理面板 -->
+        <div id="version-management-panel" class="panel">
+            <h2>版本管理</h2>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px;">
+                    <h3>当前版本信息</h3>
+                    <div style="background-color: #f0f8ff; padding: 15px; border-radius: 4px; border: 1px solid #bbdefb; margin-bottom: 15px;">
+                        <p style="margin: 5px 0;"><strong>用户端版本：</strong><span id="current-client-version">加载中...</span></p>
+                        <p style="margin: 5px 0;"><strong>团购版本：</strong><span id="current-group-version">加载中...</span></p>
+                    </div>
+                    <h3>修改版本号</h3>
+                    <div class="form-group">
+                        <label for="new-client-version">用户端版本：</label>
+                        <input type="text" id="new-client-version" placeholder="例如: 1.4.0" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-group-version">团购版本：</label>
+                        <input type="text" id="new-group-version" placeholder="例如: 2.3.0" style="width: 100%;">
+                    </div>
+                    <button class="button" onclick="updateVersions()">保存版本号</button>
+                    <button class="button button-secondary" onclick="loadVersions()">刷新</button>
+                </div>
+                <div style="flex: 1; min-width: 300px;">
+                    <h3>上传安装包</h3>
+                    <div class="form-group">
+                        <label for="client-package-file">用户端安装包 (mojang.zip)：</label>
+                        <input type="file" id="client-package-file" accept=".zip" style="width: 100%;">
+                    </div>
+                    <button class="button" onclick="uploadClientPackage()">上传用户端</button>
+                    <br><br>
+                    <div class="form-group">
+                        <label for="group-package-file">团购安装包 (ArtifactsGroupPurchasing.zip)：</label>
+                        <input type="file" id="group-package-file" accept=".zip" style="width: 100%;">
+                    </div>
+                    <button class="button" onclick="uploadGroupPackage()">上传团购</button>
+                    <br><br>
+                    <h3>上传客户端代码 (app.asar)</h3>
+                    <div class="form-group">
+                        <label for="asar-version">版本号：</label>
+                        <input type="text" id="asar-version" placeholder="例如: 1.8.0" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="asar-file">app.asar 文件：</label>
+                        <input type="file" id="asar-file" accept=".asar" style="width: 100%;">
+                    </div>
+                    <button class="button" onclick="uploadAsarFile()">上传 asar</button>
+                    <div id="upload-progress" style="margin-top: 15px; display: none;">
+                        <progress id="upload-progress-bar" value="0" max="100" style="width: 100%;"></progress>
+                        <p id="upload-progress-text" style="margin: 5px 0; font-size: 0.9em;">上传中... 0%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 查看日志面板 -->
+        <div id="logs-panel" class="panel">
+            <h2>查看日志</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label for="log-date">选择日期：</label>
+                    <input type="date" id="log-date" onchange="loadLogFilesByDate()">
+                </div>
+                <button class="button button-secondary" onclick="loadLogFilesByDate()">刷新</button>
+            </div>
+            <div style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 200px;">
+                    <select id="log-event-filter" style="width: 100%; padding: 5px;">
+                        <option value="all">所有事件类型</option>
+                        <option value="ADMIN">管理操作</option>
+                        <option value="LOGIN">用户登入/登出</option>
+                        <option value="ONLINE">用户上线/下线</option>
+                        <option value="RIDE">发车相关</option>
+                        <option value="POINTS">积分相关</option>
+                        <option value="FILE">文件操作</option>
+                        <option value="CLEANUP">清理相关</option>
+                        <option value="CODEHASH">代码校验</option>
+                        <option value="VERSION">版本检查</option>
+                        <option value="TIMER">定时器相关</option>
+                        <option value="SOCKET">Socket相关</option>
+                        <option value="ERROR">错误信息</option>
+                        <option value="WARN">警告信息</option>
+                        <option value="DEBUG">调试信息</option>
+                        <option value="INFO">一般信息</option>
+                    </select>
+                </div>
+                <div style="flex: 2; min-width: 200px;">
+                    <input type="text" id="log-search-input" placeholder="输入关键词查找" style="width: 100%; padding: 5px;">
+                </div>
+                <button class="button" onclick="searchLog()">查找</button>
+                <button class="button" onclick="searchPrevious()">上一个</button>
+                <button class="button" onclick="searchNext()">下一个</button>
+                <button class="button" onclick="downloadLog()">下载日志</button>
+            </div>
+            <div id="search-result" style="margin-bottom: 5px; font-size: 12px; color: #666;"></div>
+            <div id="log-content-container" style="border: 1px solid #bbdefb; border-radius: 4px; max-height: 500px; overflow-y: auto; padding: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap;">
+                <p>请选择日期查看日志</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 操作菜单 -->
+    <div id="action-menu" class="menu hidden">
+        <div class="menu-item" onclick="forceOffline()">强制下线</div>
+        <div class="menu-item" onclick="moveUser()">移动到其他房间</div>
+    </div>
+
+    <!-- 移动房间对话框 -->
+    <div id="move-dialog" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1001; justify-content: center; align-items: center;">
+        <div style="background-color: white; padding: 20px; border-radius: 8px; width: 400px; max-width: 90%;">
+            <h3 style="margin-top: 0; color: #1976D2;">移动用户到房间</h3>
+            <div class="form-group">
+                <label for="target-room">目标房间：</label>
+                <select id="target-room">
+                    <option value="">-- 选择房间 --</option>
+                </select>
+            </div>
+            <div style="margin-top: 15px; text-align: right;">
+                <button class="button button-secondary" onclick="closeMoveDialog()">取消</button>
+                <button class="button" onclick="confirmMoveUser()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义弹窗 -->
+    <div id="custom-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 2000; flex-direction: column; justify-content: center; align-items: center; pointer-events: auto;">
+        <div style="background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; width: 90%;">
+            <h3 id="modal-title" style="margin-top: 0; color: #333;"></h3>
+            <div id="modal-message" style="margin: 15px 0; line-height: 1.5;"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button id="modal-cancel" class="button button-secondary" onclick="closeCustomModal(false)">取消</button>
+                <button id="modal-confirm" class="button" onclick="closeCustomModal(true)">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入Socket.io客户端 -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script>
+        let socket;
+        const SERVER_URL = 'http://121.41.2.163:41013';
+        let currentAccount = null;
+        let currentUser = null; // 当前操作的用户
+        let currentRoom = null; // 当前操作的房间
+        let moveUserInfo = null; // 移动用户的信息
+        
+        // 关闭自定义弹窗
+        function closeCustomModal(confirmed) {
+            const modal = document.getElementById('custom-modal');
+            modal.style.display = 'none';
+            
+            // 执行回调
+            if (window.modalCallback) {
+                window.modalCallback(confirmed);
+                window.modalCallback = null;
+            }
+        }
+        
+        // 显示自定义确认弹窗
+        function showConfirmModal(title, message, callback) {
+            const modal = document.getElementById('custom-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalMessage = document.getElementById('modal-message');
+            const modalCancel = document.getElementById('modal-cancel');
+            
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            modalCancel.style.display = 'inline-block'; // 显示取消按钮
+            modal.style.display = 'flex';
+            
+            // 保存回调函数
+            window.modalCallback = callback;
+        }
+        
+        // 显示自定义警告弹窗
+        function showAlertModal(title, message) {
+            const modal = document.getElementById('custom-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalMessage = document.getElementById('modal-message');
+            const modalCancel = document.getElementById('modal-cancel');
+            
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            modalCancel.style.display = 'none'; // 只显示确认按钮
+            modal.style.display = 'flex';
+            
+            // 保存回调函数
+            window.modalCallback = function() {
+                modalCancel.style.display = 'inline-block'; // 恢复取消按钮
+            };
+        }
+        
+        // 管理员登录
+        function adminLogin() {
+            const account = document.getElementById('admin-login-account').value.trim();
+            const password = document.getElementById('admin-login-password').value.trim();
+            const rememberPassword = document.getElementById('remember-password').checked;
+            const autoLogin = document.getElementById('auto-login').checked;
+            const loginError = document.getElementById('admin-login-error');
+            
+            if (!account || !password) {
+                loginError.textContent = '请输入账号和密码';
+                return;
+            }
+            
+            // 创建登录连接
+            const loginSocket = io(SERVER_URL);
+            
+            loginSocket.on('connect', function() {
+                // 发送管理员登录请求
+                loginSocket.emit('message', {
+                    type: 'admin-login',
+                    account: account,
+                    password: password
+                });
+            });
+            
+            // 统一监听消息事件
+            loginSocket.on('message', function(data) {
+                if (data.type === 'login-success') {
+                    if (data.isAdmin) {
+                        currentAccount = account;
+                        
+                        // 保存登录信息到localStorage
+                        localStorage.setItem('admin_account', account);
+                        if (rememberPassword) {
+                            localStorage.setItem('admin_password', password);
+                        } else {
+                            localStorage.removeItem('admin_password');
+                        }
+                        localStorage.setItem('admin_remember_password', rememberPassword);
+                        localStorage.setItem('admin_auto_login', autoLogin);
+                        
+                        document.getElementById('login-container').classList.add('hidden');
+                        document.getElementById('main-container').classList.remove('hidden');
+                        // 重新连接socket并初始化
+                        loginSocket.disconnect();
+                        init();
+                    } else {
+                        loginError.textContent = '该账号不是管理员账号';
+                        loginSocket.disconnect();
+                    }
+                } else if (data.type === 'login-failed') {
+                    loginError.textContent = '账号或密码错误';
+                    loginSocket.disconnect();
+                }
+            });
+            
+            loginSocket.on('connect_error', function() {
+                loginError.textContent = '连接服务器失败';
+                loginSocket.disconnect();
+            });
+        }
+        
+        // 加载保存的登录信息
+        function loadSavedLoginInfo() {
+            const savedAccount = localStorage.getItem('admin_account');
+            const savedPassword = localStorage.getItem('admin_password');
+            const savedRememberPassword = localStorage.getItem('admin_remember_password') === 'true';
+            const savedAutoLogin = localStorage.getItem('admin_auto_login') === 'true';
+            
+            if (savedAccount) {
+                document.getElementById('admin-login-account').value = savedAccount;
+            }
+            if (savedPassword && savedRememberPassword) {
+                document.getElementById('admin-login-password').value = savedPassword;
+            }
+            document.getElementById('remember-password').checked = savedRememberPassword;
+            document.getElementById('auto-login').checked = savedAutoLogin;
+            
+            // 如果勾选了自动登录，自动执行登录
+            if (savedAutoLogin && savedAccount && savedPassword) {
+                adminLogin();
+            }
+        }
+        
+        // 退出登录
+        function logout() {
+            // 清除自动登录设置（保留记住密码）
+            localStorage.removeItem('admin_auto_login');
+            document.getElementById('auto-login').checked = false;
+            
+            // 断开socket连接
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            
+            // 显示登录界面，隐藏主界面
+            document.getElementById('main-container').classList.add('hidden');
+            document.getElementById('login-container').classList.remove('hidden');
+            
+            // 清空当前账号
+            currentAccount = null;
+            
+            // 清空密码输入框（如果用户想重新输入）
+            document.getElementById('admin-login-password').value = '';
+            
+            // 清空错误信息
+            document.getElementById('admin-login-error').textContent = '';
+        }
+        
+        // 初始化
+        function init() {
+            // 连接服务器
+            socket = io(SERVER_URL, {
+                query: { type: 'admin', account: currentAccount }
+            });
+            
+            socket.on('connect', function() {
+                console.log('Admin connected to server');
+                // 自动刷新房间状态
+                refreshRoomsStatus();
+                // 加载所有用户
+                loadAllAccounts();
+                // 加载所有房间
+                loadAllRooms();
+            });
+            
+            socket.on('connect_error', function(error) {
+                console.error('Connection error:', error);
+            });
+            
+            // 统一监听消息事件
+            socket.on('message', function(data) {
+                console.log('收到消息:', data);
+                
+                if (data.type === 'rooms-status') {
+                    const roomsContainer = document.getElementById('rooms-container');
+                    
+                    roomsContainer.innerHTML = '';
+                    
+                    if (!data.data || Object.keys(data.data).length === 0) {
+                        // 没有任何房间，显示提示
+                        roomsContainer.innerHTML = '<p>暂无房间</p>';
+                    } else {
+                        // 显示所有房间，包括空房间
+                        const roomCards = [];
+                        Object.entries(data.data).forEach(([roomName, roomInfo]) => {
+                            const roomCard = document.createElement('div');
+                            roomCard.className = 'room-card';
+                            
+                            // 显示房间名称和属性在同一行
+                            const roomHeader = document.createElement('div');
+                            roomHeader.style.display = 'flex';
+                            roomHeader.style.justifyContent = 'space-between';
+                            roomHeader.style.alignItems = 'center';
+                            roomHeader.style.marginBottom = '10px';
+                            
+                            const roomTitle = document.createElement('h3');
+                            roomTitle.textContent = roomName;
+                            roomTitle.style.margin = '0';
+                            roomTitle.style.fontSize = '18px';
+                            roomHeader.appendChild(roomTitle);
+                            
+                            // 显示房间属性
+                            const roomProperties = document.createElement('div');
+                            roomProperties.className = 'room-properties';
+                            roomProperties.style.display = 'flex';
+                            roomProperties.style.gap = '15px';
+                            roomProperties.style.color = '#1976d2';
+                            roomProperties.style.fontSize = '14px';
+                            
+                            const modeText = {
+                                'random': '顺序发车',
+                                'points': '积分优先',
+                                'vip': 'VIP包间',
+                                'none': '不发车'
+                            }[roomInfo.mode] || '顺序发车';
+                            
+                            // 根据房间模式决定是否显示发车人数
+                            let roomPropertiesHTML = `<span>${modeText}</span>`;
+                            if (roomInfo.mode !== 'none') {
+                                roomPropertiesHTML += `<span>${roomInfo.count}人发车</span>`;
+                            }
+                            
+                            roomProperties.innerHTML = roomPropertiesHTML;
+                            roomHeader.appendChild(roomProperties);
+                            
+                            roomCard.appendChild(roomHeader);
+                            
+                            // 添加下划线
+                            const divider = document.createElement('div');
+                            divider.style.height = '1px';
+                            divider.style.backgroundColor = '#1976d2';
+                            divider.style.margin = '10px 0';
+                            roomCard.appendChild(divider);
+                            
+                            const roomUsers = document.createElement('div');
+                            roomUsers.className = 'room-users';
+                            
+                            if (roomInfo.users.length === 0) {
+                                const noUsers = document.createElement('p');
+                                noUsers.textContent = '暂无用户';
+                                roomUsers.appendChild(noUsers);
+                            } else {
+                                roomInfo.users.forEach((user, index) => {
+                                    // index 未被使用，保留以提高代码可读性
+                                    const userItem = document.createElement('div');
+                                    userItem.className = 'room-user-item online';
+                                    
+                                    // 精简显示不当房主状态：用👑表示房主，无标记表示队员
+                                    const hostIcon = user.notHost ? '' : ' 👑';
+                                    
+                                    userItem.innerHTML = `
+                                        <span>${user.accountId}-${user.connectionId}-${user.username} (UID: ${user.uid})${hostIcon}</span>
+                                    `;
+                                    userItem.onclick = function(e) {
+                                        e.stopPropagation(); // 防止事件冒泡
+                                        showActionMenu(e, user, roomName);
+                                    };
+                                    roomUsers.appendChild(userItem);
+                                });
+                            }
+                            
+                            roomCard.appendChild(roomUsers);
+                            roomCards.push(roomCard);
+                        });
+                        
+                        // 清空容器并添加所有房间卡片
+                        roomsContainer.innerHTML = '';
+                        roomCards.forEach(card => {
+                            roomsContainer.appendChild(card);
+                        });
+                    }
+                } else if (data.type === 'online-users') {
+                    // 显示所有socket连接的用户信息
+                    const container = document.getElementById('online-users-container');
+                    if (!data.data || data.data.length === 0) {
+                        container.innerHTML = '<p>暂无在线用户</p>';
+                    } else {
+                    container.innerHTML = '';
+                    data.data.forEach(user => {
+                        const userCard = document.createElement('div');
+                        userCard.className = 'room-card';
+                        userCard.style.marginBottom = '10px';
+                        
+                        const userHeader = document.createElement('div');
+                        userHeader.style.display = 'flex';
+                        userHeader.style.justifyContent = 'space-between';
+                        userHeader.style.alignItems = 'center';
+                        userHeader.style.cursor = 'pointer';
+                        userHeader.onclick = function() {
+                            const connectionsContainer = userCard.querySelector('.connections-container');
+                            if (connectionsContainer) {
+                                connectionsContainer.classList.toggle('hidden');
+                            }
+                        };
+                        
+                        const userTitle = document.createElement('h3');
+                        userTitle.textContent = `${user.username} (${user.accountId})`;
+                        userTitle.style.margin = '0';
+                        userTitle.style.fontSize = '16px';
+                        userHeader.appendChild(userTitle);
+                        
+                        const connectionCount = document.createElement('span');
+                        connectionCount.textContent = `连接数: ${user.connections}`;
+                        connectionCount.style.color = '#1976d2';
+                        connectionCount.style.fontSize = '14px';
+                        userHeader.appendChild(connectionCount);
+                        
+                        userCard.appendChild(userHeader);
+                        
+                        // 添加连接信息容器
+                        const connectionsContainer = document.createElement('div');
+                        connectionsContainer.className = 'connections-container hidden';
+                        connectionsContainer.style.marginTop = '10px';
+                        connectionsContainer.style.padding = '10px';
+                        connectionsContainer.style.backgroundColor = '#f5f5f5';
+                        connectionsContainer.style.borderRadius = '4px';
+                        
+                        if (user.sockets && user.sockets.length > 0) {
+                            user.sockets.forEach(socket => {
+                                const socketItem = document.createElement('div');
+                                socketItem.style.marginBottom = '5px';
+                                socketItem.style.padding = '5px';
+                                socketItem.style.backgroundColor = 'white';
+                                socketItem.style.borderRadius = '4px';
+                                
+                                socketItem.innerHTML = `
+                                    <div><strong>Socket ID:</strong> ${socket.socketId}</div>
+                                    <div><strong>连接ID:</strong> ${socket.connectionId}</div>
+                                    <div><strong>房间:</strong> ${socket.roomName}</div>
+                                    <div><strong>UID:</strong> ${socket.uid}</div>
+                                `;
+                                
+                                connectionsContainer.appendChild(socketItem);
+                            });
+                        } else {
+                            connectionsContainer.innerHTML = '<p>暂无连接信息</p>';
+                        }
+                        
+                        userCard.appendChild(connectionsContainer);
+                        container.appendChild(userCard);
+                    });
+                }
+                } else if (data.type === 'room-users') {
+                    const output = document.getElementById('room-users-output');
+                    const propertiesOutput = document.getElementById('room-properties-output');
+                    output.innerHTML = '';
+                    
+                    // 显示房间属性
+                    if (data.roomProperties) {
+                        const modeText = {
+                            'random': '顺序发车',
+                            'points': '积分优先',
+                            'vip': 'VIP包间',
+                            'none': '不发车'
+                        }[data.roomProperties.mode] || '顺序发车';
+                        
+                        // 根据房间模式决定是否显示发车人数
+                        let propertiesHTML = `
+                            <div style="padding: 10px;">
+                                <p><strong>房间名称：</strong>${data.roomProperties.name}</p>
+                                <p><strong>发车模式：</strong>${modeText}</p>
+                        `;
+                        if (data.roomProperties.mode !== 'none') {
+                            propertiesHTML += `<p><strong>发车人数：</strong>${data.roomProperties.count}</p>`;
+                        }
+                        propertiesHTML += `</div>`;
+                        
+                        propertiesOutput.innerHTML = propertiesHTML;
+                    }
+                    
+                    if (data.users.length === 0) {
+                        output.innerHTML = '该房间暂无用户';
+                        return;
+                    }
+                    
+                    // 分离在线和离线用户
+                    const onlineUsers = data.users.filter(user => user.online);
+                    const offlineUsers = data.users.filter(user => !user.online);
+                    
+                    // 显示在线用户 - 格式: 账号:名称-uid
+                    if (onlineUsers.length > 0) {
+                        onlineUsers.forEach(user => {
+                            const userItem = document.createElement('div');
+                            userItem.className = 'user-item online';
+                            userItem.innerHTML = `
+                                <div>
+                                    <strong>${user.accountId}:${user.username}-${user.uid}</strong>
+                                    <br>
+                                    <small>状态: 在线</small>
+                                </div>
+                                <button class="button button-secondary" onclick="toggleUserStatus('${user.uid}', '${data.roomName}', '${user.username}')">
+                                    强制下线
+                                </button>
+                            `;
+                            output.appendChild(userItem);
+                        });
+                    }
+                    
+                    // 显示离线用户 - 只显示账号
+                    if (offlineUsers.length > 0) {
+                        const offlineHeader = document.createElement('h4');
+                        offlineHeader.textContent = '离线用户';
+                        offlineHeader.style.marginTop = '15px';
+                        offlineHeader.style.marginBottom = '10px';
+                        output.appendChild(offlineHeader);
+                        
+                        offlineUsers.forEach(user => {
+                            const userItem = document.createElement('div');
+                            userItem.className = 'user-item offline';
+                            userItem.innerHTML = `
+                                <div>
+                                    <strong>${user.accountId}</strong>
+                                    <br>
+                                    <small>状态: 离线</small>
+                                </div>
+                            `;
+                            output.appendChild(userItem);
+                        });
+                    }
+                } else if (data.type === 'all-rooms') {
+                    // 更新房间选择列表
+                    const roomSelects = [
+                        document.getElementById('admin-room-select'),
+                        document.getElementById('target-room')
+                    ];
+                    
+                    roomSelects.forEach(select => {
+                        if (select) {
+                            select.innerHTML = '<option value="">-- 选择房间 --</option>';
+                            let hasDZT = false;
+                            data.data.forEach(room => {
+                                const option = document.createElement('option');
+                                option.value = room;
+                                option.textContent = room;
+                                if (room === '大澡堂') {
+                                    hasDZT = true;
+                                }
+                                select.appendChild(option);
+                            });
+                            // 默认选择大澡堂
+                            if (hasDZT && select.id === 'admin-room-select') {
+                                select.value = '大澡堂';
+                                loadRoomUsers();
+                            }
+                        }
+                    });
+                    
+                    // 检查是否有待处理的权限管理请求
+                    const tempData = window.tempPermissionData;
+                    if (tempData) {
+                        const { accountId, userRooms } = tempData;
+                        const output = document.getElementById('room-permissions-output');
+                        
+                        if (data.data && data.data.length > 0) {
+                            // 已有的房间权限
+                            if (userRooms && userRooms.length > 0) {
+                                const existingPermissionsDiv = document.createElement('div');
+                                existingPermissionsDiv.className = 'existing-permissions';
+                                existingPermissionsDiv.innerHTML = '<h4>已有的房间权限</h4>';
+                                
+                                const existingList = document.createElement('div');
+                                existingList.className = 'permission-list';
+                                existingList.style.border = '1px solid #bbdefb';
+                                existingList.style.borderRadius = '4px';
+                                existingList.style.padding = '10px';
+                                existingList.style.minHeight = '300px';
+                                existingList.style.maxHeight = '400px';
+                                existingList.style.overflowY = 'auto';
+                                
+                                userRooms.forEach(room => {
+                                    const permissionItem = document.createElement('div');
+                                    permissionItem.className = 'permission-item';
+                                    permissionItem.style.display = 'flex';
+                                    permissionItem.style.justifyContent = 'space-between';
+                                    permissionItem.style.alignItems = 'center';
+                                    permissionItem.style.padding = '5px 0';
+                                    permissionItem.style.borderBottom = '1px solid #f0f0f0';
+                                    permissionItem.innerHTML = `
+                                        <span>${room}</span>
+                                        <button class="button button-danger" onclick="removeRoomPermission('${accountId}', '${room}')" style="white-space: nowrap;">移除</button>
+                                    `;
+                                    existingList.appendChild(permissionItem);
+                                });
+                                
+                                existingPermissionsDiv.appendChild(existingList);
+                                output.appendChild(existingPermissionsDiv);
+                            } else {
+                                const noPermissionsDiv = document.createElement('div');
+                                noPermissionsDiv.className = 'no-permissions';
+                                noPermissionsDiv.style.border = '1px solid #bbdefb';
+                                noPermissionsDiv.style.borderRadius = '4px';
+                                noPermissionsDiv.style.padding = '10px';
+                                noPermissionsDiv.style.minHeight = '300px';
+                                noPermissionsDiv.style.maxHeight = '400px';
+                                noPermissionsDiv.innerHTML = '<p>该用户暂无房间权限</p>';
+                                output.appendChild(noPermissionsDiv);
+                            }
+                            
+                            // 新增房间权限按钮
+                            const addPermissionDiv = document.createElement('div');
+                            addPermissionDiv.className = 'add-permission';
+                            addPermissionDiv.style.marginTop = '10px';
+                            addPermissionDiv.innerHTML = `
+                                <h4>新增房间权限</h4>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <select id="add-room-select" style="flex: 1;">
+                                        <option value="">-- 选择房间 --</option>
+                                    </select>
+                                    <button class="button" onclick="addRoomPermission('${accountId}')" style="white-space: nowrap;">添加权限</button>
+                                </div>
+                            `;
+                            
+                            // 填充房间选择下拉框
+                            const roomSelect = addPermissionDiv.querySelector('#add-room-select');
+                            data.data.forEach(room => {
+                                // 只显示用户尚未拥有的房间
+                                if (!userRooms.includes(room)) {
+                                    const option = document.createElement('option');
+                                    option.value = room;
+                                    option.textContent = room;
+                                    roomSelect.appendChild(option);
+                                }
+                            });
+                            
+                            output.appendChild(addPermissionDiv);
+                        } else {
+                            output.innerHTML = '暂无房间';
+                        }
+                        
+                        // 清除临时数据
+                        window.tempPermissionData = null;
+                    }
+                } else if (data.type === 'all-accounts') {
+                    const userSelect = document.getElementById('admin-user-select');
+                    userSelect.innerHTML = '<option value="">-- 选择用户 --</option>';
+                    
+                    // 存储原始用户列表
+                    window.allUsers = [];
+                    
+                    Object.entries(data.data).forEach(([accountId, account]) => {
+                        if (!account.isAdmin) {
+                            window.allUsers.push({ accountId, username: account.username });
+                            const option = document.createElement('option');
+                            option.value = accountId;
+                            option.textContent = account.username;
+                            userSelect.appendChild(option);
+                        }
+                    });
+                } else if (data.type === 'user-info') {
+                    const output = document.getElementById('user-info-output');
+                    if (!data.data) {
+                        output.innerHTML = '请选择用户';
+                        return;
+                    }
+                    
+                    output.innerHTML = `
+                        <div>
+                            <strong>账号：</strong> ${data.data.account}<br>
+                            <strong>状态：</strong> ${data.data.isFrozen ? '已冻结' : '正常'}<br>
+                            <strong>积分：</strong> ${data.data.points || 0}<br>
+                            <strong>信任状态：</strong> ${data.data.safe ? '是' : '否'}
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <h4>编辑积分</h4>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="number" id="edit-points-input" placeholder="输入积分变动值" style="flex: 1; padding: 5px;">
+                                <button class="button button-secondary" onclick="editUserPoints('${data.data.account}')">修改积分</button>
+                            </div>
+                            <small style="color: #666; margin-top: 5px; display: block;">提示：输入正数增加积分，输入负数减少积分</small>
+                        </div>
+                    `;
+                    
+                    // 更新信任用户按钮状态
+                    const safeBtn = document.getElementById('safe-user-btn');
+                    safeBtn.textContent = data.data.safe ? '取消信任' : '信任用户';
+                    safeBtn.className = `button ${data.data.safe ? 'button-danger' : ''}`;
+                    
+                    // 更新冻结用户按钮状态
+                    const freezeBtn = document.getElementById('freeze-user-btn');
+                    freezeBtn.textContent = data.data.isFrozen ? '取消冻结' : '冻结用户';
+                    freezeBtn.className = 'button button-danger';
+                    
+                    // 显示房间权限
+                    loadRoomPermissions(data.data.account, data.data.rooms);
+                } else if (data.type === 'register-success') {
+                    showAlertModal('成功', '注册成功！账号：' + data.accountId + '，名称：' + data.username);
+                    // 重新加载用户列表
+                    loadAllAccounts();
+                    document.getElementById('new-account-id').value = '';
+                } else if (data.type === 'register-error') {
+                    showAlertModal('错误', '注册失败：' + data.message);
+                } else if (data.type === 'room-created') {
+                    showAlertModal('成功', '房间创建成功');
+                    // 重新加载房间列表
+                    loadAllRooms();
+                    document.getElementById('new-room-name').value = '';
+                    // 刷新房间状态显示
+                    refreshRoomsStatus();
+                } else if (data.type === 'room-edited') {
+                    showAlertModal('成功', '房间编辑成功');
+                    // 重新加载房间列表
+                    loadAllRooms();
+                    // 刷新房间状态显示
+                    refreshRoomsStatus();
+                    // 清空输入框
+                    document.getElementById('edit-room-name').value = '';
+                } else if (data.type === 'room-deleted') {
+                    showAlertModal('成功', '房间删除成功');
+                    // 重新加载房间列表
+                    loadAllRooms();
+                    // 刷新房间状态显示
+                    refreshRoomsStatus();
+                } else if (data.type === 'reset-password-success') {
+                    showAlertModal('成功', '密码已重置为123456');
+                } else if (data.type === 'freeze-user-success') {
+                    showAlertModal('成功', data.isFrozen ? '用户已冻结' : '用户已解冻');
+                    // 重新加载用户信息
+                    loadUserInfo();
+                } else if (data.type === 'safe-user-success') {
+                    showAlertModal('成功', data.safe ? '用户已设为信任' : '已取消用户信任');
+                    // 重新加载用户信息
+                    loadUserInfo();
+                } else if (data.type === 'delete-user-success') {
+                    showAlertModal('成功', '用户已删除');
+                    // 重新加载用户列表
+                    loadAllAccounts();
+                } else if (data.type === 'move-user-permission-required') {
+                    // 用户没有目标房间权限，需要确认
+                    showConfirmModal('权限确认', data.message, function(confirmed) {
+                        if (confirmed) {
+                            // 确认赋予权限并移动
+                            socket.emit('message', {
+                                type: 'move-user',
+                                uid: data.uid,
+                                fromRoom: data.fromRoom,
+                                toRoom: data.toRoom,
+                                confirmGrantPermission: true
+                            });
+                        }
+                    });
+                } else if (data.type === 'move-success' || data.type === 'user-moved') {
+                    showAlertModal('成功', '用户移动成功');
+                    // 刷新房间状态
+                    refreshRoomsStatus();
+                    // 重新加载房间用户
+                    loadRoomUsers();
+                } else if (data.type === 'offline-success' || data.type === 'user-status-changed') {
+                    // 强制下线成功，刷新状态
+                    refreshRoomsStatus();
+                    loadRoomUsers();
+                } else if (data.type === 'permission-updated') {
+                    showAlertModal('成功', '权限更新成功');
+                    // 重新加载用户信息
+                    loadUserInfo();
+                } else if (data.type === 'success') {
+                    // 积分编辑成功
+                    showAlertModal('错误', data.message);
+                    // 重新加载用户信息
+                    loadUserInfo();
+                } else if (data.type === 'error') {
+                    showAlertModal('错误', '错误：' + data.message);
+                } else if (data.type === 'points-ranking') {
+                    console.log('收到积分排行榜数据:', data.data);
+                    updatePointsRanking(data.data);
+                } else if (data.type === 'gain-records') {
+                    console.log('收到收益记录数据:', data.data);
+                    handleAdminGainRecords(data);
+                } else if (data.type === 'log-files') {
+                    // 处理日志文件列表
+                    const date = document.getElementById('log-date').value;
+                    const container = document.getElementById('log-content-container');
+                    
+                    // 筛选指定日期的日志文件（文件名格式为YYYY-MM-DD.log）
+                    const filteredFiles = data.data.filter(file => {
+                        // 提取文件名中的日期部分
+                        const match = file.match(/^(\d{4}-\d{2}-\d{2})\.log$/);
+                        return match && match[1] === date;
+                    });
+                    
+                    if (filteredFiles.length === 0) {
+                        container.innerHTML = '<p>该日期无日志文件</p>';
+                        return;
+                    }
+                    
+                    // 检查是否是下载操作
+                    const isDownloading = window.isDownloadingLog;
+                    
+                    // 重置下载标记
+                    window.isDownloadingLog = false;
+                    
+                    if (isDownloading) {
+                        // 下载第一个匹配的日志文件
+                        socket.emit('message', { type: 'download-log-file', fileName: filteredFiles[0] });
+                    } else {
+                        // 加载第一个匹配的日志文件
+                        loadLogFileContent(filteredFiles[0]);
+                    }
+                } else if (data.type === 'log-file-content') {
+                    const container = document.getElementById('log-content-container');
+                    // 保存原始日志内容
+                    window.originalLogContent = data.content;
+                    // 应用事件类型筛选
+                    filterLogByEventType();
+                } else if (data.type === 'log-file-download') {
+                    // 处理日志文件下载
+                    downloadFile(data.fileName, data.content);
+                } else if (data.type === 'ride-records') {
+                    // 处理发车记录
+                    // 保存原始数据用于筛选
+                    window.rideRecordsData = data.data || [];
+                    
+                    // 更新房间筛选列表
+                    updateRideRoomFilter(window.rideRecordsData);
+                    
+                    // 应用筛选并显示
+                    filterRideRecords();
+                } else if (data.type === 'versions-result') {
+                    // 处理版本信息
+                    handleVersionsResult(data.data);
+                } else if (data.type === 'update-versions-result') {
+                    // 处理更新版本结果
+                    handleUpdateVersionsResult(data.data);
+                } else if (data.type === 'upload-client-package-result' || data.type === 'upload-group-purchasing-package-result' || data.type === 'upload-asar-result') {
+                    // 处理上传结果
+                    handleUploadResult(data.data);
+                } else if (data.type === 'upload-progress') {
+                    // 处理上传进度
+                    const progressBar = document.getElementById('upload-progress-bar');
+                    const progressText = document.getElementById('upload-progress-text');
+                    progressBar.value = data.data.progress;
+                    progressText.textContent = `上传中... ${data.data.progress}%`;
+                }
+            });
+        }
+        
+        // 显示操作菜单
+        function showActionMenu(e, user, roomName) {
+            const menu = document.getElementById('action-menu');
+            menu.style.left = e.clientX + 'px';
+            menu.style.top = e.clientY + 'px';
+            menu.classList.remove('hidden');
+            
+            // 保存当前操作的用户和房间
+            currentUser = user;
+            currentRoom = roomName;
+            
+            // 点击其他地方关闭菜单
+            document.addEventListener('click', closeActionMenu);
+        }
+        
+        // 关闭操作菜单
+        function closeActionMenu() {
+            document.getElementById('action-menu').classList.add('hidden');
+            document.removeEventListener('click', closeActionMenu);
+        }
+        
+        // 强制下线
+        function forceOffline() {
+            if (currentUser && currentRoom) {
+                socket.emit('message', { type: 'toggle-user-status', uid: currentUser.uid, roomName: currentRoom });
+                // 关闭菜单
+                closeActionMenu();
+            }
+        }
+        
+        // 移动用户
+        function moveUser() {
+            if (currentUser && currentRoom) {
+                // 保存移动用户信息
+                moveUserInfo = {
+                    user: currentUser,
+                    fromRoom: currentRoom
+                };
+                // 显示移动对话框
+                document.getElementById('move-dialog').style.display = 'flex';
+                // 关闭菜单
+                closeActionMenu();
+            }
+        }
+        
+        // 关闭移动对话框
+        function closeMoveDialog() {
+            document.getElementById('move-dialog').style.display = 'none';
+            moveUserInfo = null;
+        }
+        
+        // 确认移动用户
+        function confirmMoveUser() {
+            const targetRoom = document.getElementById('target-room').value;
+            if (!targetRoom) {
+                showAlertModal('提示', '请选择目标房间');
+                return;
+            }
+            
+            if (moveUserInfo) {
+                socket.emit('message', {
+                    type: 'move-user',
+                    uid: moveUserInfo.user.uid,
+                    fromRoom: moveUserInfo.fromRoom,
+                    toRoom: targetRoom
+                });
+                
+                // 移动结果通过message事件处理
+                // 关闭对话框
+                closeMoveDialog();
+            }
+        }
+        
+        // 刷新房间状态
+        function refreshRoomsStatus() {
+            socket.emit('message', { type: 'get-rooms-status' });
+        }
+        
+        // 切换到房间总览面板
+        function switchToRoomsOverview() {
+            hideAllPanels();
+            document.getElementById('rooms-status-panel').classList.add('active');
+            // 刷新房间状态
+            refreshRoomsStatus();
+        }
+        
+        // 切换到房间管理面板
+        function switchToRoomManagement() {
+            hideAllPanels();
+            document.getElementById('room-management-panel').classList.add('active');
+            // 加载所有房间
+            loadAllRooms();
+        }
+        
+        // 切换到用户管理面板
+        function switchToUserManagement() {
+            hideAllPanels();
+            document.getElementById('user-management-panel').classList.add('active');
+            // 加载所有用户
+            loadAllAccounts();
+        }
+        
+        // 切换到在线用户面板
+        function switchToOnlineUsers() {
+            hideAllPanels();
+            document.getElementById('online-users-panel').classList.add('active');
+            // 加载在线用户
+            loadOnlineUsers();
+        }
+        
+        // 切换到发车记录面板
+        function switchToRideRecords() {
+            hideAllPanels();
+            document.getElementById('ride-records-panel').classList.add('active');
+            // 设置默认日期为今天
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
+            document.getElementById('ride-record-date').value = todayStr;
+            // 加载发车记录
+            loadRideRecords();
+        }
+        
+        // 切换到积分排行榜面板
+        function switchToPointsRanking() {
+            hideAllPanels();
+            document.getElementById('points-ranking-panel').classList.add('active');
+            // 刷新积分排行榜
+            refreshPointsRanking();
+        }
+        
+        // 切换到收益排行榜面板
+        function switchToGainRecords() {
+            hideAllPanels();
+            document.getElementById('gain-records-panel').classList.add('active');
+            // 设置默认日期为今天
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
+            document.getElementById('admin-gain-date-input').value = todayStr;
+            // 默认显示日榜
+            switchAdminGainTab('day');
+        }
+
+        // 切换收益排行榜标签
+        let currentAdminGainTab = 'day';
+
+        function switchAdminGainTab(tab) {
+            currentAdminGainTab = tab;
+
+            // 更新按钮样式
+            document.getElementById('admin-gain-tab-day').style.backgroundColor = tab === 'day' ? '#1976D2' : '';
+            document.getElementById('admin-gain-tab-day').style.color = tab === 'day' ? 'white' : '';
+            document.getElementById('admin-gain-tab-week').style.backgroundColor = tab === 'week' ? '#1976D2' : '';
+            document.getElementById('admin-gain-tab-week').style.color = tab === 'week' ? 'white' : '';
+            document.getElementById('admin-gain-tab-version').style.backgroundColor = tab === 'version' ? '#1976D2' : '';
+            document.getElementById('admin-gain-tab-version').style.color = tab === 'version' ? 'white' : '';
+
+            // 显示/隐藏日期选择
+            const dateSection = document.getElementById('admin-gain-date-section');
+            if (dateSection) {
+                dateSection.style.display = tab === 'day' ? 'flex' : 'none';
+            }
+
+            // 加载对应标签的数据
+            loadGainRecords();
+        }
+
+        // 加载收益排行榜
+        function loadGainRecords() {
+            if (!socket || !socket.connected) return;
+
+            let requestData = {
+                type: 'get-gain-records',
+                gainType: currentAdminGainTab,
+                isAdmin: true
+            };
+
+            if (currentAdminGainTab === 'day') {
+                const dateInput = document.getElementById('admin-gain-date-input');
+                const date = dateInput.value;
+
+                if (!date) {
+                    alert('请选择日期');
+                    return;
+                }
+
+                requestData.date = date;
+            }
+
+            socket.emit('message', requestData);
+        }
+
+        // 处理收益记录数据
+        function handleAdminGainRecords(data) {
+            console.log('收到收益记录数据:', data);
+
+            const container = document.getElementById('admin-gain-records-container');
+            if (!container) return;
+
+            if (!data.data || data.data.length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 50px;">暂无收益排行榜</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="points-ranking-item" style="background-color: #e3f2fd; font-weight: bold; font-size: 12px; color: #666; padding: 8px 0; border-bottom: 1px solid #bbdefb;">
+                    <span style="width: 24px; display: inline-block; margin-right: 10px;">排行</span>
+                    <span style="flex: 1; text-align: left;">用户-游戏账户</span>
+                    <span style="min-width: 90px; text-align: right; margin-left: 10px;">经验收益</span>
+                    <span style="min-width: 90px; text-align: right; margin-left: 15px;">摩拉收益</span>
+                </div>
+            `;
+            data.data.forEach((item, index) => {
+                const gainItem = document.createElement('div');
+                gainItem.className = 'points-ranking-item';
+                gainItem.innerHTML = `
+                    <span class="points-ranking-rank">${index + 1}</span>
+                    <span class="points-ranking-account">${item.accountId}-${item.gameAccount}</span>
+                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #4CAF50; margin-left: 10px;">${item.expGain.toLocaleString()}</span>
+                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #FF9800; margin-left: 15px;">${item.moraGain.toLocaleString()}</span>
+                `;
+                container.appendChild(gainItem);
+            });
+        }
+        
+        // 切换到查看日志面板
+        function switchToLogs() {
+            hideAllPanels();
+            document.getElementById('logs-panel').classList.add('active');
+            // 设置默认日期为今天
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
+            document.getElementById('log-date').value = todayStr;
+            // 加载日志文件列表
+            loadLogFilesByDate();
+        }
+
+        // 切换到版本管理面板
+        function switchToVersionManagement() {
+            hideAllPanels();
+            document.getElementById('version-management-panel').classList.add('active');
+            // 加载版本信息
+            loadVersions();
+        }
+
+        // 加载版本信息
+        function loadVersions() {
+            socket.emit('message', { type: 'get-versions' });
+        }
+
+        // 更新版本信息
+        function updateVersions() {
+            const clientVersion = document.getElementById('new-client-version').value.trim();
+            const groupVersion = document.getElementById('new-group-version').value.trim();
+
+            if (!clientVersion && !groupVersion) {
+                alert('请至少输入一个版本号');
+                return;
+            }
+
+            socket.emit('message', {
+                type: 'update-versions',
+                clientVersion: clientVersion || undefined,
+                groupPurchasingVersion: groupVersion || undefined
+            });
+        }
+
+        // 上传用户端安装包
+        function uploadClientPackage() {
+            const fileInput = document.getElementById('client-package-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('请选择文件');
+                return;
+            }
+
+            if (file.name !== 'mojang.zip') {
+                alert('文件名必须为 mojang.zip');
+                return;
+            }
+
+            if (!confirm(`确定要上传用户端安装包吗？\n文件名: ${file.name}\n大小: ${(file.size / 1024).toFixed(2)} KB`)) {
+                return;
+            }
+
+            uploadFile(file, 'upload-client-package', function() {
+                fileInput.value = '';
+            });
+        }
+
+        // 上传团购安装包
+        function uploadGroupPackage() {
+            const fileInput = document.getElementById('group-package-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('请选择文件');
+                return;
+            }
+
+            if (file.name !== 'ArtifactsGroupPurchasing.zip') {
+                alert('文件名必须为 ArtifactsGroupPurchasing.zip');
+                return;
+            }
+
+            if (!confirm(`确定要上传团购安装包吗？\n文件名: ${file.name}\n大小: ${(file.size / 1024).toFixed(2)} KB`)) {
+                return;
+            }
+
+            uploadFile(file, 'upload-group-purchasing-package', function() {
+                fileInput.value = '';
+            });
+        }
+
+        // 上传 app.asar
+        function uploadAsarFile() {
+            const versionInput = document.getElementById('asar-version');
+            const fileInput = document.getElementById('asar-file');
+            const version = versionInput.value.trim();
+            const file = fileInput.files[0];
+
+            if (!version) {
+                alert('请输入版本号');
+                return;
+            }
+            if (!file) {
+                alert('请选择 app.asar 文件');
+                return;
+            }
+            if (file.name !== 'app.asar') {
+                alert('文件名必须为 app.asar');
+                return;
+            }
+
+            if (!confirm(`确定要上传版本 ${version} 的 app.asar 吗？\n大小: ${(file.size / 1024 / 1024).toFixed(2)} MB`)) {
+                return;
+            }
+
+            uploadFile(file, 'upload-asar', function() {
+                fileInput.value = '';
+                versionInput.value = '';
+            });
+        }
+
+        // 上传文件（带限速 350KB/s）
+        function uploadFile(file, type, onComplete) {
+            const CHUNK_SIZE = 350 * 1024; // 350KB per chunk
+            const totalSize = file.size;
+            let offset = 0;
+            let chunkIndex = 0;
+            let startTime = Date.now();
+            let lastTime = Date.now();
+            let lastOffset = 0;
+
+            const progressDiv = document.getElementById('upload-progress');
+            const progressBar = document.getElementById('upload-progress-bar');
+            const progressText = document.getElementById('upload-progress-text');
+
+            progressDiv.style.display = 'block';
+            progressBar.value = 0;
+            progressText.textContent = `上传中... 0%`;
+
+            function sendChunk() {
+                const chunk = file.slice(offset, offset + CHUNK_SIZE);
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const base64 = e.target.result.split(',')[1];
+                    const isLastChunk = offset + CHUNK_SIZE >= totalSize;
+
+                    const message = {
+                        type: type,
+                        fileName: file.name,
+                        fileData: base64,
+                        offset: offset,
+                        totalSize: totalSize,
+                        isFirstChunk: offset === 0,
+                        isLastChunk: isLastChunk
+                    };
+                    
+                    // 如果是上传 asar，添加版本号
+                    if (type === 'upload-asar') {
+                        message.version = document.getElementById('asar-version').value.trim();
+                    }
+
+                    socket.emit('message', message);
+
+                    // 计算上传速度
+                    const currentTime = Date.now();
+                    const elapsedTime = currentTime - lastTime;
+                    let speed = 0;
+                    if (elapsedTime > 1000) { // 每秒更新一次
+                        const bytesUploaded = offset - lastOffset;
+                        speed = (bytesUploaded / elapsedTime * 1000) / 1024; // KB/s
+                        lastTime = currentTime;
+                        lastOffset = offset;
+                    }
+
+                    const progress = Math.round((offset / totalSize) * 100);
+                    progressBar.value = progress;
+                    progressText.textContent = `上传中... ${progress}% (${speed.toFixed(1)}KB/s)`;
+
+                    if (!isLastChunk) {
+                        offset += CHUNK_SIZE;
+                        setTimeout(sendChunk, 1000); // Rate limit: 1 second between chunks
+                    }
+                };
+
+                reader.readAsDataURL(chunk);
+            }
+
+            sendChunk();
+        }
+
+        // 处理版本信息响应
+        function handleVersionsResult(data) {
+            document.getElementById('current-client-version').textContent = data.clientVersion;
+            document.getElementById('current-group-version').textContent = data.groupPurchasingVersion;
+            document.getElementById('new-client-version').value = data.clientVersion;
+            document.getElementById('new-group-version').value = data.groupPurchasingVersion;
+        }
+
+        // 处理更新版本响应
+        function handleUpdateVersionsResult(data) {
+            if (data.success) {
+                alert('版本号更新成功');
+                handleVersionsResult(data);
+            }
+        }
+
+        // 处理上传结果
+        function handleUploadResult(data) {
+            const progressDiv = document.getElementById('upload-progress');
+            const progressBar = document.getElementById('upload-progress-bar');
+            const progressText = document.getElementById('upload-progress-text');
+            progressBar.value = 100;
+            progressText.textContent = '上传完成！';
+            setTimeout(function() {
+                progressDiv.style.display = 'none';
+                alert(data.message);
+            }, 500);
+        }
+        
+        // 根据日期加载日志内容
+        function loadLogFilesByDate() {
+            const date = document.getElementById('log-date').value;
+            if (!date) {
+                showAlertModal('提示', '请选择日期');
+                return;
+            }
+            
+            // 显示加载状态
+            const container = document.getElementById('log-content-container');
+            container.innerHTML = '<p>正在加载日志内容...</p>';
+            
+            // 加载所有日志文件，然后在前端筛选
+            socket.emit('message', { type: 'get-log-files' });
+        }
+        
+        // 隐藏所有面板
+        function hideAllPanels() {
+            const panels = document.querySelectorAll('.panel');
+            panels.forEach(panel => {
+                panel.classList.remove('active');
+            });
+        }
+        
+        // 刷新积分排行榜
+        function refreshPointsRanking() {
+            socket.emit('message', { type: 'get-points-ranking' });
+        }
+        
+        // 格式化上次发车时间
+        function formatLastRide(lastRide) {
+            if (!lastRide) return '从未发车';
+            const diff = Date.now() - lastRide;
+            if (diff < 0) return '从未发车';
+            
+            const days = Math.floor(diff / 86400000);
+            const hours = Math.floor(diff / 3600000);
+            const minutes = Math.floor(diff / 60000);
+            const seconds = Math.floor(diff / 1000);
+            
+            if (days >= 1) return `${days}天前`;
+            if (hours >= 1) return `${hours}小时前`;
+            if (minutes >= 1) return `${minutes}分钟前`;
+            return `${seconds}秒前`;
+        }
+
+        // 更新积分排行榜显示
+        function updatePointsRanking(ranking) {
+            const container = document.getElementById('points-ranking-container');
+            if (!container) return;
+            
+            if (!ranking || ranking.length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 50px;">暂无积分数据</p>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            ranking.forEach((item, index) => {
+                const rankItem = document.createElement('div');
+                rankItem.className = 'points-ranking-item';
+                rankItem.innerHTML = `
+                    <span class="points-ranking-rank">${index + 1}</span>
+                    <span class="points-ranking-account">${item.accountId}</span>
+                    <span class="points-ranking-lastride">${formatLastRide(item.lastRide)}</span>
+                    <span class="points-ranking-points">${item.points}</span>
+                `;
+                container.appendChild(rankItem);
+            });
+        }
+        
+        // 加载所有房间
+        function loadAllRooms() {
+            socket.emit('message', { type: 'get-all-rooms' });
+        }
+        
+        // 加载在线用户
+        function loadOnlineUsers() {
+            socket.emit('message', { type: 'get-online-users' });
+        }
+        
+
+        
+        // 加载发车记录
+        function loadRideRecords() {
+            const date = document.getElementById('ride-record-date').value;
+            if (!date) {
+                alert('请选择日期');
+                return;
+            }
+            
+            socket.emit('message', { 
+                type: 'get-ride-records',
+                date: date 
+            });
+        }
+        
+        // 更新发车记录房间筛选列表
+        function updateRideRoomFilter(records) {
+            const roomSelect = document.getElementById('ride-filter-room');
+            const currentSelection = roomSelect.value;
+            
+            // 提取所有房间名称
+            const rooms = new Set();
+            records.forEach(record => {
+                if (record.roomName) {
+                    rooms.add(record.roomName);
+                }
+            });
+            
+            // 保存当前选项，如果还有的话
+            roomSelect.innerHTML = '<option value="all">所有房间</option>';
+            
+            // 添加房间选项
+            Array.from(rooms).sort().forEach(room => {
+                const option = document.createElement('option');
+                option.value = room;
+                option.textContent = room;
+                roomSelect.appendChild(option);
+            });
+            
+            // 恢复之前的选择（如果还存在）
+            if (currentSelection && Array.from(rooms).includes(currentSelection)) {
+                roomSelect.value = currentSelection;
+            }
+        }
+        
+        // 筛选发车记录
+        function filterRideRecords() {
+            if (!window.rideRecordsData) return;
+            
+            const container = document.getElementById('ride-records-container');
+            const roomFilter = document.getElementById('ride-filter-room').value;
+            const statusFilter = document.getElementById('ride-filter-status').value;
+            const userFilter = document.getElementById('ride-filter-user').value.trim().toLowerCase();
+            
+            // 筛选数据
+            let filteredRecords = window.rideRecordsData.filter(record => {
+                // 房间筛选
+                if (roomFilter !== 'all' && record.roomName !== roomFilter) {
+                    return false;
+                }
+                
+                // 状态筛选
+                if (statusFilter !== 'all' && record.status !== statusFilter) {
+                    return false;
+                }
+                
+                // 用户筛选（检查用户名、游戏名称或UID）
+                if (userFilter) {
+                    const riders = record.riders || [];
+                    const hasUser = riders.some(rider => {
+                        const accountIdMatch = rider.accountId && rider.accountId.toLowerCase().includes(userFilter);
+                        const usernameMatch = rider.username && rider.username.toLowerCase().includes(userFilter);
+                        const uidMatch = rider.uid && rider.uid.toString().includes(userFilter);
+                        return accountIdMatch || usernameMatch || uidMatch;
+                    });
+                    if (!hasUser) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            });
+            
+            // 显示筛选后的记录
+            container.innerHTML = '';
+            
+            if (filteredRecords.length === 0) {
+                container.innerHTML = '<p>没有找到符合条件的发车记录</p>';
+                return;
+            }
+            
+            filteredRecords.forEach((record) => {
+                // 查找原始数据中的索引
+                const originalIndex = window.rideRecordsData.findIndex(r => r.rideId === record.rideId);
+                const displayIndex = originalIndex !== -1 ? originalIndex + 1 : '?';
+                
+                const recordDiv = document.createElement('div');
+                recordDiv.className = 'ride-record-item';
+                
+                // 根据状态设置边框颜色
+                let borderColor = '#bbdefb'; // 默认蓝色
+                if (record.status === 'completed') {
+                    borderColor = '#1976D2'; // 蓝色
+                } else if (record.status === 'crashed' || record.status === 'canceled') {
+                    borderColor = '#f44336'; // 红色
+                } else if (record.status === 'waiting') {
+                    borderColor = '#4CAF50'; // 绿色
+                }
+                
+                recordDiv.style.cssText = `border: 2px solid ${borderColor}; border-radius: 8px; padding: 15px; margin-bottom: 20px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.1);`;
+                
+                // 处理时间格式
+                const startTime = new Date(record.createdAt).toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+                
+                // 查找房主（第一个骑手）
+                const host = record.riders && record.riders.length > 0 ? record.riders[0] : null;
+                
+                // 其余为队员
+                const members = record.riders && record.riders.length > 1 ? record.riders.slice(1) : [];
+                
+                // 处理炸车报告
+                const hasCrashReports = record.crashReports && record.crashReports.length > 0;
+                let crashReportHTML = '';
+                
+                if (hasCrashReports) {
+                    const reportId = `crash-report-${record.rideId || displayIndex}`;
+                    
+                    // 炸车类型中文映射
+                    const crashTypeMap = {
+                        'playerTimeoutEnterWorld': '超时未能进入房主世界',
+                        'hostTimeoutEnterWorld': '房主超时未进入世界',
+                        'waitForExpectedPlayers': '等待预期人数超时',
+                        'playerDisconnected': '队员断开连接',
+                        'hostDisconnected': '房主断开连接',
+                        'unknown': '未知原因'
+                    };
+                    
+                    const crashReportSummary = record.crashReports.map((cr, idx) => {
+                        const crashType = cr.crashType || 'unknown';
+                        const crashTypeCn = crashTypeMap[crashType] || crashType;
+                        
+                        // 构建详细信息
+                        let details = [];
+                        if (cr.reporter) {
+                            const reporterInfo = `${cr.reporter.username} (UID: ${cr.reporter.uid}, 位置: ${cr.reporter.position})`;
+                            details.push(`<span style="color: #2196F3; font-weight: bold;">报告人: ${reporterInfo}</span>`);
+                        }
+                        if (cr.myPosition) details.push(`<span style="color: #666;">位置: ${cr.myPosition}</span>`);
+                        if (cr.enteredPlayers && cr.enteredPlayers.length > 0) {
+                            details.push(`<span style="color: #4CAF50;">已进入: ${cr.enteredPlayers.join(', ')}</span>`);
+                        }
+                        if (cr.notEnteredPlayers && cr.notEnteredPlayers.length > 0) {
+                            details.push(`<span style="color: #f44336;">未进入: ${cr.notEnteredPlayers.join(', ')}</span>`);
+                        }
+                        if (cr.expectedPlayerCount) {
+                            details.push(`<span style="color: #666;">预期人数: ${cr.expectedPlayerCount}</span>`);
+                        }
+                        if (cr.actualPlayerCount !== undefined) {
+                            details.push(`<span style="color: #666;">实际人数: ${cr.actualPlayerCount}</span>`);
+                        }
+                        if (cr.description) {
+                            details.push(`<span style="color: #666;">描述: ${cr.description}</span>`);
+                        }
+                        
+                        const detailsHtml = details.length > 0 ? `<div style="margin-top: 5px; font-size: 12px;">${details.join('<br>')}</div>` : '';
+                        
+                        return `<div style="margin-bottom: 8px; padding: 8px; background-color: #ffebee; border-radius: 4px;">
+                            <strong>报告 ${idx + 1}:</strong> ${crashTypeCn}
+                            ${detailsHtml}
+                        </div>`;
+                    }).join('');
+                    
+                    crashReportHTML = `
+                        <div style="margin-top: 10px;">
+                            <div style="color: #f44336; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px;" 
+                                 onclick="toggleCrashReport('${reportId}')">
+                                <span id="${reportId}-icon">▶</span>
+                                <span>炸车报告 (${record.crashReports.length}条)</span>
+                            </div>
+                            <div id="${reportId}" style="margin-top: 8px; display: none;">
+                                ${crashReportSummary}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                recordDiv.innerHTML = `
+                    <h4>发车记录 ${displayIndex}</h4>
+                    <p><strong>发车时间:</strong> ${startTime}</p>
+                    <p><strong>发车标识:</strong> ${record.rideId || '无'}</p>
+                    <p><strong>房间:</strong> ${record.roomName || '无'}</p>
+                    <p><strong>房主:</strong> ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${host.uid})` : '无'}</p>
+                    <p><strong>队员:</strong> ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${m.uid})`).join(', ') : '无'}</p>
+                    <p><strong>状态:</strong> ${record.status}</p>
+                    ${crashReportHTML}
+                `;
+                container.appendChild(recordDiv);
+            });
+        }
+        
+        // 清除发车记录筛选
+        function clearRideFilters() {
+            document.getElementById('ride-filter-room').value = 'all';
+            document.getElementById('ride-filter-status').value = 'all';
+            document.getElementById('ride-filter-user').value = '';
+            filterRideRecords();
+        }
+        
+        // 切换炸车报告显示/隐藏
+        function toggleCrashReport(reportId) {
+            const reportDiv = document.getElementById(reportId);
+            const iconSpan = document.getElementById(reportId + '-icon');
+            
+            if (reportDiv) {
+                if (reportDiv.style.display === 'none') {
+                    reportDiv.style.display = 'block';
+                    iconSpan.textContent = '▼';
+                } else {
+                    reportDiv.style.display = 'none';
+                    iconSpan.textContent = '▶';
+                }
+            }
+        }
+        
+        // 加载日志文件内容
+        function loadLogFileContent(fileName) {
+            socket.emit('message', { type: 'get-log-file-content', fileName });
+            // 存储当前选中的日志文件
+            window.currentLogFile = fileName;
+        }
+        
+        // 存储搜索相关变量
+        let searchResults = [];
+        let currentSearchIndex = -1;
+        
+        // 查找日志中的关键词
+        function searchLog() {
+            const searchInput = document.getElementById('log-search-input');
+            const keyword = searchInput.value.trim();
+            
+            if (!keyword) {
+                showAlertModal('提示', '请输入关键词');
+                return;
+            }
+            
+            if (!window.originalLogContent) {
+                showAlertModal('提示', '请先选择日期');
+                return;
+            }
+            
+            // 应用当前的事件类型筛选
+            const filter = document.getElementById('log-event-filter').value;
+            let contentToSearch;
+            
+            if (filter === 'all') {
+                contentToSearch = window.originalLogContent;
+            } else {
+                // 根据事件类型筛选
+                const lines = window.originalLogContent.split('\n');
+                const filteredLines = lines.filter(line => {
+                    return line.includes(`[${filter}]`);
+                });
+                contentToSearch = filteredLines.join('\n');
+            }
+            
+            // 查找所有匹配项
+            searchResults = [];
+            const regex = new RegExp(keyword, 'g');
+            let match;
+            while ((match = regex.exec(contentToSearch)) !== null) {
+                searchResults.push(match.index);
+            }
+            
+            if (searchResults.length === 0) {
+                document.getElementById('search-result').textContent = '未找到匹配项';
+                currentSearchIndex = -1;
+                return;
+            }
+            
+            // 定位到第一个匹配项
+            currentSearchIndex = 0;
+            highlightSearchResult();
+        }
+        
+        // 查找上一个匹配项
+        function searchPrevious() {
+            if (searchResults.length === 0) {
+                showAlertModal('提示', '请先执行查找');
+                return;
+            }
+            
+            currentSearchIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
+            highlightSearchResult();
+        }
+        
+        // 查找下一个匹配项
+        function searchNext() {
+            if (searchResults.length === 0) {
+                showAlertModal('提示', '请先执行查找');
+                return;
+            }
+            
+            currentSearchIndex = (currentSearchIndex + 1) % searchResults.length;
+            highlightSearchResult();
+        }
+        
+        // 高亮显示搜索结果
+        function highlightSearchResult() {
+            const logContent = document.getElementById('log-content-container');
+            const searchInput = document.getElementById('log-search-input');
+            const keyword = searchInput.value.trim();
+            
+            if (!keyword || searchResults.length === 0 || !window.originalLogContent) return;
+            
+            // 更新搜索结果显示
+            document.getElementById('search-result').textContent = `第 ${currentSearchIndex + 1}/${searchResults.length} 个匹配项`;
+            
+            // 重新应用事件类型筛选，然后高亮搜索结果
+            const filter = document.getElementById('log-event-filter').value;
+            let lines;
+            
+            if (filter === 'all') {
+                lines = window.originalLogContent.split('\n');
+            } else {
+                // 根据事件类型筛选
+                lines = window.originalLogContent.split('\n').filter(line => {
+                    return line.includes(`[${filter}]`);
+                });
+            }
+            
+            // 为每行添加行号容器，便于高亮整行
+            const highlightedLines = lines.map((line, lineIndex) => {
+                // 高亮关键词，使用蓝色背景
+                const highlightedLine = line.replace(new RegExp(keyword, 'g'), match => {
+                    return `<span class="search-highlight" data-line="${lineIndex}">${match}</span>`;
+                });
+                return `<div class="log-line" data-line="${lineIndex}">${highlightedLine}</div>`;
+            });
+            
+            // 使用innerHTML显示高亮内容
+            logContent.innerHTML = highlightedLines.join('');
+            
+            // 滚动到匹配位置并设置高亮样式
+            setTimeout(() => {
+                const highlightElements = logContent.querySelectorAll('.search-highlight');
+                if (highlightElements[currentSearchIndex]) {
+                    const currentEl = highlightElements[currentSearchIndex];
+                    const currentLineIndex = currentEl.getAttribute('data-line');
+                    
+                    // 滚动到元素位置，使其显示在视野中央
+                    currentEl.scrollIntoView({ 
+                        behavior: 'smooth', 
+                        block: 'center',
+                        inline: 'center'
+                    });
+                    
+                    // 设置所有匹配项的样式
+                    highlightElements.forEach((el, index) => {
+                        if (index === currentSearchIndex) {
+                            // 当前选中的匹配项 - 深蓝色背景，白色文字
+                            el.style.backgroundColor = '#1565C0';
+                            el.style.color = 'white';
+                            el.style.padding = '2px 4px';
+                            el.style.borderRadius = '3px';
+                            el.style.fontWeight = 'bold';
+                            el.style.boxShadow = '0 0 8px rgba(21, 101, 192, 0.6)';
+                        } else {
+                            // 其他匹配项 - 浅蓝色背景，黑色文字
+                            el.style.backgroundColor = '#90CAF9';
+                            el.style.color = 'black';
+                            el.style.padding = '1px 2px';
+                            el.style.borderRadius = '2px';
+                            el.style.fontWeight = 'bold';
+                            el.style.boxShadow = 'none';
+                        }
+                    });
+                    
+                    // 高亮当前匹配项所在行 - 浅蓝色背景
+                    const allLines = logContent.querySelectorAll('.log-line');
+                    allLines.forEach(lineEl => {
+                        const lineIdx = lineEl.getAttribute('data-line');
+                        if (lineIdx === currentLineIndex) {
+                            lineEl.style.backgroundColor = '#E3F2FD';
+                            lineEl.style.borderLeft = '3px solid #1565C0';
+                            lineEl.style.paddingLeft = '7px';
+                            lineEl.style.marginLeft = '-10px';
+                        } else {
+                            lineEl.style.backgroundColor = 'transparent';
+                            lineEl.style.borderLeft = 'none';
+                            lineEl.style.paddingLeft = '0';
+                            lineEl.style.marginLeft = '0';
+                        }
+                    });
+                }
+            }, 100);
+        }
+        
+        // 下载日志文件
+        function downloadLog() {
+            const date = document.getElementById('log-date').value;
+            if (!date) {
+                showAlertModal('提示', '请先选择日期');
+                return;
+            }
+            
+            // 设置下载标记
+            window.isDownloadingLog = true;
+            
+            // 首先获取日志文件列表
+            socket.emit('message', { type: 'get-log-files' });
+        }
+        
+        // 处理文件下载
+        function downloadFile(fileName, content) {
+            // 创建Blob对象
+            const blob = new Blob([content], { type: 'text/plain' });
+            
+            // 创建下载链接
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            
+            // 触发下载
+            document.body.appendChild(link);
+            link.click();
+            
+            // 清理
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            }, 100);
+        }
+        
+        // 创建房间
+        function createRoom() {
+            const roomName = document.getElementById('new-room-name').value.trim();
+            if (!roomName) {
+                showAlertModal('提示', '请输入房间名称');
+                return;
+            }
+            
+            socket.emit('message', { type: 'create-room', roomName });
+        }
+        
+        // 编辑房间名称
+        function editRoomName() {
+            const roomName = document.getElementById('admin-room-select').value;
+            const newRoomName = document.getElementById('edit-room-name').value.trim();
+            
+            if (!roomName) {
+                showAlertModal('提示', '请选择要编辑的房间');
+                return;
+            }
+            
+            if (roomName === '大澡堂' || roomName === '待机') {
+                showAlertModal('提示', '大澡堂和待机房间不能改名');
+                return;
+            }
+            
+            if (!newRoomName) {
+                showAlertModal('提示', '请输入新房间名称');
+                return;
+            }
+            
+            showConfirmModal('确认修改', `确定要将房间 ${roomName} 改名为 ${newRoomName} 吗？`, function(confirmed) {
+                if (confirmed) {
+                    socket.emit('message', { type: 'edit-room-name', roomName, newRoomName });
+                }
+            });
+        }
+        
+        // 删除房间
+        function deleteRoom() {
+            const roomName = document.getElementById('admin-room-select').value;
+            if (!roomName) {
+                showAlertModal('提示', '请选择要删除的房间');
+                return;
+            }
+            
+            if (roomName === '大澡堂' || roomName === '待机') {
+                showAlertModal('提示', '大澡堂和待机房间不能删除');
+                return;
+            }
+            
+            showConfirmModal('确认删除', `确定要删除房间 ${roomName} 吗？`, function(confirmed) {
+                if (confirmed) {
+                    socket.emit('message', { type: 'delete-room', roomName });
+                }
+            });
+        }
+        
+        // 加载房间用户
+        function loadRoomUsers() {
+            const roomName = document.getElementById('admin-room-select').value;
+            if (!roomName) {
+                return;
+            }
+            
+            socket.emit('message', { type: 'get-room-users', roomName });
+        }
+        
+        // 切换用户状态
+        function toggleUserStatus(uid, roomName, username) {
+            socket.emit('message', { type: 'toggle-user-status', uid, roomName });
+            // 重新加载房间用户
+            loadRoomUsers();
+            // 刷新房间状态显示
+            refreshRoomsStatus();
+        }
+        
+        // 加载所有用户
+        function loadAllAccounts() {
+            socket.emit('message', { type: 'get-all-accounts' });
+        }
+        
+        // 过滤用户
+        function filterUsers() {
+            const filterInput = document.getElementById('user-filter-input').value.toLowerCase();
+            const userSelect = document.getElementById('admin-user-select');
+            
+            userSelect.innerHTML = '<option value="">-- 选择用户 --</option>';
+            
+            if (!window.allUsers) {
+                return;
+            }
+            
+            window.allUsers.forEach(user => {
+                if (user.username.toLowerCase().includes(filterInput)) {
+                    const option = document.createElement('option');
+                    option.value = user.accountId;
+                    option.textContent = user.username;
+                    userSelect.appendChild(option);
+                }
+            });
+        }
+        
+        // 加载用户信息
+        function loadUserInfo() {
+            const accountId = document.getElementById('admin-user-select').value;
+            if (!accountId) {
+                document.getElementById('user-info-output').innerHTML = '请选择用户';
+                document.getElementById('room-permissions-output').innerHTML = '请选择用户';
+                // 重置信任用户按钮
+                const safeBtn = document.getElementById('safe-user-btn');
+                safeBtn.textContent = '信任用户';
+                safeBtn.className = 'button';
+                // 重置冻结用户按钮
+                const freezeBtn = document.getElementById('freeze-user-btn');
+                freezeBtn.textContent = '冻结用户';
+                freezeBtn.className = 'button button-danger';
+                return;
+            }
+            
+            socket.emit('message', { type: 'get-user-info', accountId });
+        }
+        
+        // 加载房间权限
+        function loadRoomPermissions(accountId, userRooms) {
+            const output = document.getElementById('room-permissions-output');
+            output.innerHTML = '';
+            
+            // 临时存储accountId和userRooms
+            window.tempPermissionData = { accountId, userRooms };
+            
+            // 获取所有房间
+            socket.emit('message', { type: 'get-all-rooms' });
+        }
+        
+
+        
+        // 更新房间权限
+        function updateRoomPermission(accountId, room, isGranted) {
+            socket.emit('message', {
+                type: 'update-room-permission',
+                accountId: accountId,
+                room: room,
+                isGranted: isGranted
+            });
+        }
+        
+        // 移除房间权限
+        function removeRoomPermission(accountId, room) {
+            showConfirmModal('确认移除', '确定要移除该房间的权限吗？', function(confirmed) {
+                if (confirmed) {
+                    socket.emit('message', { type: 'update-room-permission', accountId, room, isGranted: false });
+                }
+            });
+        }
+        
+        // 添加房间权限
+        function addRoomPermission(accountId) {
+            const roomSelect = document.getElementById('add-room-select');
+            const room = roomSelect.value;
+            if (!room) {
+                showAlertModal('提示', '请选择要添加的房间');
+                return;
+            }
+            
+            socket.emit('message', { type: 'update-room-permission', accountId, room, isGranted: true });
+        }
+        
+        // 注册用户
+        function registerUser() {
+            const accountId = document.getElementById('new-account-id').value.trim();
+            if (!accountId) {
+                showAlertModal('提示', '请输入账号');
+                return;
+            }
+            
+            if (!socket) {
+                showAlertModal('提示', 'Socket 连接未建立，请重新登录');
+                return;
+            }
+            
+            console.log('发送注册请求:', { accountId, username: accountId });
+            socket.emit('message', { type: 'register-user', accountId, username: accountId });
+        }
+        
+        // 重置密码
+        function resetPassword() {
+            const accountId = document.getElementById('admin-user-select').value;
+            if (!accountId) {
+                showAlertModal('提示', '请选择用户');
+                return;
+            }
+            
+            showConfirmModal('确认重置', '确定要重置该用户的密码为123456吗？', function(confirmed) {
+                if (confirmed) {
+                    socket.emit('message', { type: 'reset-password', accountId });
+                }
+            });
+        }
+        
+        // 冻结/解冻用户
+        function toggleFreezeUser() {
+            const accountId = document.getElementById('admin-user-select').value;
+            if (!accountId) {
+                showAlertModal('提示', '请选择用户');
+                return;
+            }
+            
+            socket.emit('message', { type: 'toggle-freeze-user', accountId });
+        }
+        
+        // 切换信任用户状态
+        function toggleSafeUser(accountId) {
+            if (!accountId) {
+                showAlertModal('提示', '请选择用户');
+                return;
+            }
+            socket.emit('message', { type: 'toggle-safe-user', accountId });
+        }
+        
+        // 删除用户
+        function deleteUser() {
+            const accountId = document.getElementById('admin-user-select').value;
+            if (!accountId) {
+                showAlertModal('提示', '请选择用户');
+                return;
+            }
+            
+            showConfirmModal('确认删除', `确定要删除用户 ${accountId} 吗？此操作不可恢复。`, function(confirmed) {
+                if (confirmed) {
+                    socket.emit('message', { type: 'delete-user', accountId });
+                }
+            });
+        }
+        
+        // 编辑用户积分
+        function editUserPoints(accountId) {
+            const pointsInput = document.getElementById('edit-points-input');
+            if (!pointsInput) {
+                showAlertModal('提示', '请先选择用户');
+                return;
+            }
+            
+            const pointsChange = parseInt(pointsInput.value.trim());
+            
+            // 验证输入是否为非零的整数
+            if (isNaN(pointsChange) || pointsChange === 0) {
+                showAlertModal('提示', '请输入非零的整数');
+                return;
+            }
+            
+            // 显示确认对话框
+            showConfirmModal('确认修改', `确定要对用户 ${accountId} 的积分进行 ${pointsChange > 0 ? '增加' : '减少'} ${Math.abs(pointsChange)} 分的操作吗？`, function(confirmed) {
+                if (confirmed) {
+                    // 发送修改积分的请求到服务端
+                    socket.emit('message', { 
+                        type: 'edit-user-points', 
+                        accountId: accountId, 
+                        pointsChange: pointsChange 
+                    });
+                }
+            });
+        }
+        
+        // 根据事件类型筛选日志
+        function filterLogByEventType() {
+            const container = document.getElementById('log-content-container');
+            const filter = document.getElementById('log-event-filter').value;
+            
+            if (!window.originalLogContent) {
+                return;
+            }
+            
+            // 如果有搜索结果，重新应用高亮
+            if (searchResults.length > 0) {
+                highlightSearchResult();
+            } else {
+                // 没有搜索结果时，直接显示筛选后的内容
+                if (filter === 'all') {
+                    // 显示所有日志
+                    container.textContent = window.originalLogContent;
+                } else {
+                    // 根据事件类型筛选
+                    const lines = window.originalLogContent.split('\n');
+                    const filteredLines = lines.filter(line => {
+                        // 检查每行日志是否包含指定的事件类型
+                        return line.includes(`[${filter}]`);
+                    });
+                    container.textContent = filteredLines.join('\n');
+                }
+            }
+        }
+        
+        // 页面加载完成后初始化
+        window.onload = function() {
+            // 初始只显示登录界面
+            document.getElementById('main-container').classList.add('hidden');
+            
+            // 加载保存的登录信息
+            loadSavedLoginInfo();
+            
+            // 添加事件类型筛选的监听器
+            const eventFilter = document.getElementById('log-event-filter');
+            if (eventFilter) {
+                eventFilter.addEventListener('change', filterLogByEventType);
+            }
+        };
+        
+        // 打开编辑房间属性模态框
+        function openEditRoomModal() {
+            const roomName = document.getElementById('admin-room-select').value;
+            if (!roomName) {
+                showAlertModal('提示', '请选择要编辑的房间');
+                return;
+            }
+            
+            // 显示模态框
+            document.getElementById('edit-room-modal').style.display = 'flex';
+            
+            // 设置当前房间名称
+            document.getElementById('edit-room-name').value = roomName;
+            
+            // 从roomsData中获取房间属性并填充
+            if (roomsData && roomsData[roomName]) {
+                const roomInfo = roomsData[roomName];
+                document.getElementById('edit-room-mode').value = roomInfo.mode || 'random';
+                document.getElementById('edit-room-count').value = roomInfo.count || '4';
+            } else {
+                // 暂时设置默认值
+                document.getElementById('edit-room-mode').value = 'random';
+                document.getElementById('edit-room-count').value = '4';
+            }
+        }
+        
+        // 关闭编辑房间属性模态框
+        function closeEditRoomModal() {
+            document.getElementById('edit-room-modal').style.display = 'none';
+        }
+        
+        // 打开新增房间模态框
+        function openCreateRoomModal() {
+            document.getElementById('create-room-modal').style.display = 'flex';
+        }
+        
+        // 关闭新增房间模态框
+        function closeCreateRoomModal() {
+            document.getElementById('create-room-modal').style.display = 'none';
+        }
+        
+        // 保存房间属性
+        function saveRoomProperties() {
+            const roomName = document.getElementById('admin-room-select').value;
+            const newRoomName = document.getElementById('edit-room-name').value.trim();
+            const roomMode = document.getElementById('edit-room-mode').value;
+            const roomCount = document.getElementById('edit-room-count').value;
+            
+            if (!newRoomName) {
+                showAlertModal('提示', '请输入房间名称');
+                return;
+            }
+            
+            // 发送保存请求
+            socket.emit('message', {
+                type: 'edit-room-properties',
+                roomName: roomName,
+                newRoomName: newRoomName,
+                roomMode: roomMode,
+                roomCount: roomCount
+            });
+            
+            // 关闭模态框
+            closeEditRoomModal();
+            
+            // 重新加载房间列表
+            loadAllRooms();
+            
+            // 刷新房间状态显示
+            refreshRoomsStatus();
+        }
+        
+        // 加载房间用户时同时加载房间属性
+        function loadRoomUsers() {
+            const roomName = document.getElementById('admin-room-select').value;
+            if (!roomName) {
+                document.getElementById('room-users-output').innerHTML = '请选择房间';
+                document.getElementById('room-properties-output').innerHTML = '请选择房间';
+                return;
+            }
+            
+            socket.emit('message', { type: 'get-room-users', roomName });
+        }
+        
+        // 修改创建房间函数
+        function createRoom() {
+            const roomName = document.getElementById('new-room-name').value.trim();
+            const roomMode = document.getElementById('new-room-mode').value;
+            const roomCount = document.getElementById('new-room-count').value;
+            
+            if (!roomName) {
+                showAlertModal('提示', '请输入房间名称');
+                return;
+            }
+            
+            socket.emit('message', { 
+                type: 'create-room', 
+                roomName: roomName,
+                roomMode: roomMode,
+                roomCount: roomCount
+            });
+            
+            // 关闭模态框
+            closeCreateRoomModal();
+            
+            // 重新加载房间列表
+            loadAllRooms();
+            
+            // 清空输入框
+            document.getElementById('new-room-name').value = '';
+            document.getElementById('new-room-mode').value = 'random';
+            document.getElementById('new-room-count').value = '4';
+            
+            // 刷新房间状态显示
+            refreshRoomsStatus();
+        }
+    </script>
+    
+    <!-- 编辑房间属性对话框 -->
+    <div id="edit-room-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.2); width: 400px; max-width: 90%;">
+            <h3>编辑房间属性</h3>
+            <div class="form-group">
+                <label for="edit-room-name">房间名称：</label>
+                <input type="text" id="edit-room-name" placeholder="请输入房间名称" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label for="edit-room-mode">发车模式：</label>
+                <select id="edit-room-mode" style="width: 100%;">
+                    <option value="random">顺序发车</option>
+                    <option value="points">积分优先</option>
+                    <option value="vip">VIP包间</option>
+                    <option value="none">不发车</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="edit-room-count">发车人数：</label>
+                <select id="edit-room-count" style="width: 100%;">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                </select>
+            </div>
+            <div style="margin-top: 15px; display: flex; justify-content: space-between;">
+                <button class="button" onclick="closeEditRoomModal()">取消</button>
+                <button class="button button-success" onclick="saveRoomProperties()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 新增房间对话框 -->
+    <div id="create-room-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.2); width: 400px; max-width: 90%;">
+            <h3>新增房间</h3>
+            <div class="form-group">
+                <label for="new-room-name">房间名称：</label>
+                <input type="text" id="new-room-name" placeholder="请输入房间名称" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label for="new-room-mode">发车模式：</label>
+                <select id="new-room-mode" style="width: 100%;">
+                    <option value="random">顺序发车</option>
+                    <option value="points">积分优先</option>
+                    <option value="vip">VIP包间</option>
+                    <option value="none">不发车</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="new-room-count">发车人数：</label>
+                <select id="new-room-count" style="width: 100%;">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4" selected>4</option>
+                </select>
+            </div>
+            <div style="margin-top: 15px; display: flex; justify-content: space-between;">
+                <button class="button" onclick="closeCreateRoomModal()">取消</button>
+                <button class="button button-success" onclick="createRoom()">创建</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

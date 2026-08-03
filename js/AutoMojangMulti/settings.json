@@ -1,0 +1,62 @@
+[
+  {
+    "name": "gameName",
+    "type": "input-text",
+    "label": "游戏名称"
+  },
+  {
+    "name": "uid",
+    "type": "input-text",
+    "label": "UID"
+  },
+  {
+    "name": "room1",
+    "type": "input-text",
+    "label": "目标房间1"
+  },
+  {
+    "name": "room2",
+    "type": "input-text",
+    "label": "目标房间2"
+  },
+  {
+    "name": "room3",
+    "type": "input-text",
+    "label": "目标房间3"
+  },
+  {
+    "name": "room4",
+    "type": "input-text",
+    "label": "目标房间4"
+  },
+  {
+    "name": "room5",
+    "type": "input-text",
+    "label": "目标房间5"
+  },
+  {
+    "name": "room6",
+    "type": "input-text",
+    "label": "目标房间6"
+  },
+  {
+    "name": "room7",
+    "type": "input-text",
+    "label": "目标房间7"
+  },
+  {
+    "name": "room8",
+    "type": "input-text",
+    "label": "目标房间8"
+  },
+  {
+    "name": "room9",
+    "type": "input-text",
+    "label": "目标房间9"
+  },
+  {
+    "name": "room10",
+    "type": "input-text",
+    "label": "目标房间10"
+  }
+]

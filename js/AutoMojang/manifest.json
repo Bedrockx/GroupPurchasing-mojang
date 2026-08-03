@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "name": "自动莫酱",
+  "version": "1.0.0",
+  "tags": [],
+  "description": "配合莫酱妙妙屋使用，使用js触发莫酱妙妙屋指令",
+  "saved_files": [],
+  "authors": [
+    {
+      "name": "mno",
+      "links": "https://github.com/Bedrockx"
+    }
+  ],
+  "settings_ui": "settings.json",
+  "main": "main.js"
+}

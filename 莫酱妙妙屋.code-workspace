@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../BetterGI/User/JsScript/ArtifactsGroupPurchasing"
+		},
+		{
+			"path": "../BetterGI/User/JsScript/AutoMojang"
+		},
+		{
+			"path": "../BetterGI/User/JsScript/AAA-Artifacts-Bulk-Supply"
+		},
+		{
+			"path": "../BetterGI/User/JsScript/AutoMojangMulti"
+		}
+	],
+	"settings": {}
+}

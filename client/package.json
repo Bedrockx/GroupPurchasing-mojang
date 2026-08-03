@@ -1,0 +1,38 @@
+{
+  "name": "mojang",
+  "version": "1.8.2",
+  "description": "莫酱妙妙屋",
+  "author": "mno",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:release": "electron-builder && node copy-release-files.js"
+  },
+  "build": {
+    "appId": "com.mojang.app",
+    "productName": "mojang",
+    "icon": "icon.ico",
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "icon.ico"
+    ]
+  },
+  "dependencies": {
+    "socket.io": "^4.7.4"
+  },
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

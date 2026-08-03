@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "name": "自动莫酱(多房间)",
+  "version": "1.0.0",
+  "tags": [],
+  "description": "配合莫酱妙妙屋使用，批量上线多个房间的账号",
+  "saved_files": [],
+  "authors": [
+    {
+      "name": "mno",
+      "links": "https://github.com/Bedrockx"
+    }
+  ],
+  "settings_ui": "settings.json",
+  "main": "main.js"
+}
