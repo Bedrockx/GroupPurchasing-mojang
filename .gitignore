@@ -12,9 +12,14 @@ other/
 # 敏感数据（含明文密码/真实用户信息，不应上传）
 server/data/
 client/config.json
+js/AAA-Artifacts-Bulk-Supply/CDInfo/
+js/AAA-Artifacts-Bulk-Supply/records/
 
 # Node 依赖
 node_modules/
 
 # 日志
 *.log
+
+# 本地 IDE 配置
+*.code-workspace
