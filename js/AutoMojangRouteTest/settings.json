@@ -1,0 +1,52 @@
+[
+  {
+    "name": "routePreferences",
+    "type": "multi-checkbox",
+    "label": "#############################################\n路线测试申请配置\n\n路线偏好（多选）\n勾选全选则接受所有类型的路线",
+    "default": [
+      "全选"
+    ],
+    "options": [
+      "全选",
+      "战斗",
+      "食材采集",
+      "特产采集",
+      "其他"
+    ]
+  },
+  {
+    "name": "combatTeamName",
+    "type": "input-text",
+    "label": "#############################################\n配队信息\n\n战斗配队名称"
+  },
+  {
+    "name": "collectTeam1Name",
+    "type": "input-text",
+    "label": "采集配队1名称"
+  },
+  {
+    "name": "collectTeam1Chars",
+    "type": "input-text",
+    "label": "采集配队1角色\n使用中文逗号（，）分隔角色名称\n例如：纳西妲，夜兰，万叶，钟离"
+  },
+  {
+    "name": "collectTeam2Name",
+    "type": "input-text",
+    "label": "采集配队2名称"
+  },
+  {
+    "name": "collectTeam2Chars",
+    "type": "input-text",
+    "label": "采集配队2角色\n使用中文逗号（，）分隔角色名称"
+  },
+  {
+    "name": "collectTeam3Name",
+    "type": "input-text",
+    "label": "采集配队3名称"
+  },
+  {
+    "name": "collectTeam3Chars",
+    "type": "input-text",
+    "label": "采集配队3角色\n使用中文逗号（，）分隔角色名称"
+  }
+]

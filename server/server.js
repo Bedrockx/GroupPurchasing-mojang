@@ -178,6 +178,8 @@ const ASAR_DIR = path.join(__dirname, 'asar'); // 存储各版本 app.asar，用
 const logDir = path.join(__dirname, 'log');
 const rideRecordsDir = path.join(__dirname, 'rideRecords');
 const gainRecordsDir = path.join(__dirname, 'gainRecords');
+const ROUTE_TASKS_FILE = path.join(DATA_DIR, 'route_tasks.json');       // 路线测试任务池
+const ROUTE_RECORDS_FILE = path.join(DATA_DIR, 'route_test_records.json'); // 路线测试结果记录
 
 // 默认版本号
 const DEFAULT_VERSIONS = {
@@ -261,6 +263,10 @@ const rideRecords = [];
 const crashReports = [];
 // 首程加分用户记录（服务端启动时为空，存储已获得首程加分的用户 accountId）
 const firstRideBonusUsers = [];
+
+// ==================== 路线测试任务数据 ====================
+let routeTestTasks = [];     // 任务池：[{ taskId, routeFileName, routeContent, routeType, statisticsMode, activatePickup, underwater, timeRule, requiredCount, results, status, createdAt }]
+let routeTestRecords = [];   // 结果记录：[{ recordId, taskId, routeFileName, accountId, date, routeTime, monsterNum, itemNum, expectMora, normalNum, eliteNum, reportedAt }]
 
 // ==================== 发车管理模块 ====================
 const RideManager = {
@@ -1112,7 +1118,11 @@ async function initData() {
       log(`创建 asar 目录: ${ASAR_DIR}`, LOG_TYPES.INFO);
     }
 
-    log(`初始化数据完成，加载了 ${rooms.length} 个房间，${Object.keys(userAccounts).length} 个用户账户`, LOG_TYPES.INFO);
+    // 加载路线测试任务与结果记录
+    routeTestTasks = await loadData(ROUTE_TASKS_FILE, []);
+    routeTestRecords = await loadData(ROUTE_RECORDS_FILE, []);
+
+    log(`初始化数据完成，加载了 ${rooms.length} 个房间，${Object.keys(userAccounts).length} 个用户账户，${routeTestTasks.length} 个路线测试任务`, LOG_TYPES.INFO);
   } catch (error) {
     handleError(error, 'initData');
     throw error;
@@ -3050,6 +3060,27 @@ async function handleReceivedMessage(socket, message) {
         case 'get-gain-records':
           await handleGetGainRecords(message, socket);
           break;
+        case 'publish-route-test':
+          await handlePublishRouteTest(message, socket);
+          break;
+        case 'get-route-test-types':
+          await handleGetRouteTestTypes(message, socket);
+          break;
+        case 'apply-route-test':
+          await handleApplyRouteTest(message, socket);
+          break;
+        case 'route-test-result':
+          await handleReportRouteTest(message, socket);
+          break;
+        case 'get-route-test-tasks':
+          await handleGetRouteTestTasks(message, socket);
+          break;
+        case 'get-route-test-records':
+          await handleGetRouteTestRecords(message, socket);
+          break;
+        case 'download-route-test-data':
+          await handleDownloadRouteTestData(message, socket);
+          break;
         case 'get-user-connections-for-mobile':
           handleGetUserConnectionsForMobile(socket);
           break;
@@ -4367,6 +4398,346 @@ function handleReportGain(message, socket) {
       });
     }
   }
+}
+
+// ==================== 路线测试任务管理 ====================
+
+/**
+ * 生成任务/记录 ID
+ */
+function generateRouteTestId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 校验路线 JSON 是否合法（需为对象，可含 info/points 等字段）
+ */
+function isValidRouteContent(content) {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 管理端：发布路线测试任务
+ * @param {Object} message - { routeFileName, routeContent, routeType, statisticsMode, activatePickup, underwater, timeRule, requiredCount }
+ * @param {Object} socket
+ */
+async function handlePublishRouteTest(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData || !socketData.isAdmin) {
+    socket.emit('message', { type: 'error', message: '权限不足' });
+    return;
+  }
+
+  const { routeFileName, routeContent, routeType, statisticsMode, activatePickup, underwater, timeRule, requiredCount, points } = message;
+
+  if (!routeFileName || !routeContent) {
+    socket.emit('message', { type: 'error', message: '路线文件名和内容不能为空' });
+    return;
+  }
+  if (!isValidRouteContent(routeContent)) {
+    socket.emit('message', { type: 'error', message: '路线文件内容不是合法的 JSON 对象' });
+    return;
+  }
+
+  const task = {
+    taskId: generateRouteTestId('rt'),
+    routeFileName,
+    routeContent,
+    routeType: (routeType || '').trim() || '默认',
+    statisticsMode: statisticsMode || '识别怪物',
+    activatePickup: !!activatePickup,
+    underwater: !!underwater,
+    timeRule: timeRule || '',
+    requiredCount: Math.max(1, parseInt(requiredCount, 10) || 1),
+    points: Math.max(0, Number(points) || 0.2), // 完成奖励积分，默认 0.2，支持小数
+    results: [],          // 已完成的 recordId 列表
+    status: 'active',     // active | completed
+    createdAt: Date.now()
+  };
+
+  routeTestTasks.push(task);
+  await saveData(ROUTE_TASKS_FILE, routeTestTasks);
+
+  log(`发布路线测试任务: ${task.taskId}, 路线 ${routeFileName}, 类型 ${task.routeType}, 需测试 ${task.requiredCount} 次`, LOG_TYPES.ADMIN, { accountId: socketData.accountId, taskId: task.taskId });
+  socket.emit('message', {
+    type: 'route-test-published',
+    taskId: task.taskId,
+    message: '路线测试任务发布成功'
+  });
+}
+
+/**
+ * 获取已知路线类型列表（用户端偏好设置使用）
+ */
+async function handleGetRouteTestTypes(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData) {
+    socket.emit('message', { type: 'error', message: '未登录' });
+    return;
+  }
+  const types = [...new Set(routeTestTasks.filter(t => t.status === 'active').map(t => t.routeType).filter(Boolean))];
+  socket.emit('message', { type: 'route-test-types', types });
+}
+
+/**
+ * 用户端：申请路线测试任务
+ * 规则：routeType 匹配用户选择的类型 + 任务未满员 + 用户当天未测过该路线（同天可测多条不同路线）
+ */
+async function handleApplyRouteTest(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData) {
+    socket.emit('message', { type: 'route-test-error', message: '未登录，无法申请路线测试' });
+    return;
+  }
+  if (socketData.isAdmin) {
+    socket.emit('message', { type: 'route-test-error', message: '管理员无法申请路线测试' });
+    return;
+  }
+
+  const accountId = socketData.accountId;
+  const selectedTypes = Array.isArray(message.selectedTypes) ? message.selectedTypes.map(String).filter(Boolean) : [];
+
+  // 记录用户配队与路线偏好（供管理端查看）
+  const routePreferences = Array.isArray(message.routePreferences) ? message.routePreferences.map(String).filter(Boolean) : [];
+  const combatTeamName = String(message.combatTeamName || '').trim();
+  const collectTeams = Array.isArray(message.collectTeams) ? message.collectTeams : [];
+  const account = userAccounts[accountId];
+  if (account) {
+    account.routeTestProfile = {
+      routePreferences,
+      selectedTypes,
+      combatTeamName,
+      collectTeams,
+      updatedAt: Date.now()
+    };
+    await saveData(USER_ACCOUNTS_FILE, userAccounts);
+    resetDataChangeTimer();
+  }
+  if (routePreferences.length > 0) {
+    LOG(`[路线测试] 用户 ${accountId} 申请，偏好: ${routePreferences.join('、')}，战斗配队: ${combatTeamName || '未填写'}，采集配队: ${collectTeams.length}个`);
+  }
+
+  // 当天已测过的任务（凌晨4点分界）
+  const todayStr = getTodayDateStr();
+  const testedTaskIds = new Set(
+    routeTestRecords.filter(r => r.accountId === accountId && r.date === todayStr).map(r => r.taskId)
+  );
+
+  // 候选：active + 类型匹配 + 未满员 + 用户当天未测过
+  const candidates = routeTestTasks.filter(t =>
+    t.status === 'active' &&
+    (selectedTypes.length === 0 || selectedTypes.includes(t.routeType)) &&
+    t.results.length < t.requiredCount &&
+    !testedTaskIds.has(t.taskId)
+  );
+
+  if (candidates.length === 0) {
+    socket.emit('message', {
+      type: 'route-test-error',
+      message: selectedTypes.length > 0 ? '没有符合所选类型的可用路线测试任务' : '暂无可用路线测试任务'
+    });
+    return;
+  }
+
+  // 优先分配完成次数最少（最需要凑齐测试次数）的任务，其次最早的
+  candidates.sort((a, b) => a.results.length - b.results.length || a.createdAt - b.createdAt);
+  const task = candidates[0];
+
+  socket.emit('message', {
+    type: 'route-test-distribute',
+    data: {
+      taskId: task.taskId,
+      routeFileName: task.routeFileName,
+      routeContent: task.routeContent,
+      routeType: task.routeType,
+      statisticsMode: task.statisticsMode,
+      activatePickup: task.activatePickup,
+      underwater: task.underwater,
+      timeRule: task.timeRule
+    }
+  });
+
+  log(`向用户 ${accountId} 分发路线测试任务: ${task.taskId}, 路线 ${task.routeFileName}, 类型 ${task.routeType}`, LOG_TYPES.INFO, { accountId, taskId: task.taskId });
+}
+
+/**
+ * 用户端：上报路线测试结果
+ * 去重：同一用户当天同一路线只能上报一次
+ */
+async function handleReportRouteTest(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData) {
+    socket.emit('message', { type: 'route-test-error', message: '未登录，无法上报结果' });
+    return;
+  }
+  if (socketData.isAdmin) {
+    socket.emit('message', { type: 'route-test-error', message: '管理员无法上报路线测试结果' });
+    return;
+  }
+
+  const accountId = socketData.accountId;
+  const { taskId, routeTime, monsterNum, itemNum, expectMora, normalNum, eliteNum, routeFileName } = message;
+
+  if (!taskId || routeTime === undefined || routeTime === null) {
+    socket.emit('message', { type: 'route-test-error', message: '路线测试结果参数不完整' });
+    return;
+  }
+
+  const task = routeTestTasks.find(t => t.taskId === taskId);
+  if (!task) {
+    socket.emit('message', { type: 'route-test-error', message: '路线测试任务不存在' });
+    return;
+  }
+
+  const todayStr = getTodayDateStr();
+
+  // 去重：同一用户当天同一路线只能测试一次
+  const duplicate = routeTestRecords.find(r => r.accountId === accountId && r.date === todayStr && r.taskId === taskId);
+  if (duplicate) {
+    log(`路线测试结果去重拒绝: 用户 ${accountId}, 任务 ${taskId}, 当天已测过`, LOG_TYPES.WARN, { accountId, taskId });
+    socket.emit('message', { type: 'route-test-error', message: '您今天已经测试过该路线，不能重复上报' });
+    return;
+  }
+
+  const record = {
+    recordId: generateRouteTestId('rtr'),
+    taskId,
+    routeFileName: routeFileName || task.routeFileName,
+    accountId,
+    date: todayStr,
+    routeTime: Number(routeTime) || 0,
+    monsterNum: (monsterNum && typeof monsterNum === 'object') ? monsterNum : {},
+    itemNum: (itemNum && typeof itemNum === 'object') ? itemNum : {},
+    expectMora: Number(expectMora) || 0,
+    normalNum: Number(normalNum) || 0,
+    eliteNum: Number(eliteNum) || 0,
+    reportedAt: Date.now()
+  };
+
+  routeTestRecords.push(record);
+  task.results.push(record.recordId);
+  if (task.results.length >= task.requiredCount) {
+    task.status = 'completed';
+  }
+
+  await saveData(ROUTE_RECORDS_FILE, routeTestRecords);
+  await saveData(ROUTE_TASKS_FILE, routeTestTasks);
+
+  // 完成路线测试奖励积分（数值由管理端发布时指定，默认 0.2，支持小数）
+  const rewardPoints = Number(task.points) || 0;
+  if (rewardPoints > 0) {
+    const account = userAccounts[accountId];
+    if (account) {
+      const oldPoints = account.points || 0;
+      // 保留两位小数，避免 0.2 累加的浮点精度误差
+      account.points = Math.round((oldPoints + rewardPoints) * 100) / 100;
+      await saveData(USER_ACCOUNTS_FILE, userAccounts);
+      resetDataChangeTimer();
+      log(`路线测试奖励积分: 用户 ${accountId} 完成 ${taskId} 获得 ${rewardPoints} 分，当前积分 ${account.points}`, LOG_TYPES.POINTS, { accountId, taskId, points: account.points, gained: rewardPoints });
+    }
+  }
+
+  log(`路线测试结果上报: 用户 ${accountId}, 任务 ${taskId}, 路线 ${record.routeFileName}, 用时 ${record.routeTime}s, 任务当前 ${task.results.length}/${task.requiredCount} 次`, LOG_TYPES.INFO, { accountId, taskId });
+  socket.emit('message', {
+    type: 'route-test-result-accepted',
+    message: '路线测试结果上报成功'
+  });
+}
+
+/**
+ * 管理端：获取路线测试任务列表
+ */
+async function handleGetRouteTestTasks(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData || !socketData.isAdmin) {
+    socket.emit('message', { type: 'error', message: '权限不足' });
+    return;
+  }
+  // 附带每条任务的记录数/状态，便于管理端展示
+  const tasks = routeTestTasks.map(t => ({
+    ...t,
+    resultCount: t.results.length
+  }));
+  socket.emit('message', { type: 'route-test-tasks', tasks });
+}
+
+/**
+ * 管理端：获取路线测试结果记录
+ * @param {Object} message - { taskId? } 可选按任务过滤
+ */
+async function handleGetRouteTestRecords(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData || !socketData.isAdmin) {
+    socket.emit('message', { type: 'error', message: '权限不足' });
+    return;
+  }
+  const taskId = message && message.taskId;
+  const records = taskId
+    ? routeTestRecords.filter(r => r.taskId === taskId)
+    : routeTestRecords;
+  socket.emit('message', { type: 'route-test-records', records });
+}
+
+/**
+ * 管理端：下载路线测试数据（任务信息 + 测试结果记录，打包为 JSON）
+ * @param {Object} message - { taskId? } 可选按任务下载；不传则下载全部
+ */
+async function handleDownloadRouteTestData(message, socket) {
+  const socketData = getConnectionBySocketId(socket.id);
+  if (!socketData || !socketData.isAdmin) {
+    socket.emit('message', { type: 'error', message: '权限不足' });
+    return;
+  }
+
+  const taskId = message && message.taskId;
+  let tasks = routeTestTasks;
+  let records = routeTestRecords;
+  if (taskId) {
+    tasks = routeTestTasks.filter(t => t.taskId === taskId);
+    records = routeTestRecords.filter(r => r.taskId === taskId);
+  }
+
+  if (tasks.length === 0 && records.length === 0) {
+    socket.emit('message', { type: 'error', message: '没有可下载的路线测试数据' });
+    return;
+  }
+
+  const exportData = {
+    exportedAt: Date.now(),
+    exportedAtStr: getBeijingTime().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+    tasks: tasks.map(t => ({
+      taskId: t.taskId,
+      routeFileName: t.routeFileName,
+      routeType: t.routeType,
+      statisticsMode: t.statisticsMode,
+      activatePickup: t.activatePickup,
+      underwater: t.underwater,
+      timeRule: t.timeRule,
+      requiredCount: t.requiredCount,
+      points: t.points || 0.2,
+      resultCount: t.results.length,
+      status: t.status,
+      createdAt: t.createdAt
+    })),
+    records
+  };
+
+  const dateStr = getTodayDateStr();
+  const fileName = taskId
+    ? `路线测试数据_${taskId}_${dateStr}.json`
+    : `路线测试数据_全部_${dateStr}.json`;
+
+  socket.emit('message', {
+    type: 'route-test-data-file',
+    fileName,
+    content: JSON.stringify(exportData, null, 2)
+  });
+  log(`管理员 ${socketData.username} 下载路线测试数据: ${fileName}, 任务 ${tasks.length} 个, 记录 ${records.length} 条`, LOG_TYPES.ADMIN, { accountId: socketData.accountId });
 }
 
 /**

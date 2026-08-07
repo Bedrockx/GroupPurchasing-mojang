@@ -1,0 +1,263 @@
+[
+  {
+    "itemName": "业果木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "刺葵木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 81,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "却砂木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 162,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "垂香木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 243,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "夏栎木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 324,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "孔雀木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 405,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "御伽木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 486,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "悬铃木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 567,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "杉木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 648,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "松木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 729,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "枫木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 810,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "柽木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 891,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "桃椰子木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 972,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "桤木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1053,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "桦木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1134,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "梦见木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1215,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "椴木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1296,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "榛木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1377,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "灰灰楼林木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1458,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "炬木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1539,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "燃爆木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1620,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "白栗栎木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1701,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "白梣木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1782,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "竹节",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1863,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "萃华木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1944,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "证悟木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2025,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "辉木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2106,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "银冷杉木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2187,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "香柏木",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2268,
+      "width": 120,
+      "height": 80
+    }
+  }
+]

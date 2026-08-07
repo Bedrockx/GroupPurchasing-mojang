@@ -492,6 +492,7 @@
             <button class="button" onclick="switchToOnlineUsers()">在线用户</button>
             <button class="button" onclick="switchToRideRecords()">发车记录</button>
             <button class="button" onclick="switchToVersionManagement()">版本管理</button>
+            <button class="button" onclick="switchToRouteTest()">路线测试</button>
             <button class="button" onclick="switchToLogs()">查看日志</button>
             <button class="button" onclick="logout()" style="background-color: #f44336; margin-left: auto;">退出登录</button>
         </div>
@@ -707,6 +708,76 @@
                     <div id="upload-progress" style="margin-top: 15px; display: none;">
                         <progress id="upload-progress-bar" value="0" max="100" style="width: 100%;"></progress>
                         <p id="upload-progress-text" style="margin: 5px 0; font-size: 0.9em;">上传中... 0%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 路线测试面板 -->
+        <div id="route-test-panel" class="panel">
+            <h2>路线测试</h2>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px;">
+                    <h3>发布路线测试任务</h3>
+                    <div class="form-group">
+                        <label for="route-test-file">路线文件 (.json)：</label>
+                        <input type="file" id="route-test-file" accept=".json" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="route-test-type">路线类型：</label>
+                        <select id="route-test-type" style="width: 100%;">
+                            <option value="战斗">战斗</option>
+                            <option value="食材采集">食材采集</option>
+                            <option value="特产采集">特产采集</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="route-test-count">测试次数：</label>
+                        <input type="number" id="route-test-count" value="1" min="1" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="route-test-points">奖励积分（每人/次）：</label>
+                        <input type="number" id="route-test-points" value="0.2" min="0" step="0.1" style="width: 100%;">
+                        <small style="color: #666;">用户完成该路线测试后获得的积分，默认 0.2，支持小数</small>
+                    </div>
+                    <div class="form-group">
+                        <label>统计模式：</label>
+                        <div style="display: flex; gap: 20px;">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                <input type="radio" name="route-test-statistics" value="识别怪物" checked> 识别怪物
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                <input type="radio" name="route-test-statistics" value="识别材料"> 识别材料
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                            <input type="checkbox" id="route-test-pickup"> 启用拾取 (activatePickup)
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                            <input type="checkbox" id="route-test-underwater"> 水下路线 (underwater)
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="route-test-time-rule">时间限制规则：</label>
+                        <input type="text" id="route-test-time-rule" placeholder="例如: 8-11,23:11-23:55 (留空不限)" style="width: 100%;">
+                    </div>
+                    <button class="button button-success" onclick="publishRouteTest()">发布任务</button>
+                </div>
+                <div style="flex: 2; min-width: 400px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3 style="margin: 0;">测试进度</h3>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="button button-secondary" onclick="loadRouteTestTasks()">刷新</button>
+                            <button class="button button-secondary" onclick="downloadRouteTestData()">下载全部数据</button>
+                        </div>
+                    </div>
+                    <div id="route-test-tasks-container" style="max-height: 500px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: #f0f8ff; padding: 10px;">
+                        <p style="color: #999; text-align: center; margin-top: 50px;">暂无路线测试任务</p>
                     </div>
                 </div>
             </div>
@@ -1543,6 +1614,22 @@
                     const progressText = document.getElementById('upload-progress-text');
                     progressBar.value = data.data.progress;
                     progressText.textContent = `上传中... ${data.data.progress}%`;
+                } else if (data.type === 'route-test-published') {
+                    // 路线测试任务发布成功
+                    showAlertModal('提示', data.message || '路线测试任务发布成功');
+                    document.getElementById('route-test-file').value = '';
+                    document.getElementById('route-test-count').value = '1';
+                    document.getElementById('route-test-points').value = '0.2';
+                    loadRouteTestTasks();
+                } else if (data.type === 'route-test-tasks') {
+                    // 渲染路线测试任务列表（进度）
+                    renderRouteTestTasks(data.tasks);
+                } else if (data.type === 'route-test-records') {
+                    // 渲染路线测试结果明细
+                    renderRouteTestRecords(data.records);
+                } else if (data.type === 'route-test-data-file') {
+                    // 下载路线测试数据
+                    downloadFile(data.fileName, data.content);
                 }
             });
         }
@@ -1789,6 +1876,174 @@
             document.getElementById('version-management-panel').classList.add('active');
             // 加载版本信息
             loadVersions();
+        }
+
+        // ==================== 路线测试 ====================
+
+        // 切换到路线测试面板
+        function switchToRouteTest() {
+            hideAllPanels();
+            document.getElementById('route-test-panel').classList.add('active');
+            loadRouteTestTasks();
+        }
+
+        // 简单的 HTML 转义
+        function routeTestEscapeHtml(str) {
+            if (str === undefined || str === null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // 发布路线测试任务
+        function publishRouteTest() {
+            const fileInput = document.getElementById('route-test-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                showAlertModal('提示', '请先选择路线文件');
+                return;
+            }
+            const routeType = document.getElementById('route-test-type').value;
+            if (!routeType) {
+                showAlertModal('提示', '请选择路线类型');
+                return;
+            }
+            const requiredCount = parseInt(document.getElementById('route-test-count').value, 10) || 1;
+            if (requiredCount < 1) {
+                showAlertModal('提示', '测试次数至少为 1');
+                return;
+            }
+            const points = parseFloat(document.getElementById('route-test-points').value);
+            if (isNaN(points) || points < 0) {
+                showAlertModal('提示', '奖励积分必须为不小于 0 的数字');
+                return;
+            }
+            const statisticsMode = document.querySelector('input[name="route-test-statistics"]:checked').value;
+            const activatePickup = document.getElementById('route-test-pickup').checked;
+            const underwater = document.getElementById('route-test-underwater').checked;
+            const timeRule = document.getElementById('route-test-time-rule').value.trim();
+
+            if (!confirm(`确定要发布路线测试任务吗？\n路线文件: ${file.name}\n类型: ${routeType}\n测试次数: ${requiredCount}\n奖励积分: ${points}/人`)) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                try {
+                    JSON.parse(content);
+                } catch (err) {
+                    showAlertModal('提示', '路线文件不是合法的 JSON');
+                    return;
+                }
+                socket.emit('message', {
+                    type: 'publish-route-test',
+                    routeFileName: file.name,
+                    routeContent: content,
+                    routeType: routeType,
+                    statisticsMode: statisticsMode,
+                    activatePickup: activatePickup,
+                    underwater: underwater,
+                    timeRule: timeRule,
+                    requiredCount: requiredCount,
+                    points: points
+                });
+            };
+            reader.readAsText(file, 'utf-8');
+        }
+
+        // 加载路线测试任务列表（进度）
+        function loadRouteTestTasks() {
+            socket.emit('message', { type: 'get-route-test-tasks' });
+        }
+
+        // 渲染任务列表
+        function renderRouteTestTasks(tasks) {
+            const container = document.getElementById('route-test-tasks-container');
+            if (!tasks || tasks.length === 0) {
+                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 50px;">暂无路线测试任务</p>';
+                return;
+            }
+            const cards = tasks.map(task => {
+                const statusText = task.status === 'completed' ? '已完成' : '进行中';
+                const statusColor = task.status === 'completed' ? '#4CAF50' : '#1976D2';
+                const percent = task.requiredCount > 0
+                    ? Math.min(100, Math.round(task.resultCount / task.requiredCount * 100))
+                    : 0;
+                const timeRuleText = task.timeRule ? ' | 时间限制：' + routeTestEscapeHtml(task.timeRule) : '';
+                return `
+                    <div style="border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 12px; margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <strong style="font-size: 15px;">${routeTestEscapeHtml(task.routeFileName)}</strong>
+                            <span style="color: ${statusColor}; font-weight: bold;">${statusText}</span>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 13px; color: #555; line-height: 1.6;">
+                            类型：${routeTestEscapeHtml(task.routeType)} | 统计模式：${routeTestEscapeHtml(task.statisticsMode)} | 拾取：${task.activatePickup ? '开' : '关'} | 水下：${task.underwater ? '是' : '否'}${timeRuleText}
+                        </div>
+                        <div style="margin-top: 4px; font-size: 13px; color: #555;">
+                            进度：${task.resultCount}/${task.requiredCount} 次
+                            <div style="height: 6px; background-color: #e3f2fd; border-radius: 3px; margin-top: 4px; overflow: hidden;">
+                                <div style="height: 100%; width: ${percent}%; background-color: #1976D2;"></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button class="button button-secondary" onclick="viewRouteTestRecords('${task.taskId}')">查看结果</button>
+                            <button class="button button-secondary" onclick="downloadRouteTestData('${task.taskId}')">下载数据</button>
+                        </div>
+                        <div id="route-test-records-${task.taskId}" style="display: none; margin-top: 10px; border-top: 1px dashed #bbdefb; padding-top: 8px; font-size: 13px;"></div>
+                    </div>
+                `;
+            }).join('');
+            container.innerHTML = cards;
+        }
+
+        // 查看任务结果明细（切换显示/隐藏）
+        function viewRouteTestRecords(taskId) {
+            const container = document.getElementById('route-test-records-' + taskId);
+            if (!container) return;
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                container.innerHTML = '<p style="color: #999;">加载中...</p>';
+                socket.emit('message', { type: 'get-route-test-records', taskId: taskId });
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        // 渲染任务结果明细
+        function renderRouteTestRecords(records) {
+            if (!records || records.length === 0) return;
+            const taskId = records[0].taskId;
+            const container = document.getElementById('route-test-records-' + taskId);
+            if (!container) return;
+            const rows = records.map(rec => {
+                const monsterEntries = rec.monsterNum && Object.keys(rec.monsterNum).length > 0
+                    ? Object.entries(rec.monsterNum).map(([k, v]) => `${routeTestEscapeHtml(k)}*${v}`).join('、')
+                    : '无';
+                const itemEntries = rec.itemNum && Object.keys(rec.itemNum).length > 0
+                    ? Object.entries(rec.itemNum).map(([k, v]) => `${routeTestEscapeHtml(k)}*${v}`).join('、')
+                    : '无';
+                return `
+                    <div style="border-bottom: 1px solid #e3f2fd; padding: 6px 0;">
+                        <div><strong>${routeTestEscapeHtml(rec.accountId)}</strong> ${routeTestEscapeHtml(rec.date)} | 用时 ${rec.routeTime}s | 预估摩拉 ${rec.expectMora} | 普通怪 ${rec.normalNum} | 精英怪 ${rec.eliteNum}</div>
+                        <div style="color: #666;">怪物: ${monsterEntries}</div>
+                        <div style="color: #666;">材料: ${itemEntries}</div>
+                    </div>
+                `;
+            }).join('');
+            container.innerHTML = '<div style="font-weight: bold; margin-bottom: 4px;">测试结果明细</div>' + rows;
+        }
+
+        // 下载路线测试数据（不传 taskId 下载全部）
+        function downloadRouteTestData(taskId) {
+            const msg = { type: 'download-route-test-data' };
+            if (taskId) {
+                msg.taskId = taskId;
+            }
+            socket.emit('message', msg);
         }
 
         // 加载版本信息

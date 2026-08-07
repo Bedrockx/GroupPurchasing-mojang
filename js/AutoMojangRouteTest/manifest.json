@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "name": "申请路线测试",
+  "version": "1.0.0",
+  "tags": [],
+  "description": "配置配队信息与路线偏好，向莫酱妙妙屋申请路线测试任务",
+  "saved_files": [],
+  "authors": [
+    {
+      "name": "mno",
+      "links": "https://github.com/Bedrockx"
+    }
+  ],
+  "settings_ui": "settings.json",
+  "main": "main.js"
+}
