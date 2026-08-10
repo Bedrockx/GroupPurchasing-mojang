@@ -1271,6 +1271,7 @@ async function getPlayerSign() {
 
 async function findTotalNumber() {
     await genshin.returnMainUi();
+    await sleep(1000);
     await keyPress("F2");
     await sleep(2000);
 
