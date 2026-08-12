@@ -1,0 +1,128 @@
+[
+  {
+    "itemName": "北陆单手剑原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "北陆弓原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 81,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "北陆法器原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 162,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "北陆长柄武器原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 243,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "垠土单手剑原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 324,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "垠土双手剑原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 405,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "垠土弓原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 486,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "垠土法器原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 567,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "垠土长柄武器原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 648,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "央陆单手剑原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 729,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "央陆双手剑原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 810,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "央陆弓原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 891,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "央陆法器原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 972,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "央陆长柄武器原胚",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1053,
+      "width": 120,
+      "height": 80
+    }
+  }
+]

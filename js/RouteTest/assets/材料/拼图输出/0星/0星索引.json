@@ -1,0 +1,1316 @@
+[
+  {
+    "itemName": "万相石",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "久雨莲",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 81,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "云岩裂叶",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 162,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "便携轴承",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 243,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "兽肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 324,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "冬凌草",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 405,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "冰雾花花朵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 486,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "冷鲜肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 567,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "初露之源",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 648,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "劫波莲",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 729,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "卷心菜",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 810,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "发光髓",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 891,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "发酵果实汁",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 972,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "咖啡豆",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1053,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "嘟嘟莲",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1134,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "土豆",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1215,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "圣金虫",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1296,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "培根",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1377,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "堇瓜",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1458,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "墩墩桃",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1539,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "夏槲果",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1620,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "夜泊石",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1701,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "天云草实",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1782,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "奇异的牙齿",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1863,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "奶油",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1944,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "奶酪",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2025,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "子探测单元",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2106,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "宿影花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2187,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "寒涌石",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2268,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "小灯草",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2349,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "小麦",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2430,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "布匹",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2511,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "帕蒂沙兰",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2592,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "幽光星星",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2673,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "幽灯蕈",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2754,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "微光角菌",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2835,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "悼灵花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2916,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "慕风蘑菇",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2997,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "星螺",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3078,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "星银矿石",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3159,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "晶化骨髓",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3240,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "晶核",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3321,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "月莲",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3402,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "月落银",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3483,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "杏仁",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3564,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "松果",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3645,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "松珀香",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3726,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "松茸",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3807,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "果酱",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3888,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "枣椰",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3969,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "枯叶紫英",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4050,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "柔灯铃",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4131,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "树王圣体菇",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4212,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "树莓",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4293,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "毗波耶",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4374,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "水晶块",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4455,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "汐藻",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4536,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "沉玉仙茗",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4617,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "沙脂蛹",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4698,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "洋葱",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4779,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "浪沫羽鳃",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4860,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "海灵芝",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 4941,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "海草",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5022,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "海露花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5103,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "清心",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5184,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "清水玉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5265,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "湖光铃兰",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5346,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "澄晶实",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5427,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "火腿",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5508,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "灼灼彩菊",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5589,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "烈焰花花蕊",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5670,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "烬芯花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5751,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "熏禽肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5832,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "珊瑚真珠",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5913,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "琉璃百合",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 5994,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "琉璃袋",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6075,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "琉鳞石",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6156,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "甜甜花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6237,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "电气水晶",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6318,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "番茄",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6399,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "白灵果",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6480,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "白萝卜",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6561,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "白铁块",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6642,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "盐",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6723,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "石珀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6804,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "神秘的肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6885,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "禽肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 6966,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "秃秃豆",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7047,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "稻米",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7128,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "空羽蛾",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7209,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "竹笋",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7290,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "糖",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7371,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "紫晶块",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7452,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "红果果菇",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7533,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "红色染料",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7614,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "绝云椒椒",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7695,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "绯樱绣球",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7776,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "肉龙掌",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7857,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "胡椒",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 7938,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "胡萝卜",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8019,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "苍晶螺",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8100,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "苦种",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8181,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "茉洁草",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8262,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "莲蓬",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8343,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "萃凝晶",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8424,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "落落莓",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8505,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蒲公英籽",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8586,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蓝色染料",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8667,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "薄荷",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8748,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蘑菇",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8829,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "虹彩薔薇",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8910,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "虹滴晶",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 8991,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "虾仁",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9072,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蜥蜴尾巴",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9153,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蝴蝶翅膀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9234,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "螃蟹",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9315,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蟹黃",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9396,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "血斛",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9477,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "豆腐",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9558,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "赤念果",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9639,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "酸奶油",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9720,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "金鱼草",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9801,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "钩钩果",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9882,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "铁块",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 9963,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "霓裳花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10044,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "霜盏花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10125,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "青蛙",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10206,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "青蜜莓",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10287,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "面粉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10368,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "须弥蔷薇",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10449,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "颗粒果",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10530,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "风息花",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10611,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "风车菊",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10692,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "香肠",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10773,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "香辛料",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10854,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "马尾",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 10935,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鬼兜虫",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11016,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "魔晶块",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11097,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鱼肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11178,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鳅鳅宝玉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11259,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鳗肉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11340,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鸟蛋",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11421,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鸣草",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11502,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "黄油",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11583,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "黄色染料",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11664,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "黑麦粉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 11745,
+      "width": 120,
+      "height": 80
+    }
+  }
+]

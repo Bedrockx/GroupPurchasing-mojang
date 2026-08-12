@@ -1,0 +1,380 @@
+[
+  {
+    "itemName": "伪装鲨鲨独角鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "佛玛洛鳐",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 81,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "冷冽巨斧鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 162,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "吹沙角鲀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 243,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "夜色明眼鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 324,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "拟似燃素独角鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 405,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "擒霞客",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 486,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "斗棘鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 567,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "无奇巨斧鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 648,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "暮云角鲀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 729,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "水晶宴",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 810,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "沉波蜜桃",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 891,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "波波心羽鲈",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 972,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "流纹茶蝶鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1053,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "流纹褐蝶鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1134,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "深潜斗士急流鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1215,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "炮鲀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1296,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "炽岩斗士急流鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1377,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "炽铁巨斧鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1458,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "烘烘心羽鲈",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1539,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "玉玉心羽鲈",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1620,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "真果角鲀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1701,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "素素凶凶鲨",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1782,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "繁花斗士急流鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1863,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "维护机关初始能力型",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 1944,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "维护机关态势控制者",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2025,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "维护机关水域清理者",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2106,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "维护机关澄金领队型",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2187,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "维护机关白金典藏型",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2268,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "翡玉斧枪鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2349,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "肺棘鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2430,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "苦炮鲀",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2511,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蓝昼明眼鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2592,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蓝染花鳉",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2673,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "虹光凶凶鲨",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2754,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "赤魔王",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2835,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "迪芙妲鳐",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2916,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "金赤假龙",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 2997,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "锖假龙",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3078,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "长生仙",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3159,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "雪中君",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3240,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "鸩棘鱼",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 3321,
+      "width": 120,
+      "height": 80
+    }
+  }
+]

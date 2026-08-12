@@ -1,0 +1,22 @@
+{
+  "manifest_version": 1,
+  "name": "单路线测试",
+  "version": "1.0.0",
+  "tags": [
+    "锄地",
+    "测试"
+  ],
+  "description": "单路线测试脚本：运行指定的单条锄地路线，统计耗时、击杀怪物（或材料收集）变化，并通过 command.json 上报结果给莫酱妙妙屋",
+  "saved_files": [
+    "records/*.json",
+    "pathing/*.json"
+  ],
+  "authors": [
+    {
+      "name": "莫酱妙妙屋",
+      "links": "https://github.com/jiegedabaobei"
+    }
+  ],
+  "settings_ui": "settings.json",
+  "main": "main.js"
+}

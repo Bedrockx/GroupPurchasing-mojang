@@ -1,0 +1,45 @@
+[
+  {
+    "name": "routeFileName",
+    "type": "input-text",
+    "label": "#############################################\n路线测试配置\n\n要测试的路线文件名（位于 pathing 文件夹下）\n由莫酱妙妙屋服务端下发任务时自动填入",
+    "default": ""
+  },
+  {
+    "name": "taskId",
+    "type": "input-text",
+    "label": "任务ID\n由莫酱妙妙屋服务端下发任务时自动填入，请勿修改",
+    "default": ""
+  },
+  {
+    "name": "statisticsMode",
+    "type": "select",
+    "label": "统计模式\n识别怪物：进生物志统计击杀怪物数\n识别材料：扫描背包统计材料变化",
+    "options": [
+      "识别怪物",
+      "识别材料"
+    ],
+    "default": "识别怪物"
+  },
+  {
+    "name": "activatePickup",
+    "type": "checkbox",
+    "label": "启用自动拾取"
+  },
+  {
+    "name": "underwater",
+    "type": "checkbox",
+    "label": "水下路线（运行前学习螃蟹技能）"
+  },
+  {
+    "name": "timeRule",
+    "type": "input-text",
+    "label": "时间限制规则（可选）\n如：8-11,23:11-23:55 表示这些时段不执行",
+    "default": ""
+  },
+  {
+    "name": "notify",
+    "type": "checkbox",
+    "label": "#############################################\n其他配置\n\n是否通知信息"
+  }
+]

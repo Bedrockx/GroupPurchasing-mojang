@@ -1,0 +1,101 @@
+[
+  {
+    "itemName": "果酿饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "槲梭饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 81,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "清白饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 162,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "温火饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 243,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "澄晶果粒饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 324,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "甘露饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 405,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "维护机关频闪诱饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 486,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "蠕虫假饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 567,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "赤糜饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 648,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "酸桔饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 729,
+      "width": 120,
+      "height": 80
+    }
+  },
+  {
+    "itemName": "飞蝇假饵",
+    "itemPicRegion": {
+      "x": 0,
+      "y": 810,
+      "width": 120,
+      "height": 80
+    }
+  }
+]

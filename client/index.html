@@ -613,6 +613,21 @@
                 <div class="schedule-list" id="schedule-list">
                     <div style="padding: 10px; color: #999; text-align: center;">暂无调度任务</div>
                 </div>
+                
+                <!-- 路线测试功能区 -->
+                <div style="margin-top: 10px; padding: 12px; border: 1px solid #bbdefb; border-radius: 4px; background-color: #f0f8ff;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <strong style="color: #1976D2;">路线测试</strong>
+                        <button class="button button-success" onclick="requestRouteTest()" style="padding: 6px 16px;">申请路线测试</button>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 13px; color: #555;">
+                        <label>接受的路线类型：</label>
+                        <div id="route-test-types-container" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px;">
+                            <span style="color: #999;">登录后自动加载可用类型，请先新增"路线测试"调度</span>
+                        </div>
+                        <div style="margin-top: 6px; color: #999;">申请后：有符合条件的路线则用测试BGI启动测试一条龙；无路线任务则用兜底BGI启动兜底一条龙</div>
+                    </div>
+                </div>
             </div>
             
             <!-- 集成功能面板 -->
@@ -801,6 +816,7 @@
                     <option value="file-command">文件指令</option>
                     <option value="cron">定时启动</option>
                     <option value="trigger-ride">触发发车</option>
+                    <option value="route-test">路线测试</option>
                 </select>
             </div>
             
@@ -856,6 +872,42 @@
                     <div class="form-group">
                         <label for="ride-uid">UID：</label>
                         <input type="text" id="ride-uid" placeholder="请输入UID">
+                    </div>
+                </div>
+                
+                <!-- 路线测试配置 -->
+                <div id="route-test-config" style="display: none;">
+                    <h4>路线测试配置</h4>
+                    <div class="form-group">
+                        <label>监听命令文件：</label>
+                        <div style="display: flex; gap: 10px;">
+                            <div class="folder-display" id="route-test-command-file" style="flex: 1;">未选择文件</div>
+                            <button class="button" onclick="selectCommandFileForRouteTest()">选择文件</button>
+                        </div>
+                        <small style="color: #666;">建议指向测试脚本目录下的 command.json</small>
+                    </div>
+                    <div class="form-group">
+                        <label>测试BGI文件夹（用于启动测试一条龙）：</label>
+                        <div style="display: flex; gap: 10px;">
+                            <div class="folder-display" id="route-test-bgi-folder" style="flex: 1;">未选择文件夹</div>
+                            <button class="button" onclick="selectRouteTestFolder('route-test-bgi-folder')">选择文件夹</button>
+                        </div>
+                        <small style="color: #666;">测试路线可能使用单独版本的 BGI，需要单独指定</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="route-test-dragon">测试一条龙配置：</label>
+                        <input type="text" id="route-test-dragon" placeholder="请输入要启动的一条龙配置名称">
+                    </div>
+                    <div class="form-group">
+                        <label>兜底BGI文件夹（无路线任务时启动）：</label>
+                        <div style="display: flex; gap: 10px;">
+                            <div class="folder-display" id="route-test-fallback-bgi-folder" style="flex: 1;">未选择文件夹</div>
+                            <button class="button" onclick="selectRouteTestFolder('route-test-fallback-bgi-folder')">选择文件夹</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="route-test-fallback-dragon">兜底一条龙配置：</label>
+                        <input type="text" id="route-test-fallback-dragon" placeholder="请输入无路线任务时要启动的一条龙配置名称">
                     </div>
                 </div>
             </div>
@@ -1336,6 +1388,21 @@
                         } else if (data.type === 'gain-reported') {
                             console.log('收益报告成功:', data);
                             addLog('收益报告成功', 'success');
+                        } else if (data.type === 'route-test-distribute') {
+                            console.log('收到路线测试任务分发:', data);
+                            handleRouteTestDistribute(data.data || {});
+                        } else if (data.type === 'route-test-error') {
+                            console.log('路线测试申请失败:', data.message);
+                            addLog('路线测试申请失败: ' + data.message, 'warning');
+                            showAlertModal('提示', '路线测试申请失败：' + data.message);
+                            // 无可用路线任务，启动兜底一条龙（使用兜底BGI）
+                            handleRouteTestFallback();
+                        } else if (data.type === 'route-test-types') {
+                            console.log('收到路线测试类型列表:', data.types);
+                            renderRouteTestTypes(data.types || []);
+                        } else if (data.type === 'route-test-result-accepted') {
+                            console.log('路线测试结果上报成功:', data);
+                            addLog('路线测试结果上报成功', 'success');
                         } else if (data.type === 'claim-success') {
                             console.log('认领成功:', data);
                             addLog(`认领成功: ${data.username} (${data.uid})`, 'success');
@@ -1364,6 +1431,10 @@
                                 updateAccountInfo(data.data);
                                 sendMessageToServer({
                                     type: 'get-rooms-status'
+                                });
+                                // 登录成功后拉取路线测试类型列表
+                                sendMessageToServer({
+                                    type: 'get-route-test-types'
                                 });
                             }
                         } else if (data.type === 'user-online-success') {
@@ -1902,6 +1973,30 @@
                             break;
                         }
                         
+                        case 'route-test-apply': {
+                            // 申请路线测试指令（由路线测试调度触发）
+                            addLog('执行路线测试申请指令', 'info');
+                            applyRouteTestToServer(params || {});
+                            break;
+                        }
+                        
+                        case 'route-test-result': {
+                            // 路线测试结果上报指令
+                            addLog('执行路线测试结果上报指令', 'info');
+                            sendMessageToServer({
+                                type: 'route-test-result',
+                                taskId: params.taskId,
+                                routeFileName: params.routeFileName,
+                                routeTime: params.routeTime,
+                                monsterNum: params.monsterNum || {},
+                                itemNum: params.itemNum || {},
+                                expectMora: params.expectMora || 0,
+                                normalNum: params.normalNum || 0,
+                                eliteNum: params.eliteNum || 0
+                            });
+                            break;
+                        }
+                        
                         case 'close-process': {
                             // 关闭进程指令
                             const { process } = params;
@@ -1958,7 +2053,7 @@
             addLog(`开始执行调度任务: ${schedule.name}`, 'info');
             
             // 检查是否是文件指令类型
-            if (schedule.trigger.type === 'file-command') {
+            if (schedule.trigger.type === 'file-command' || schedule.trigger.type === 'route-test') {
                 // 执行文件指令
                 executeFileCommand(schedule);
                 return;
@@ -2073,7 +2168,7 @@
         function clearFileCommandFiles() {
             // 找到所有文件指令类型的调度任务
             const fileCommandSchedules = schedules.filter(s => 
-                s.trigger.type === 'file-command'
+                s.trigger.type === 'file-command' || s.trigger.type === 'route-test'
             );
             
             if (fileCommandSchedules.length === 0) {
@@ -2109,7 +2204,7 @@
             
             // 获取所有文件相关的调度任务（文件监听和文件指令）
             const fileSchedules = schedules.filter(s => 
-                s.trigger.type === 'file-watch' || s.trigger.type === 'file-command'
+                s.trigger.type === 'file-watch' || s.trigger.type === 'file-command' || s.trigger.type === 'route-test'
             );
             
             if (fileSchedules.length === 0) {
@@ -2465,6 +2560,7 @@
                     autoUpdateGroup: document.getElementById('auto-update-group').checked,
                     connectionId: connectionId,
                     connectionName: document.getElementById('connection-name-input').value.trim(),
+                    routeTestSelectedTypes: config.routeTestSelectedTypes || [],
                     schedules: schedules
                 };
                 const filePath = `${currentAppPath}/config.json`;
@@ -2999,6 +3095,427 @@
                 });
             } else {
                 addLog('无法启动，Electron API不可用', 'error');
+            }
+        }
+
+        // ==================== 路线测试 ====================
+
+        // 简单的 HTML 转义
+        function routeTestEscapeHtml(str) {
+            if (str === undefined || str === null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // 查找路线测试调度（trigger.type === 'route-test'）
+        function findRouteTestSchedule() {
+            return schedules.find(s => s.trigger && s.trigger.type === 'route-test');
+        }
+
+        // 申请路线测试（按钮入口）：检测是否有路线测试调度，没有则不响应
+        function requestRouteTest() {
+            const schedule = findRouteTestSchedule();
+            if (!schedule) {
+                showAlertModal('提示', '未配置路线测试调度，命令不响应。请先新增"路线测试"触发器类型的调度并配置测试/兜底一条龙。');
+                addLog('未配置路线测试调度，申请命令不响应', 'warning');
+                return;
+            }
+            const filePath = schedule.trigger.config.filePath;
+            if (!filePath || filePath === '未选择文件') {
+                showAlertModal('提示', '路线测试调度未配置监听命令文件');
+                return;
+            }
+            // 写入申请指令到命令文件，由路线测试调度轮询触发
+            const command = JSON.stringify({
+                'mojiang-command': true,
+                'command': 'route-test-apply',
+                'params': {}
+            });
+            window.electronAPI.writeFile(filePath, command, (err) => {
+                if (err) {
+                    addLog('写入路线测试申请指令失败: ' + err, 'error');
+                    return;
+                }
+                addLog('已写入路线测试申请指令，等待调度响应', 'success');
+            });
+        }
+
+        // 向服务端发送路线测试申请（由 route-test-apply 指令触发）
+        function applyRouteTestToServer(params) {
+            params = params || {};
+            // 检测是否已配置路线测试调度，未配置则命令不响应
+            const schedule = findRouteTestSchedule();
+            if (!schedule) {
+                showAlertModal('提示', '未配置路线测试调度，申请命令不响应。请先新增"路线测试"触发器类型的调度并配置测试/兜底一条龙。');
+                addLog('未配置路线测试调度，申请命令不响应', 'warning');
+                return;
+            }
+            // 从脚本参数读取路线偏好（多选），兼容旧的 config 偏好
+            let routePreferences = Array.isArray(params.routePreferences) ? params.routePreferences : (config.routeTestSelectedTypes || []);
+            // 勾选"全选"时不限制路线类型
+            const selectedTypes = routePreferences.includes('全选') ? [] : routePreferences.slice();
+            // 配队信息
+            const combatTeamName = params.combatTeamName || '';
+            const collectTeams = Array.isArray(params.collectTeams) ? params.collectTeams : [];
+            const teamNames = [];
+            if (combatTeamName) teamNames.push(combatTeamName);
+            collectTeams.forEach(t => { if (t && t.name) teamNames.push(t.name); });
+
+            addLog('发送路线测试申请，路线偏好: ' + (routePreferences.length > 0 ? routePreferences.join('、') : '全部') + '，队伍: ' + (teamNames.join('、') || '未配置'), 'info');
+            sendMessageToServer({
+                type: 'apply-route-test',
+                selectedTypes: selectedTypes,
+                routePreferences: routePreferences,
+                combatTeamName: combatTeamName,
+                collectTeams: collectTeams
+            });
+        }
+
+        // 获取当前已勾选的路线类型偏好
+        function getSelectedRouteTestTypes() {
+            return (config.routeTestSelectedTypes || []).slice();
+        }
+
+        // 渲染路线类型多选（数据来自服务端）
+        function renderRouteTestTypes(types) {
+            const container = document.getElementById('route-test-types-container');
+            if (!container) return;
+            const selected = config.routeTestSelectedTypes || [];
+            if (!types || types.length === 0) {
+                container.innerHTML = '<span style="color: #999;">暂无可用路线类型</span>';
+                return;
+            }
+            container.innerHTML = types.map(t => `
+                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: #333;">
+                    <input type="checkbox" value="${routeTestEscapeHtml(t)}" ${selected.includes(t) ? 'checked' : ''} onchange="updateRouteTestSelectedTypes()">
+                    ${routeTestEscapeHtml(t)}
+                </label>
+            `).join('');
+        }
+
+        // 更新类型偏好并保存到 config.json
+        function updateRouteTestSelectedTypes() {
+            const checkboxes = document.querySelectorAll('#route-test-types-container input[type="checkbox"]:checked');
+            config.routeTestSelectedTypes = Array.from(checkboxes).map(cb => cb.value);
+            saveConfig();
+            addLog('路线测试类型偏好已更新: ' + (config.routeTestSelectedTypes.join(', ') || '全部'), 'info');
+        }
+
+        // 写入文件的 Promise 封装（writeFile 会自动创建父目录）
+        function writeFilePromise(filePath, content) {
+            return new Promise((resolve, reject) => {
+                window.electronAPI.writeFile(filePath, content, (err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                });
+            });
+        }
+
+        // 用指定BGI文件夹启动一条龙
+        function executeDragonLaunchWithBgi(configName, bgiFolder) {
+            if (!configName) {
+                addLog('一条龙配置名为空', 'error');
+                return;
+            }
+            if (!bgiFolder || bgiFolder === '未选择' || bgiFolder === '未选择文件夹') {
+                showAlertModal('提示', '未配置有效的BGI文件夹');
+                addLog('未配置有效的BGI文件夹', 'error');
+                return;
+            }
+            // BGI一定要关，不需要用户选择
+            closeBGI();
+            // 调用closeGenshin函数，内部会检查复选框状态
+            closeGenshin();
+
+            if (window.electronAPI && window.electronAPI.startProcess) {
+                window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder).then(pid => {
+                    addLog(`一条龙 "${configName}" 启动成功（BGI: ${bgiFolder}），进程ID: ` + pid, 'success');
+                }).catch(error => {
+                    addLog('启动失败: ' + error, 'error');
+                });
+            } else {
+                addLog('无法启动，Electron API不可用', 'error');
+            }
+        }
+
+        // 处理服务端下发的路线测试任务
+        async function handleRouteTestDistribute(data) {
+            const schedule = findRouteTestSchedule();
+            if (!schedule) {
+                addLog('收到路线测试任务但未配置路线测试调度，忽略', 'warning');
+                return;
+            }
+            const cfg = schedule.trigger.config;
+            const testBgiFolder = cfg.testBgiFolder;
+            const testDragonName = cfg.testDragonName;
+            const routeFileName = data.routeFileName;
+            const routeContent = data.routeContent;
+
+            if (!testBgiFolder || testBgiFolder === '未选择文件夹' || testBgiFolder === '未选择') {
+                showAlertModal('提示', '路线测试调度未配置测试BGI文件夹');
+                return;
+            }
+            if (!testDragonName) {
+                showAlertModal('提示', '路线测试调度未配置测试一条龙');
+                return;
+            }
+            if (!routeFileName || !routeContent) {
+                showAlertModal('提示', '路线测试任务数据不完整');
+                return;
+            }
+
+            try {
+                // 1. 写路线文件到测试BGI的脚本目录（单路线测试脚本文件夹 RouteTest）
+                const routePath = testBgiFolder + '\\User\\JsScript\\RouteTest\\pathing\\' + routeFileName;
+                await writeFilePromise(routePath, routeContent);
+                addLog('路线文件已写入: ' + routePath, 'success');
+
+                // 2. 生成 OneDragon 配置
+                const oneDragonPath = testBgiFolder + '\\User\\OneDragon\\' + testDragonName + '.json';
+                await writeFilePromise(oneDragonPath, JSON.stringify(buildRouteTestOneDragonConfig(testDragonName), null, 2));
+                addLog('测试一条龙配置已生成: ' + oneDragonPath, 'success');
+
+                // 3. 生成 ScriptGroup 配置
+                const scriptGroupPath = testBgiFolder + '\\User\\ScriptGroup\\' + testDragonName + '.json';
+                await writeFilePromise(scriptGroupPath, JSON.stringify(buildRouteTestScriptGroupConfig(testDragonName, data), null, 2));
+                addLog('脚本组配置已生成: ' + scriptGroupPath, 'success');
+
+                // 4. 使用测试BGI启动测试一条龙
+                addLog('启动测试一条龙: ' + testDragonName + '（使用测试BGI）', 'info');
+                executeDragonLaunchWithBgi(testDragonName, testBgiFolder);
+            } catch (error) {
+                addLog('路线测试任务处理失败: ' + error, 'error');
+                showAlertModal('提示', '路线测试任务处理失败：' + error);
+            }
+        }
+
+        // 无可用路线任务时，启动兜底一条龙（使用兜底BGI）
+        function handleRouteTestFallback() {
+            const schedule = findRouteTestSchedule();
+            if (!schedule) {
+                addLog('未配置路线测试调度，无法启动兜底一条龙', 'warning');
+                return;
+            }
+            const cfg = schedule.trigger.config;
+            if (!cfg.fallbackBgiFolder || cfg.fallbackBgiFolder === '未选择文件夹' || cfg.fallbackBgiFolder === '未选择') {
+                showAlertModal('提示', '路线测试调度未配置兜底BGI文件夹');
+                return;
+            }
+            if (!cfg.fallbackDragonName) {
+                showAlertModal('提示', '路线测试调度未配置兜底一条龙');
+                return;
+            }
+            addLog('无可用路线任务，启动兜底一条龙: ' + cfg.fallbackDragonName + '（使用兜底BGI）', 'info');
+            executeDragonLaunchWithBgi(cfg.fallbackDragonName, cfg.fallbackBgiFolder);
+        }
+
+        // 构建测试一条龙的 OneDragon 配置
+        function buildRouteTestOneDragonConfig(name) {
+            return {
+                "TaskEnabledList": { [name]: true },
+                "Name": name,
+                "CraftingBenchCountry": "枫丹",
+                "AdventurersGuildCountry": "枫丹",
+                "PartyName": "",
+                "DomainName": "",
+                "WeeklyDomainEnabled": false,
+                "DailyRewardPartyName": "",
+                "MinResinToKeep": 0,
+                "SundayEverySelectedValue": "0",
+                "SundaySelectedValue": "0",
+                "SereniteaPotTpType": "地图传送",
+                "SecretTreasureObjects": [],
+                "LeyLineOneDragonMode": false,
+                "LeyLineRunMonday": true,
+                "LeyLineRunTuesday": true,
+                "LeyLineRunWednesday": true,
+                "LeyLineRunThursday": true,
+                "LeyLineRunFriday": true,
+                "LeyLineRunSaturday": true,
+                "LeyLineRunSunday": true,
+                "LeyLineMondayType": "",
+                "LeyLineMondayCountry": "",
+                "LeyLineTuesdayType": "",
+                "LeyLineTuesdayCountry": "",
+                "LeyLineWednesdayType": "",
+                "LeyLineWednesdayCountry": "",
+                "LeyLineThursdayType": "",
+                "LeyLineThursdayCountry": "",
+                "LeyLineFridayType": "",
+                "LeyLineFridayCountry": "",
+                "LeyLineSaturdayType": "",
+                "LeyLineSaturdayCountry": "",
+                "LeyLineSundayType": "",
+                "LeyLineSundayCountry": "",
+                "LeyLineRunCount": 0,
+                "LeyLineResinExhaustionMode": false,
+                "LeyLineOpenModeCountMin": false,
+                "MondayPartyName": "",
+                "MondayDomainName": "",
+                "TuesdayPartyName": "",
+                "TuesdayDomainName": "",
+                "WednesdayPartyName": "",
+                "WednesdayDomainName": "",
+                "ThursdayPartyName": "",
+                "ThursdayDomainName": "",
+                "FridayPartyName": "",
+                "FridayDomainName": "",
+                "SaturdayPartyName": "",
+                "SaturdayDomainName": "",
+                "SundayPartyName": "",
+                "SundayDomainName": "",
+                "CompletionAction": ""
+            };
+        }
+
+        // 构建测试脚本组的 ScriptGroup 配置（projects 指向 RouteTest 脚本，携带测试参数）
+        function buildRouteTestScriptGroupConfig(name, data) {
+            return {
+                "index": 1,
+                "name": name,
+                "config": {
+                    "pathingConfig": {
+                        "enabled": false,
+                        "autoPickEnabled": true,
+                        "partyName": "",
+                        "isVisitStatueBeforeSwitchParty": false,
+                        "mainAvatarIndex": "",
+                        "guardianAvatarIndex": "",
+                        "guardianElementalSkillSecondInterval": "",
+                        "guardianElementalSkillLongPress": false,
+                        "onlyInTeleportRecover": false,
+                        "jsScriptUseEnabled": true,
+                        "soloTaskUseFightEnabled": true,
+                        "skipDuring": "",
+                        "useGadgetIntervalMs": 0,
+                        "autoSkipEnabled": true,
+                        "autoRunEnabled": true,
+                        "autoEatEnabled": false,
+                        "autoEatConfig": {
+                            "enabled": false,
+                            "showNotification": true,
+                            "checkInterval": 150,
+                            "eatInterval": 1000,
+                            "testFoodName": null,
+                            "defaultAtkBoostingDishName": "炸萝卜丸子",
+                            "defaultAdventurersDishName": null,
+                            "defaultDefBoostingDishName": null
+                        },
+                        "hideOnRepeat": false,
+                        "taskCycleConfig": {
+                            "enable": false,
+                            "boundaryTime": 0,
+                            "isBoundaryTimeBasedOnServerTime": false,
+                            "cycle": 1,
+                            "index": 1
+                        },
+                        "taskCompletionSkipRuleConfig": {
+                            "enable": false,
+                            "skipPolicy": "GroupPhysicalPathSkipPolicy",
+                            "boundaryTime": 4,
+                            "isBoundaryTimeBasedOnServerTime": false,
+                            "lastRunGapSeconds": -1,
+                            "referencePoint": "EndTime"
+                        },
+                        "preExecutionPriorityConfig": {
+                            "enabled": false,
+                            "groupNames": "",
+                            "maxRetryCount": 1
+                        },
+                        "autoFightEnabled": false,
+                        "autoFightConfig": {
+                            "strategyName": "",
+                            "teamNames": "",
+                            "fightFinishDetectEnabled": true,
+                            "actionSchedulerByCd": "",
+                            "onlyPickEliteDropsMode": "Closed",
+                            "finishDetectConfig": {
+                                "battleEndProgressBarColor": "",
+                                "battleEndProgressBarColorTolerance": "",
+                                "fastCheckEnabled": false,
+                                "rotateFindEnemyEnabled": false,
+                                "fastCheckParams": "",
+                                "checkEndDelay": "",
+                                "beforeDetectDelay": "",
+                                "rotaryFactor": 10,
+                                "isFirstCheck": false,
+                                "checkBeforeBurst": false
+                            },
+                            "pickDropsAfterFightEnabled": false,
+                            "pickDropsAfterFightSeconds": 15,
+                            "battleThresholdForLoot": null,
+                            "kazuhaPickupEnabled": true,
+                            "qinDoublePickUp": false,
+                            "guardianAvatar": "",
+                            "guardianCombatSkip": false,
+                            "skipModel": false,
+                            "guardianAvatarHold": false,
+                            "burstEnabled": false,
+                            "kazuhaPartyName": "",
+                            "swimmingEnabled": false,
+                            "timeout": 120
+                        }
+                    },
+                    "shellConfig": {
+                        "disable": false,
+                        "timeout": 60,
+                        "noWindow": true,
+                        "output": true
+                    },
+                    "enableShellConfig": false
+                },
+                "projects": [
+                    {
+                        "name": "单路线测试",
+                        "folderName": "RouteTest",
+                        "jsScriptSettingsObject": {
+                            "routeFileName": data.routeFileName || "",
+                            "taskId": data.taskId || "",
+                            "statisticsMode": data.statisticsMode || "识别怪物",
+                            "activatePickup": data.activatePickup || false,
+                            "underwater": data.underwater || false,
+                            "timeRule": data.timeRule || ""
+                        },
+                        "index": 1,
+                        "type": "Javascript",
+                        "status": "Enabled",
+                        "schedule": "Daily",
+                        "runNum": 1,
+                        "allowJsNotification": true,
+                        "allowJsHTTPHash": ""
+                    }
+                ]
+            };
+        }
+
+        // 选择路线测试调度的监听命令文件
+        function selectCommandFileForRouteTest() {
+            if (window.electronAPI && window.electronAPI.selectFile) {
+                window.electronAPI.selectFile().then(filePath => {
+                    if (filePath) {
+                        document.getElementById('route-test-command-file').textContent = filePath;
+                        document.getElementById('schedule-modal').style.pointerEvents = 'auto';
+                    }
+                });
+            }
+        }
+
+        // 选择路线测试调度的BGI文件夹
+        function selectRouteTestFolder(elementId) {
+            if (window.electronAPI && window.electronAPI.selectFolder) {
+                window.electronAPI.selectFolder().then(folderPath => {
+                    if (folderPath) {
+                        document.getElementById(elementId).textContent = folderPath;
+                        document.getElementById('schedule-modal').style.pointerEvents = 'auto';
+                    }
+                });
             }
         }
 
@@ -3860,6 +4377,13 @@
                 document.getElementById('watch-keyword').value = schedule.trigger.config.keyword || '';
             } else if (schedule.trigger.type === 'file-command') {
                 document.getElementById('command-file-path').textContent = schedule.trigger.config.filePath || '未选择文件';
+            } else if (schedule.trigger.type === 'route-test') {
+                const cfg = schedule.trigger.config || {};
+                document.getElementById('route-test-command-file').textContent = cfg.filePath || '未选择文件';
+                document.getElementById('route-test-bgi-folder').textContent = cfg.testBgiFolder || '未选择文件夹';
+                document.getElementById('route-test-dragon').value = cfg.testDragonName || '';
+                document.getElementById('route-test-fallback-bgi-folder').textContent = cfg.fallbackBgiFolder || '未选择文件夹';
+                document.getElementById('route-test-fallback-dragon').value = cfg.fallbackDragonName || '';
             } else if (schedule.trigger.type === 'cron') {
                 document.getElementById('cron-expression').value = schedule.trigger.config.expression || '';
             } else if (schedule.trigger.type === 'trigger-ride') {
@@ -4259,6 +4783,7 @@
             document.getElementById('file-command-config').style.display = 'none';
             document.getElementById('cron-config').style.display = 'none';
             document.getElementById('trigger-ride-config').style.display = 'none';
+            document.getElementById('route-test-config').style.display = 'none';
             document.getElementById(`${triggerType}-config`).style.display = 'block';
             
             // 根据触发器类型限制可用的动作类型
@@ -4270,7 +4795,7 @@
             const actionConfigSection = document.getElementById('action-config');
             
             // 文件指令类型不需要执行动作配置
-            if (triggerType === 'file-command') {
+            if (triggerType === 'file-command' || triggerType === 'route-test') {
                 actionSection.style.display = 'none';
                 actionConfigSection.style.display = 'none';
                 actionTypeSelect.disabled = true;
@@ -4315,7 +4840,7 @@
             const actionSection = document.querySelector('#action-type').closest('.form-group');
             const actionConfigSection = document.getElementById('action-config');
             
-            if (triggerType === 'file-command') {
+            if (triggerType === 'file-command' || triggerType === 'route-test') {
                 // 文件指令类型不显示执行动作
                 actionSection.style.display = 'none';
                 actionConfigSection.style.display = 'none';
@@ -4516,6 +5041,36 @@
                     showAlertModal('提示', '请输入 UID');
                     return;
                 }
+            } else if (triggerType === 'route-test') {
+                triggerConfig = {
+                    filePath: document.getElementById('route-test-command-file').textContent,
+                    testBgiFolder: document.getElementById('route-test-bgi-folder').textContent,
+                    testDragonName: document.getElementById('route-test-dragon').value.trim(),
+                    fallbackBgiFolder: document.getElementById('route-test-fallback-bgi-folder').textContent,
+                    fallbackDragonName: document.getElementById('route-test-fallback-dragon').value.trim()
+                };
+                
+                // 验证配置
+                if (triggerConfig.filePath === '未选择文件') {
+                    showAlertModal('提示', '请选择监听命令文件');
+                    return;
+                }
+                if (triggerConfig.testBgiFolder === '未选择文件夹' || triggerConfig.testBgiFolder === '未选择') {
+                    showAlertModal('提示', '请选择测试BGI文件夹');
+                    return;
+                }
+                if (!triggerConfig.testDragonName) {
+                    showAlertModal('提示', '请输入测试一条龙配置');
+                    return;
+                }
+                if (triggerConfig.fallbackBgiFolder === '未选择文件夹' || triggerConfig.fallbackBgiFolder === '未选择') {
+                    showAlertModal('提示', '请选择兜底BGI文件夹');
+                    return;
+                }
+                if (!triggerConfig.fallbackDragonName) {
+                    showAlertModal('提示', '请输入兜底一条龙配置');
+                    return;
+                }
             }
             
             const actionType = document.getElementById('action-type').value;
@@ -4554,7 +5109,7 @@
             };
             
             // 文件指令类型不需要action
-            if (triggerType !== 'file-command') {
+            if (triggerType !== 'file-command' && triggerType !== 'route-test') {
                 scheduleData.action = {
                     type: actionType,
                     config: actionConfig
@@ -4649,6 +5204,8 @@
                     }
                 } else if (schedule.trigger.type === 'trigger-ride') {
                     triggerDesc = `触发发车: ${schedule.trigger.config.username} (${schedule.trigger.config.uid})`;
+                } else if (schedule.trigger.type === 'route-test') {
+                    triggerDesc = `路线测试: ${schedule.trigger.config.testDragonName} / 兜底 ${schedule.trigger.config.fallbackDragonName}`;
                 }
                 
                 let actionDesc = '';
