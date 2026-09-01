@@ -56,7 +56,7 @@
             color: #333;
             font-size: 0.9em;
         }
-        input[type="text"], input[type="password"], select {
+        input[type="text"], input[type="password"], input[type="number"], select {
             width: 100%;
             padding: 6px;
             border: 1px solid #bbdefb;
@@ -91,10 +91,10 @@
             background-color: #42A5F5;
         }
         .button-warning {
-            background-color: #ff9800;
+            background-color: #4d9cf7;
         }
         .button-warning:hover {
-            background-color: #f57c00;
+            background-color: #2563eb;
         }
         .output {
             background-color: #f0f8ff;
@@ -348,7 +348,7 @@
             border-bottom: none;
         }
         .room-user-item.online {
-            border-left: 4px solid #4CAF50;
+            border-left: 4px solid #60a5fa;
         }
         .user-item {
             padding: 10px;
@@ -438,7 +438,7 @@
             min-width: 60px;
             text-align: right;
             font-weight: bold;
-            color: #4CAF50;
+            color: #2563eb;
         }
         .room-permissions {
             margin-top: 10px;
@@ -450,6 +450,1038 @@
         }
         .permission-item input[type="checkbox"] {
             margin-right: 8px;
+        }
+
+        /* 管理端统一视觉与响应式布局 */
+        :root {
+            --admin-bg: #eef3f8;
+            --admin-surface: #ffffff;
+            --admin-surface-muted: #f7f9fc;
+            --admin-border: #d9e2ec;
+            --admin-text: #1f2937;
+            --admin-muted: #64748b;
+            --admin-primary: #2563eb;
+            --admin-primary-dark: #1d4ed8;
+            --admin-secondary: #3b82f6;
+            --admin-secondary-dark: #2563eb;
+            --admin-danger: #dc2626;
+            --admin-warning: #4d9cf7;
+            --admin-radius: 12px;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            padding: clamp(12px, 2vw, 32px);
+            background: var(--admin-bg);
+            color: var(--admin-text);
+            font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+            line-height: 1.5;
+        }
+
+        .container {
+            width: min(100%, 1440px);
+            max-width: 1440px;
+            padding: clamp(18px, 2.4vw, 32px);
+            background: var(--admin-surface-muted);
+            border: 1px solid var(--admin-border);
+            border-radius: 18px;
+            box-shadow: 0 16px 40px rgba(30, 64, 90, 0.08);
+        }
+
+        .login-container {
+            width: min(100%, 430px);
+            max-width: 430px;
+            margin: clamp(32px, 12vh, 120px) auto;
+            padding: clamp(24px, 4vw, 40px);
+            background: var(--admin-surface);
+            border: 1px solid var(--admin-border);
+            border-radius: 18px;
+            box-shadow: 0 18px 42px rgba(30, 64, 90, 0.12);
+        }
+
+        h1 {
+            margin: 0 0 24px;
+            color: #12304a;
+            font-size: clamp(1.55rem, 2.5vw, 2.15rem);
+            letter-spacing: 0;
+        }
+
+        #main-container > h1 {
+            text-align: left;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--admin-border);
+        }
+
+        h2 {
+            margin: 0 0 20px;
+            padding: 0;
+            color: #12304a;
+            font-size: clamp(1.2rem, 1.8vw, 1.5rem);
+            border: 0;
+        }
+
+        h3 {
+            margin: 0 0 12px;
+            color: #234b67;
+            font-size: 1rem;
+        }
+
+        .admin-nav {
+            display: grid !important;
+            grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+            gap: 10px !important;
+            margin: 0 0 24px !important;
+            padding: 12px;
+            background: var(--admin-surface);
+            border: 1px solid var(--admin-border);
+            border-radius: var(--admin-radius);
+        }
+
+        .admin-nav .button {
+            width: 100%;
+            min-height: 42px;
+            margin: 0 !important;
+        }
+
+        .panel {
+            padding: clamp(16px, 2vw, 26px);
+            background: var(--admin-surface);
+            border: 1px solid var(--admin-border);
+            border-radius: var(--admin-radius);
+            box-shadow: 0 8px 22px rgba(30, 64, 90, 0.05);
+        }
+
+        .button {
+            min-height: 42px;
+            padding: 10px 16px;
+            margin-right: 6px;
+            margin-bottom: 6px;
+            border-radius: 9px;
+            background: var(--admin-primary);
+            font-weight: 600;
+            letter-spacing: 0;
+            box-shadow: 0 2px 5px rgba(37, 99, 235, 0.16);
+            transition: background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .button:hover {
+            background: var(--admin-primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 5px 12px rgba(37, 99, 235, 0.2);
+        }
+
+        .button-secondary {
+            background: var(--admin-secondary);
+        }
+
+        .button-secondary:hover {
+            background: var(--admin-secondary-dark);
+        }
+
+        .button-danger {
+            background: var(--admin-danger);
+        }
+
+        .button-danger:hover {
+            background: #b91c1c;
+        }
+
+        .button-warning {
+            background: var(--admin-warning);
+        }
+
+        input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="file"], select {
+            min-height: 42px;
+            padding: 10px 12px !important;
+            color: var(--admin-text);
+            background: #fff;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 8px !important;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--admin-primary) !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+        }
+
+        label {
+            margin-bottom: 6px;
+            color: #334155;
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .room-management-container,
+        .user-management-container,
+        .logs-container {
+            display: grid !important;
+            grid-template-columns: minmax(250px, 0.9fr) minmax(0, 2fr);
+            gap: 22px !important;
+            align-items: start !important;
+        }
+
+        .room-management-container > div,
+        .user-management-container > div,
+        .logs-container > div {
+            width: auto !important;
+            min-width: 0 !important;
+        }
+
+        .room-management-container > div:first-child,
+        .user-management-container > div:first-child {
+            padding: 18px;
+            background: var(--admin-surface-muted);
+            border: 1px solid var(--admin-border);
+            border-radius: 10px;
+        }
+
+        .user-directory-panel,
+        .user-detail-panel {
+            min-height: 100%;
+        }
+
+        .user-workspace {
+            grid-template-columns: minmax(320px, 1.05fr) minmax(420px, 1.35fr);
+        }
+
+        .user-detail-panel {
+            padding: 18px;
+            background: var(--admin-surface-muted);
+            border: 1px solid var(--admin-border);
+            border-radius: 10px;
+        }
+
+        .user-section-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .user-section-heading h3 {
+            margin: 0;
+        }
+
+        .user-section-badge {
+            flex: 0 0 auto;
+            padding: 4px 9px;
+            color: #1d4ed8;
+            background: #e4f2ff;
+            border: 1px solid #b9dcff;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .user-create-section,
+        .user-select-section,
+        .user-info-section {
+            padding-top: 18px;
+            border-top: 1px solid var(--admin-border);
+        }
+
+        .user-create-section {
+            padding-top: 0;
+            border-top: 0;
+        }
+
+        .user-create-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        .user-create-row .form-group {
+            margin-bottom: 0;
+        }
+
+        .user-create-row .button {
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        .user-section-heading-compact {
+            margin-bottom: 14px;
+        }
+
+        .user-filter-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.35fr) minmax(130px, 0.75fr) minmax(150px, 0.9fr);
+            gap: 10px;
+        }
+
+        .user-filter-row .form-group {
+            margin-bottom: 16px;
+        }
+
+        .user-actions {
+            display: grid !important;
+            grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+            gap: 8px !important;
+            margin: 0;
+        }
+
+        .user-actions .button {
+            width: 100%;
+            min-height: 42px;
+            margin: 0;
+        }
+
+        .user-info-section {
+            margin-top: 18px;
+        }
+
+        .user-info-section #user-info-output,
+        .user-detail-panel #room-permissions-output {
+            min-height: 170px !important;
+            max-height: none !important;
+            overflow-y: auto;
+        }
+
+        .user-detail-panel #room-permissions-output {
+            flex: 1;
+        }
+
+        #user-info-output > div:first-child {
+            padding: 12px 14px;
+            color: #334155;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            line-height: 1.9;
+        }
+
+        #user-info-output > div:nth-child(2) {
+            margin-top: 16px !important;
+            padding-top: 16px;
+            border-top: 1px solid var(--admin-border);
+        }
+
+        #user-info-output > div:nth-child(2) h4,
+        #room-permissions-output h4 {
+            margin: 0 0 10px;
+            color: #234b67;
+        }
+
+        #user-info-output > div:nth-child(2) > div {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px !important;
+            align-items: center !important;
+        }
+
+        #user-info-output > div:nth-child(2) small {
+            color: var(--admin-muted) !important;
+        }
+
+        #room-permissions-output .permission-list,
+        #room-permissions-output .no-permissions {
+            min-height: 0 !important;
+            max-height: 320px !important;
+            padding: 8px 12px !important;
+            background: #fff;
+            border: 1px solid var(--admin-border) !important;
+            border-radius: 8px !important;
+            overflow-y: auto;
+        }
+
+        #room-permissions-output .permission-item {
+            min-height: 44px;
+            gap: 10px;
+            padding: 8px 0 !important;
+            border-bottom-color: #e7edf3 !important;
+        }
+
+        #room-permissions-output .permission-item span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #room-permissions-output .permission-item .button {
+            flex: 0 0 auto;
+            margin: 0;
+            padding: 7px 10px;
+            min-height: 36px;
+        }
+
+        #room-permissions-output .add-permission {
+            margin-top: 18px !important;
+            padding-top: 16px;
+            border-top: 1px solid var(--admin-border);
+        }
+
+        #room-permissions-output .add-permission > div {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px !important;
+            align-items: center !important;
+        }
+
+        #room-permissions-output .add-permission .button {
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        .output,
+        #room-properties-output,
+        #user-info-output,
+        #room-permissions-output,
+        #points-ranking-container,
+        #admin-gain-records-container,
+        #ride-records-container,
+        #log-content-container {
+            background: #fbfdff !important;
+            border: 1px solid var(--admin-border) !important;
+            border-radius: 10px !important;
+            box-shadow: inset 0 1px 2px rgba(30, 64, 90, 0.03);
+        }
+
+        #rooms-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .room-card {
+            padding: 18px;
+            background: #fbfdff;
+            border: 1px solid var(--admin-border);
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(30, 64, 90, 0.04);
+        }
+
+        .room-card h3 {
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--admin-border);
+        }
+
+        .points-ranking-container,
+        #admin-gain-records-container,
+        #ride-records-container,
+        #log-content-container {
+            max-height: min(62vh, 620px) !important;
+            padding: 14px !important;
+        }
+
+        .points-ranking-item {
+            min-height: 42px;
+            padding: 10px 4px;
+            border-bottom-color: #e7edf3;
+        }
+
+        .user-item {
+            padding: 12px 14px;
+            border-color: var(--admin-border);
+            border-radius: 9px;
+            box-shadow: 0 2px 7px rgba(30, 64, 90, 0.04);
+        }
+
+        .menu {
+            border-color: var(--admin-border);
+            border-radius: 9px;
+            box-shadow: 0 12px 26px rgba(15, 23, 42, 0.16);
+        }
+
+        .menu-item {
+            min-height: 42px;
+            padding: 10px 14px;
+        }
+
+        #ride-records-panel > div[style*="justify-content"],
+        #gain-records-panel > div[style*="display: flex"],
+        #logs-panel > div[style*="justify-content"] {
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+
+        #ride-records-panel > div[style*="flex-wrap"],
+        #logs-panel > div[style*="flex-wrap"] {
+            align-items: stretch !important;
+        }
+
+        #ride-records-panel > div[style*="flex-wrap"] > div,
+        #logs-panel > div[style*="flex-wrap"] > div {
+            min-width: 180px !important;
+        }
+
+        #version-management-panel > div[style*="display: flex"] {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 22px !important;
+            align-items: start !important;
+        }
+
+        #version-management-panel > div[style*="display: flex"] > div {
+            width: auto !important;
+            min-width: 0 !important;
+            padding: 18px;
+            background: var(--admin-surface-muted);
+            border: 1px solid var(--admin-border);
+            border-radius: 10px;
+        }
+
+        #log-content-container {
+            line-height: 1.65;
+            color: #334155;
+        }
+
+        @media (max-width: 980px) and (min-width: 761px) {
+            .user-workspace {
+                grid-template-columns: 1fr;
+            }
+
+            .user-detail-panel {
+                min-height: 420px;
+            }
+        }
+
+        @media (max-width: 760px) {
+            body {
+                padding: 8px;
+                font-size: 14px;
+            }
+
+            .container {
+                padding: 12px;
+                border-radius: 12px;
+            }
+
+            .login-container {
+                margin: 28px auto;
+                padding: 24px 18px;
+            }
+
+            #main-container > h1 {
+                margin-bottom: 16px;
+                padding-bottom: 14px;
+                font-size: 1.45rem;
+            }
+
+            .admin-nav {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px !important;
+                padding: 8px;
+            }
+
+            .admin-nav .button {
+                min-height: 44px;
+                padding: 9px 6px;
+                font-size: 0.85rem;
+            }
+
+            .panel {
+                padding: 14px 10px;
+                border-radius: 10px;
+            }
+
+            .panel h2 {
+                margin-bottom: 16px;
+                font-size: 1.2rem;
+            }
+
+            .room-management-container,
+            .user-management-container,
+            .logs-container,
+            #version-management-panel > div[style*="display: flex"] {
+                grid-template-columns: 1fr;
+                gap: 14px !important;
+            }
+
+            .room-management-container > div:first-child,
+            .user-management-container > div:first-child {
+                padding: 14px;
+            }
+
+            .user-detail-panel {
+                padding: 14px;
+            }
+
+            .user-create-row {
+                grid-template-columns: 1fr;
+            }
+
+            .user-filter-row {
+                grid-template-columns: 1fr;
+                gap: 0;
+            }
+
+            .user-create-row .button {
+                width: 100%;
+                margin: 0;
+            }
+
+            .user-actions {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .user-section-heading {
+                align-items: flex-start;
+            }
+
+            #user-info-output > div:nth-child(2) > div,
+            #room-permissions-output .add-permission > div {
+                grid-template-columns: 1fr;
+            }
+
+            #user-info-output > div:nth-child(2) > div .button,
+            #room-permissions-output .add-permission .button {
+                width: 100%;
+                margin: 0;
+            }
+
+            #room-permissions-output .permission-item {
+                align-items: flex-start !important;
+            }
+
+            #room-permissions-output .permission-item .button {
+                min-height: 38px;
+            }
+
+            #rooms-container {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .flex-row:not(.admin-nav) {
+                flex-wrap: wrap !important;
+                gap: 8px !important;
+            }
+
+            .flex-row:not(.admin-nav) .button {
+                flex: 1 1 132px;
+                margin: 0 !important;
+            }
+
+            #ride-records-panel > div[style*="justify-content"],
+            #gain-records-panel > div[style*="display: flex"],
+            #logs-panel > div[style*="justify-content"] {
+                align-items: stretch !important;
+            }
+
+            #ride-records-panel > div[style*="justify-content"] > div,
+            #gain-records-panel > div[style*="display: flex"] > div,
+            #logs-panel > div[style*="justify-content"] > div {
+                width: 100%;
+            }
+
+            #ride-records-panel > div[style*="justify-content"] .button,
+            #gain-records-panel > div[style*="display: flex"] .button,
+            #logs-panel > div[style*="justify-content"] .button {
+                width: 100%;
+                margin: 0 !important;
+            }
+
+            #ride-records-panel > div[style*="flex-wrap"] > div,
+            #logs-panel > div[style*="flex-wrap"] > div {
+                min-width: 100% !important;
+            }
+
+            #ride-records-panel > div[style*="flex-wrap"] .button,
+            #logs-panel > div[style*="flex-wrap"] .button {
+                flex: 1 1 calc(50% - 8px);
+                margin: 0 !important;
+            }
+
+            #admin-gain-records-container,
+            #points-ranking-container {
+                overflow-x: hidden !important;
+            }
+
+            /* 积分榜：移动端改为两行信息结构，避免固定列挤压账号 */
+            #points-ranking-container .points-ranking-item {
+                display: grid;
+                grid-template-columns: 30px minmax(0, 1fr) auto;
+                grid-template-rows: auto auto;
+                gap: 3px 8px;
+                min-width: 0;
+                padding: 10px 2px;
+            }
+
+            #points-ranking-container .points-ranking-rank {
+                grid-column: 1;
+                grid-row: 1 / 3;
+                align-self: center;
+                margin-right: 0;
+            }
+
+            #points-ranking-container .points-ranking-account {
+                grid-column: 2 / 4;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            #points-ranking-container .points-ranking-lastride {
+                grid-column: 2;
+                grid-row: 2;
+                min-width: 0;
+                text-align: left;
+                font-size: 0.72rem;
+                color: var(--admin-muted);
+            }
+
+            #points-ranking-container .points-ranking-lastride::before {
+                content: "上次发车：";
+                color: #94a3b8;
+            }
+
+            #points-ranking-container .points-ranking-points {
+                grid-column: 3;
+                grid-row: 2;
+                min-width: 0;
+                white-space: nowrap;
+                font-size: 0.85rem;
+            }
+
+            #points-ranking-container .points-ranking-points::before {
+                content: "积分 ";
+                color: #94a3b8;
+                font-size: 0.72rem;
+                font-weight: 400;
+            }
+
+            /* 收益榜：窄屏使用账号行 + 双收益行，数值列不再固定 90px */
+            #admin-gain-records-container .points-ranking-item {
+                display: grid;
+                grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr);
+                grid-template-rows: auto auto;
+                gap: 4px 8px;
+                min-width: 0;
+                padding: 10px 2px;
+            }
+
+            #admin-gain-records-container .points-ranking-item > span:nth-child(1) {
+                grid-column: 1;
+                grid-row: 1 / 3;
+                width: auto !important;
+                margin: 0 !important;
+                align-self: center;
+            }
+
+            #admin-gain-records-container .points-ranking-item > span:nth-child(2) {
+                grid-column: 2 / 4;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            #admin-gain-records-container .points-ranking-item > span:nth-child(3),
+            #admin-gain-records-container .points-ranking-item > span:nth-child(4) {
+                min-width: 0 !important;
+                margin-left: 0 !important;
+                overflow-wrap: anywhere;
+            }
+
+            #admin-gain-records-container .points-ranking-item > span:nth-child(3) {
+                grid-column: 2;
+                grid-row: 2;
+            }
+
+            #admin-gain-records-container .points-ranking-item > span:nth-child(4) {
+                grid-column: 3;
+                grid-row: 2;
+            }
+
+            #gain-records-panel > div[style*="display: flex"] {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 8px !important;
+            }
+
+            #gain-records-panel > div[style*="display: flex"] > div:first-child {
+                grid-column: 1 / -1;
+                display: grid !important;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 6px !important;
+                width: 100% !important;
+            }
+
+            #gain-records-panel > div[style*="display: flex"] > div:first-child .button {
+                width: 100% !important;
+                min-width: 0;
+                margin: 0 !important;
+                padding: 9px 4px;
+            }
+
+            #gain-records-panel #admin-gain-date-section {
+                grid-column: 1;
+                width: auto !important;
+                min-width: 0 !important;
+                margin: 0;
+            }
+
+            #gain-records-panel > div[style*="display: flex"] > .button {
+                grid-column: 2;
+                width: auto !important;
+                margin: 0 !important;
+                white-space: nowrap;
+            }
+
+        }
+
+        @media (max-width: 380px) {
+            #gain-records-panel > div[style*="display: flex"] {
+                grid-template-columns: 1fr;
+            }
+
+            #gain-records-panel #admin-gain-date-section,
+            #gain-records-panel > div[style*="display: flex"] > .button {
+                grid-column: 1;
+                width: 100% !important;
+            }
+        }
+
+        @media (min-width: 761px) {
+            #main-container > h1::after {
+                content: "运营控制台";
+                float: right;
+                margin-top: 7px;
+                color: var(--admin-muted);
+                font-size: 0.78rem;
+                font-weight: 500;
+            }
+        }
+
+        /* 淡蓝渐变主题覆盖 */
+        body {
+            background: linear-gradient(135deg, #eaf5ff 0%, #dceeff 48%, #f8fcff 100%);
+            background-attachment: fixed;
+        }
+
+        .container {
+            background: linear-gradient(145deg, #fbfdff 0%, #eef7ff 100%);
+            border-color: #c9def2;
+        }
+
+        .login-container {
+            background: linear-gradient(145deg, #ffffff 0%, #f0f8ff 100%);
+            border-color: #c9def2;
+            border-top: 4px solid #60a5fa;
+        }
+
+        #login-container > .button {
+            width: 100%;
+            margin: 8px 0 0;
+        }
+
+        #main-container > h1 {
+            color: #164e79;
+            border-bottom-color: #c9def2;
+        }
+
+        h2 {
+            color: #164e79;
+        }
+
+        h3 {
+            color: #245d88;
+        }
+
+        .admin-nav {
+            background: linear-gradient(135deg, #ffffff 0%, #edf7ff 100%);
+            border-color: #c9def2;
+        }
+
+        .panel {
+            background: linear-gradient(145deg, #ffffff 0%, #f2f8ff 100%);
+            border-color: #c9def2;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #4d9cf7 0%, #2563eb 100%);
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+        }
+
+        .button:hover {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+
+        .button-secondary {
+            background: linear-gradient(135deg, #8bc9ff 0%, #3b82f6 100%);
+        }
+
+        .button-secondary:hover {
+            background: linear-gradient(135deg, #6db8f5 0%, #2563eb 100%);
+        }
+
+        .button-danger {
+            background: linear-gradient(135deg, #f06b6b 0%, #dc2626 100%);
+        }
+
+        .button-danger:hover {
+            background: linear-gradient(135deg, #e95757 0%, #b91c1c 100%);
+        }
+
+        .admin-nav .button[onclick*="logout"] {
+            background: linear-gradient(135deg, #f06b6b 0%, #dc2626 100%) !important;
+        }
+
+        .admin-nav .button[onclick*="logout"]:hover {
+            background: linear-gradient(135deg, #e95757 0%, #b91c1c 100%) !important;
+        }
+
+        .button-warning {
+            background: linear-gradient(135deg, #a8d8ff 0%, #4d9cf7 100%);
+        }
+
+        input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="file"], select {
+            background: linear-gradient(180deg, #ffffff 0%, #f6fbff 100%);
+            border-color: #b9d3ea !important;
+        }
+
+        input[type="number"] {
+            font-variant-numeric: tabular-nums;
+        }
+
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            margin: 0;
+            opacity: 0.65;
+        }
+
+        input[type="file"] {
+            padding: 6px 8px !important;
+        }
+
+        input[type="file"]::file-selector-button {
+            margin-right: 8px;
+            padding: 7px 11px;
+            color: #1d4ed8;
+            background: #e4f2ff;
+            border: 1px solid #b9dcff;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #3b82f6;
+        }
+
+        progress {
+            width: 100%;
+            height: 10px;
+            overflow: hidden;
+            appearance: none;
+            background: #e4f2ff;
+            border: 0;
+            border-radius: 999px;
+        }
+
+        progress::-webkit-progress-bar {
+            background: #e4f2ff;
+            border-radius: 999px;
+        }
+
+        progress::-webkit-progress-value,
+        progress::-moz-progress-bar {
+            background: linear-gradient(90deg, #8bc9ff 0%, #3b82f6 100%);
+            border-radius: 999px;
+        }
+
+        .room-management-container > div:first-child,
+        .user-management-container > div:first-child,
+        .user-detail-panel,
+        #version-management-panel > div[style*="display: flex"] > div {
+            background: linear-gradient(145deg, #fafdff 0%, #edf7ff 100%);
+            border-color: #c9def2;
+        }
+
+        .room-card {
+            background: linear-gradient(145deg, #ffffff 0%, #eff8ff 100%) !important;
+            border-color: #c9def2;
+        }
+
+        .output,
+        #room-properties-output,
+        #user-info-output,
+        #room-permissions-output,
+        #points-ranking-container,
+        #admin-gain-records-container,
+        #ride-records-container,
+        #log-content-container {
+            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%) !important;
+            border-color: #c9def2 !important;
+        }
+
+        #user-info-output > div:first-child {
+            background: linear-gradient(145deg, #f8fcff 0%, #eaf5ff 100%);
+            border-color: #c9def2;
+        }
+
+        .user-section-badge {
+            color: #1d4ed8;
+            background: #e4f2ff;
+            border-color: #b9dcff;
+        }
+
+        .panel h2 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .panel h2::before {
+            content: "";
+            width: 5px;
+            height: 1.15em;
+            flex: 0 0 auto;
+            background: linear-gradient(180deg, #93cfff 0%, #2563eb 100%);
+            border-radius: 999px;
+        }
+
+        .room-card {
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .room-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 9px 20px rgba(37, 99, 235, 0.13);
+        }
+
+        .button:focus-visible,
+        input:focus-visible,
+        select:focus-visible {
+            outline: 3px solid rgba(96, 165, 250, 0.35);
+            outline-offset: 2px;
+        }
+
+        ::selection {
+            color: #12304a;
+            background: #cfe7ff;
+        }
+
+        ::-webkit-scrollbar {
+            width: 9px;
+            height: 9px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #eaf4ff;
+            border-radius: 999px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #9bc9f2;
+            border: 2px solid #eaf4ff;
+            border-radius: 999px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6daee8;
         }
     </style>
 </head>
@@ -483,7 +1515,7 @@
     <!-- 主界面 -->
     <div id="main-container" class="container hidden">
         <h1>莫酱妙妙屋管理</h1>
-        <div class="flex-row" style="margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+        <div class="flex-row admin-nav" style="margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
             <button class="button" onclick="switchToRoomsOverview()">房间总览</button>
             <button class="button" onclick="switchToPointsRanking()">积分排行榜</button>
             <button class="button" onclick="switchToGainRecords()">收益排行榜</button>
@@ -572,41 +1604,77 @@
         <!-- 用户管理面板 -->
         <div id="user-management-panel" class="panel">
             <h2>用户管理</h2>
-            <div class="user-management-container" style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch;">
-                <div style="flex: 1; min-width: 300px;">
-                    <h3>注册用户</h3>
-                    <div class="form-group">
-                        <label for="new-account-id">账号：</label>
-                        <input type="text" id="new-account-id" placeholder="请输入账号" style="width: 100%;">
+            <div class="user-management-container user-workspace" style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch;">
+                <div class="user-directory-panel" style="flex: 1; min-width: 300px;">
+                    <div class="user-section-heading">
+                        <div>
+                            <h3>用户目录</h3>
+                        </div>
+                        <span class="user-section-badge">账号管理</span>
                     </div>
-                    <button class="button" onclick="registerUser()">注册用户</button>
-                    <br><br>
-                    <h3>选择用户</h3>
-                    <div class="form-group">
-                        <label for="user-filter-input">筛选：</label>
-                        <input type="text" id="user-filter-input" placeholder="输入用户名进行筛选" onkeyup="filterUsers()" style="width: 100%;">
+
+                    <div class="user-create-section">
+                        <h3>注册用户</h3>
+                        <div class="user-create-row">
+                            <div class="form-group">
+                                <label for="new-account-id">账号：</label>
+                                <input type="text" id="new-account-id" placeholder="请输入账号" style="width: 100%;">
+                            </div>
+                            <button class="button" onclick="registerUser()">注册用户</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="admin-user-select">用户：</label>
-                        <select id="admin-user-select" onchange="loadUserInfo()" style="width: 100%;">
-                            <option value="">-- 选择用户 --</option>
-                        </select>
+
+                    <div class="user-select-section">
+                        <div class="user-section-heading user-section-heading-compact">
+                            <h3>选择用户</h3>
+                        </div>
+                        <div class="user-filter-row">
+                            <div class="form-group">
+                                <label for="user-filter-input">关键词筛选：</label>
+                                <input type="text" id="user-filter-input" placeholder="输入用户名进行筛选" onkeyup="filterUsers()" style="width: 100%;">
+                            </div>
+                            <div class="form-group">
+                                <label for="user-status-filter">账号状态：</label>
+                                <select id="user-status-filter" onchange="filterUsers()" style="width: 100%;">
+                                    <option value="all">全部状态</option>
+                                    <option value="normal">正常</option>
+                                    <option value="frozen">已冻结</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="user-last-ride-days-filter">超过天数：</label>
+                                <input type="number" id="user-last-ride-days-filter" min="0" step="1" value="0" placeholder="0 = 不限" oninput="filterUsers()" style="width: 100%;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="admin-user-select">用户：</label>
+                            <select id="admin-user-select" onchange="loadUserInfo()" style="width: 100%;">
+                                <option value="">-- 选择用户 --</option>
+                            </select>
+                        </div>
+                        <div class="flex-row user-actions" style="flex-wrap: wrap; gap: 10px;">
+                            <button class="button" onclick="loadAllAccounts()">刷新列表</button>
+                            <button class="button" onclick="resetPassword()">重置密码</button>
+                            <button id="freeze-user-btn" class="button button-danger" onclick="toggleFreezeUser()">冻结用户</button>
+                            <button id="safe-user-btn" class="button" onclick="toggleSafeUser(document.getElementById('admin-user-select').value)">信任用户</button>
+                            <button class="button button-danger" onclick="deleteUser()">删除用户</button>
+                        </div>
                     </div>
-                    <div class="flex-row" style="flex-wrap: wrap; gap: 10px;">
-                        <button class="button" onclick="loadAllAccounts()">刷新列表</button>
-                        <button class="button" onclick="resetPassword()">重置密码</button>
-                        <button id="freeze-user-btn" class="button button-danger" onclick="toggleFreezeUser()">冻结用户</button>
-                        <button id="safe-user-btn" class="button" onclick="toggleSafeUser(document.getElementById('admin-user-select').value)">信任用户</button>
-                        <button class="button button-danger" onclick="deleteUser()">删除用户</button>
-                    </div>
-                    <br><br>
-                    <h3>用户信息</h3>
-                    <div id="user-info-output" style="min-height: 100px; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
-                        请选择用户
+
+                    <div class="user-info-section">
+                        <h3>用户信息</h3>
+                        <div id="user-info-output" style="min-height: 100px; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
+                            请选择用户
+                        </div>
                     </div>
                 </div>
-                <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column;">
-                    <h3>房间权限管理</h3>
+                <div class="user-detail-panel" style="flex: 1; min-width: 300px; display: flex; flex-direction: column;">
+                    <div class="user-section-heading">
+                        <div>
+                            <h3>房间权限管理</h3>
+                        </div>
+                        <span class="user-section-badge">访问控制</span>
+                    </div>
                     <div class="output" id="room-permissions-output" style="flex: 1; min-height: 300px; padding: 15px; border: 1px solid #bbdefb; border-radius: 4px; background-color: white;">
                         请选择用户
                     </div>
@@ -643,7 +1711,7 @@
                     <select id="ride-filter-status" style="width: 100%; padding: 5px;" onchange="filterRideRecords()">
                         <option value="all">所有状态</option>
                         <option value="completed">已完成</option>
-                        <option value="waiting">等待中</option>
+                        <option value="waiting_for_ready">等待中</option>
                         <option value="crashed">已炸车</option>
                         <option value="cancelled">已取消</option>
                     </select>
@@ -1232,7 +2300,7 @@
                         });
                     }
                 } else if (data.type === 'all-rooms') {
-                    // 更新房间选择列表
+                    // 更新房间选择列表，并尽量保留当前选择
                     const roomSelects = [
                         document.getElementById('admin-room-select'),
                         document.getElementById('target-room')
@@ -1240,6 +2308,7 @@
                     
                     roomSelects.forEach(select => {
                         if (select) {
+                            const currentSelection = select.value;
                             select.innerHTML = '<option value="">-- 选择房间 --</option>';
                             let hasDZT = false;
                             data.data.forEach(room => {
@@ -1251,10 +2320,15 @@
                                 }
                                 select.appendChild(option);
                             });
-                            // 默认选择大澡堂
-                            if (hasDZT && select.id === 'admin-room-select') {
-                                select.value = '大澡堂';
-                                loadRoomUsers();
+                            if (select.id === 'admin-room-select') {
+                                if (currentSelection && data.data.includes(currentSelection)) {
+                                    select.value = currentSelection;
+                                } else if (hasDZT) {
+                                    select.value = '大澡堂';
+                                }
+                                if (select.value) {
+                                    loadRoomUsers();
+                                }
                             }
                         }
                     });
@@ -1353,25 +2427,34 @@
                     
                     Object.entries(data.data).forEach(([accountId, account]) => {
                         if (!account.isAdmin) {
-                            window.allUsers.push({ accountId, username: account.username });
-                            const option = document.createElement('option');
-                            option.value = accountId;
-                            option.textContent = account.username;
-                            userSelect.appendChild(option);
+                            window.allUsers.push({
+                                accountId,
+                                username: account.username,
+                                isFrozen: Boolean(account.isFrozen),
+                                lastRide: account.lastRide
+                            });
                         }
                     });
+                    // 按当前关键词和状态筛选条件生成用户选项
+                    filterUsers();
                 } else if (data.type === 'user-info') {
                     const output = document.getElementById('user-info-output');
                     if (!data.data) {
                         output.innerHTML = '请选择用户';
                         return;
                     }
+
+                    const cachedUser = (window.allUsers || []).find(user => user.accountId === data.data.account);
+                    const lastRide = data.data.lastRide ?? (cachedUser && cachedUser.lastRide);
+                    const lastRideAgeDays = getRideAgeDays(lastRide);
+                    const lastRideText = lastRideAgeDays === null ? '从未发车' : `${lastRideAgeDays}天`;
                     
                     output.innerHTML = `
                         <div>
                             <strong>账号：</strong> ${data.data.account}<br>
                             <strong>状态：</strong> ${data.data.isFrozen ? '已冻结' : '正常'}<br>
                             <strong>积分：</strong> ${data.data.points || 0}<br>
+                            <strong>距上次发车：</strong> ${lastRideText}<br>
                             <strong>信任状态：</strong> ${data.data.safe ? '是' : '否'}
                         </div>
                         <div style="margin-top: 15px;">
@@ -1468,7 +2551,7 @@
                     loadUserInfo();
                 } else if (data.type === 'success') {
                     // 积分编辑成功
-                    showAlertModal('错误', data.message);
+                    showAlertModal('成功', data.message);
                     // 重新加载用户信息
                     loadUserInfo();
                 } else if (data.type === 'error') {
@@ -1657,13 +2740,24 @@
             loadOnlineUsers();
         }
         
+        // 使用服务端统一的北京时间生成日期
+        function getBeijingDateString(date = new Date()) {
+            const parts = new Intl.DateTimeFormat('zh-CN', {
+                timeZone: 'Asia/Shanghai',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).formatToParts(date);
+            const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+            return `${values.year}-${values.month}-${values.day}`;
+        }
+
         // 切换到发车记录面板
         function switchToRideRecords() {
             hideAllPanels();
             document.getElementById('ride-records-panel').classList.add('active');
             // 设置默认日期为今天
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getBeijingDateString();
             document.getElementById('ride-record-date').value = todayStr;
             // 加载发车记录
             loadRideRecords();
@@ -1682,8 +2776,7 @@
             hideAllPanels();
             document.getElementById('gain-records-panel').classList.add('active');
             // 设置默认日期为今天
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getBeijingDateString();
             document.getElementById('admin-gain-date-input').value = todayStr;
             // 默认显示日榜
             switchAdminGainTab('day');
@@ -1764,8 +2857,8 @@
                 gainItem.innerHTML = `
                     <span class="points-ranking-rank">${index + 1}</span>
                     <span class="points-ranking-account">${item.accountId}-${item.gameAccount}</span>
-                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #4CAF50; margin-left: 10px;">${item.expGain.toLocaleString()}</span>
-                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #FF9800; margin-left: 15px;">${item.moraGain.toLocaleString()}</span>
+                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #3b82f6; margin-left: 10px;">${item.expGain.toLocaleString()}</span>
+                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #60a5fa; margin-left: 15px;">${item.moraGain.toLocaleString()}</span>
                 `;
                 container.appendChild(gainItem);
             });
@@ -1776,8 +2869,7 @@
             hideAllPanels();
             document.getElementById('logs-panel').classList.add('active');
             // 设置默认日期为今天
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getBeijingDateString();
             document.getElementById('log-date').value = todayStr;
             // 加载日志文件列表
             loadLogFilesByDate();
@@ -2034,6 +3126,14 @@
             return `${seconds}秒前`;
         }
 
+        // 计算用户距上次发车的完整天数
+        function getRideAgeDays(lastRide) {
+            if (!lastRide) return null;
+            const diff = Date.now() - lastRide;
+            if (diff < 0) return 0;
+            return Math.floor(diff / 86400000);
+        }
+
         // 更新积分排行榜显示
         function updatePointsRanking(ranking) {
             const container = document.getElementById('points-ranking-container');
@@ -2172,10 +3272,10 @@
                 let borderColor = '#bbdefb'; // 默认蓝色
                 if (record.status === 'completed') {
                     borderColor = '#1976D2'; // 蓝色
-                } else if (record.status === 'crashed' || record.status === 'canceled') {
+                } else if (record.status === 'crashed' || record.status === 'cancelled') {
                     borderColor = '#f44336'; // 红色
-                } else if (record.status === 'waiting') {
-                    borderColor = '#4CAF50'; // 绿色
+                } else if (record.status === 'waiting_for_ready') {
+                    borderColor = '#60a5fa'; // 淡蓝色
                 }
                 
                 recordDiv.style.cssText = `border: 2px solid ${borderColor}; border-radius: 8px; padding: 15px; margin-bottom: 20px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.1);`;
@@ -2225,7 +3325,7 @@
                         }
                         if (cr.myPosition) details.push(`<span style="color: #666;">位置: ${cr.myPosition}</span>`);
                         if (cr.enteredPlayers && cr.enteredPlayers.length > 0) {
-                            details.push(`<span style="color: #4CAF50;">已进入: ${cr.enteredPlayers.join(', ')}</span>`);
+                        details.push(`<span style="color: #3b82f6;">已进入: ${cr.enteredPlayers.join(', ')}</span>`);
                         }
                         if (cr.notEnteredPlayers && cr.notEnteredPlayers.length > 0) {
                             details.push(`<span style="color: #f44336;">未进入: ${cr.notEnteredPlayers.join(', ')}</span>`);
@@ -2310,6 +3410,10 @@
         // 存储搜索相关变量
         let searchResults = [];
         let currentSearchIndex = -1;
+
+        function escapeRegExp(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
         
         // 查找日志中的关键词
         function searchLog() {
@@ -2343,7 +3447,7 @@
             
             // 查找所有匹配项
             searchResults = [];
-            const regex = new RegExp(keyword, 'g');
+            const regex = new RegExp(escapeRegExp(keyword), 'g');
             let match;
             while ((match = regex.exec(contentToSearch)) !== null) {
                 searchResults.push(match.index);
@@ -2409,7 +3513,7 @@
             // 为每行添加行号容器，便于高亮整行
             const highlightedLines = lines.map((line, lineIndex) => {
                 // 高亮关键词，使用蓝色背景
-                const highlightedLine = line.replace(new RegExp(keyword, 'g'), match => {
+                const highlightedLine = line.replace(new RegExp(escapeRegExp(keyword), 'g'), match => {
                     return `<span class="search-highlight" data-line="${lineIndex}">${match}</span>`;
                 });
                 return `<div class="log-line" data-line="${lineIndex}">${highlightedLine}</div>`;
@@ -2509,17 +3613,6 @@
             }, 100);
         }
         
-        // 创建房间
-        function createRoom() {
-            const roomName = document.getElementById('new-room-name').value.trim();
-            if (!roomName) {
-                showAlertModal('提示', '请输入房间名称');
-                return;
-            }
-            
-            socket.emit('message', { type: 'create-room', roomName });
-        }
-        
         // 编辑房间名称
         function editRoomName() {
             const roomName = document.getElementById('admin-room-select').value;
@@ -2567,16 +3660,6 @@
             });
         }
         
-        // 加载房间用户
-        function loadRoomUsers() {
-            const roomName = document.getElementById('admin-room-select').value;
-            if (!roomName) {
-                return;
-            }
-            
-            socket.emit('message', { type: 'get-room-users', roomName });
-        }
-        
         // 切换用户状态
         function toggleUserStatus(uid, roomName, username) {
             socket.emit('message', { type: 'toggle-user-status', uid, roomName });
@@ -2594,6 +3677,9 @@
         // 过滤用户
         function filterUsers() {
             const filterInput = document.getElementById('user-filter-input').value.toLowerCase();
+            const statusFilter = document.getElementById('user-status-filter').value;
+            const lastRideDaysInput = document.getElementById('user-last-ride-days-filter');
+            const lastRideDays = Math.max(0, Number.parseInt(lastRideDaysInput.value, 10) || 0);
             const userSelect = document.getElementById('admin-user-select');
             
             userSelect.innerHTML = '<option value="">-- 选择用户 --</option>';
@@ -2603,7 +3689,16 @@
             }
             
             window.allUsers.forEach(user => {
-                if (user.username.toLowerCase().includes(filterInput)) {
+                const matchesKeyword = user.username.toLowerCase().includes(filterInput);
+                const matchesStatus = statusFilter === 'all'
+                    || (statusFilter === 'frozen' && user.isFrozen)
+                    || (statusFilter === 'normal' && !user.isFrozen);
+                const userRideAgeDays = getRideAgeDays(user.lastRide);
+                const matchesRideAge = lastRideDays === 0
+                    || userRideAgeDays === null
+                    || userRideAgeDays > lastRideDays;
+
+                if (matchesKeyword && matchesStatus && matchesRideAge) {
                     const option = document.createElement('option');
                     option.value = user.accountId;
                     option.textContent = user.username;
