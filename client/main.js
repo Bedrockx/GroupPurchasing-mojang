@@ -25,6 +25,13 @@ function createWindow() {
 
 app.on('ready', createWindow);
 
+// 渲染进程按用户配置请求最小化窗口。
+ipcMain.on('minimize-window', () => {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+    mainWindow.minimize();
+  }
+});
+
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') app.quit();
 });

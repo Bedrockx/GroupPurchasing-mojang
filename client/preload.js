@@ -2,6 +2,10 @@ const { ipcRenderer } = require('electron');
 
 // 直接暴露API给渲染进程（因为contextIsolation: false）
 window.electronAPI = {
+  // 窗口控制
+  minimizeWindow: () => {
+    ipcRenderer.send('minimize-window');
+  },
   // 获取应用数据路径
   getAppDataPath: () => {
     return ipcRenderer.sendSync('get-app-data-path');
