@@ -316,14 +316,14 @@
 
         /* 手机竖屏优先：与管理端保持淡蓝渐变视觉 */
         :root {
-            --mobile-bg: #e4f2fc;
+            --mobile-bg: #d9effc;
             --mobile-surface: #ffffff;
-            --mobile-surface-muted: #edf7ff;
-            --mobile-border: #b6d2e8;
-            --mobile-text: #24445f;
-            --mobile-muted: #607d94;
-            --mobile-primary: #3f8fd0;
-            --mobile-primary-light: #79bce5;
+            --mobile-surface-muted: #e8f5fd;
+            --mobile-border: #a5cce5;
+            --mobile-text: #214765;
+            --mobile-muted: #5d7e98;
+            --mobile-primary: #358dca;
+            --mobile-primary-light: #6bb5df;
             --mobile-danger: #dc2626;
             --mobile-radius: 14px;
         }
@@ -338,7 +338,7 @@
             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
             color: var(--mobile-text);
             font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
-            background: linear-gradient(160deg, #e1f1fc 0%, #d4eafb 48%, #f4fbff 100%);
+            background: linear-gradient(160deg, #d5edfb 0%, #bfdef3 48%, #eef8ff 100%);
             background-attachment: fixed;
         }
 
@@ -354,7 +354,7 @@
             margin-top: clamp(28px, 10vh, 96px);
             margin-bottom: 24px;
             padding: 26px 20px 22px;
-            background: linear-gradient(145deg, #ffffff 0%, #eef7ff 100%);
+            background: linear-gradient(145deg, #ffffff 0%, #e6f4fd 100%);
             border: 1px solid var(--mobile-border);
             border-top: 4px solid #60a5fa;
             border-radius: 18px;
@@ -387,7 +387,7 @@
             min-height: 44px;
             padding: 10px 12px !important;
             color: var(--mobile-text);
-            background: linear-gradient(180deg, #ffffff 0%, #f5faff 100%);
+            background: linear-gradient(180deg, #ffffff 0%, #eaf6fd 100%);
             border: 1px solid #b9d3ea !important;
             border-radius: 9px !important;
             font-size: 0.95rem;
@@ -411,7 +411,7 @@
             padding: 10px 15px;
             margin: 0;
             color: #fff;
-            background: linear-gradient(135deg, #75bce5 0%, #3f8fd0 100%);
+            background: linear-gradient(135deg, #69b8e3 0%, #358dca 100%);
             border-radius: 9px;
             font-size: 0.92rem;
             font-weight: 700;
@@ -420,18 +420,18 @@
         }
 
         .button:hover {
-            background: linear-gradient(135deg, #5aa7d6 0%, #3179b4 100%);
+            background: linear-gradient(135deg, #4b9fd0 0%, #2f76a8 100%);
             transform: translateY(-1px);
         }
 
         .button-secondary,
         .button-success {
-            background: linear-gradient(135deg, #a0d7f2 0%, #5aa7d6 100%);
+            background: linear-gradient(135deg, #91d0ef 0%, #4b9fd0 100%);
         }
 
         .button-secondary:hover,
         .button-success:hover {
-            background: linear-gradient(135deg, #82c5e6 0%, #478fbe 100%);
+            background: linear-gradient(135deg, #72b9df 0%, #3e86b4 100%);
         }
 
         .button-danger {
@@ -446,7 +446,7 @@
         .control-panel {
             min-height: 0;
             padding: 16px 14px;
-            background: linear-gradient(145deg, #ffffff 0%, #eff8ff 100%);
+            background: linear-gradient(145deg, #ffffff 0%, #e5f3fc 100%);
             border: 1px solid var(--mobile-border);
             border-radius: var(--mobile-radius);
             box-shadow: 0 10px 24px rgba(44, 104, 145, 0.12);
@@ -465,7 +465,7 @@
             max-height: 42vh;
             margin-top: 10px;
             overflow-y: auto;
-            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%);
+            background: linear-gradient(145deg, #ffffff 0%, #e8f5fd 100%);
             border: 1px solid var(--mobile-border);
             border-radius: 10px;
         }
@@ -591,7 +591,7 @@
             max-height: 58vh !important;
             padding: 10px !important;
             overflow-y: auto;
-            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%) !important;
+            background: linear-gradient(145deg, #ffffff 0%, #e8f5fd 100%) !important;
             border: 1px solid var(--mobile-border) !important;
             border-radius: 10px !important;
         }
@@ -604,7 +604,7 @@
         #mobile-my-ride-records-container > div {
             padding: 13px !important;
             margin-bottom: 10px !important;
-            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%) !important;
+            background: linear-gradient(145deg, #ffffff 0%, #e8f5fd 100%) !important;
             border: 1px solid var(--mobile-border) !important;
             border-radius: 10px !important;
             box-shadow: 0 3px 9px rgba(30, 64, 90, 0.05);
