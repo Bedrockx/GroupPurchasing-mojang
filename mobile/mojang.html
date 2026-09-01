@@ -313,6 +313,452 @@
             padding: 20px;
             color: #999;
         }
+
+        /* 手机竖屏优先：与管理端保持淡蓝渐变视觉 */
+        :root {
+            --mobile-bg: #eaf5ff;
+            --mobile-surface: #ffffff;
+            --mobile-surface-muted: #f1f8ff;
+            --mobile-border: #c9def2;
+            --mobile-text: #1f2937;
+            --mobile-muted: #64748b;
+            --mobile-primary: #2563eb;
+            --mobile-primary-light: #8bc9ff;
+            --mobile-danger: #dc2626;
+            --mobile-radius: 14px;
+        }
+
+        html {
+            min-height: 100%;
+            background: var(--mobile-bg);
+        }
+
+        body {
+            min-height: 100vh;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            color: var(--mobile-text);
+            font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(160deg, #e8f4ff 0%, #dceeff 48%, #f8fcff 100%);
+            background-attachment: fixed;
+        }
+
+        .login-container,
+        .mobile-container {
+            width: min(100%, 620px);
+            max-width: 620px;
+            margin: 0 auto;
+        }
+
+        .login-container {
+            min-height: 0;
+            margin-top: clamp(28px, 10vh, 96px);
+            margin-bottom: 24px;
+            padding: 26px 20px 22px;
+            background: linear-gradient(145deg, #ffffff 0%, #eef7ff 100%);
+            border: 1px solid var(--mobile-border);
+            border-top: 4px solid #60a5fa;
+            border-radius: 18px;
+            box-shadow: 0 16px 36px rgba(30, 64, 90, 0.12);
+        }
+
+        h1 {
+            color: #164e79;
+            font-size: clamp(1.6rem, 7vw, 2rem);
+            letter-spacing: 0;
+        }
+
+        h2 {
+            color: #164e79;
+            margin-bottom: 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--mobile-border);
+            font-size: 1.14rem;
+        }
+
+        h3 {
+            color: #245d88;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        input[type="date"],
+        select {
+            min-height: 44px;
+            padding: 10px 12px !important;
+            color: var(--mobile-text);
+            background: linear-gradient(180deg, #ffffff 0%, #f5faff 100%);
+            border: 1px solid #b9d3ea !important;
+            border-radius: 9px !important;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--mobile-primary) !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+        }
+
+        input[type="checkbox"] {
+            width: 17px;
+            height: 17px;
+            accent-color: #3b82f6;
+        }
+
+        .button {
+            min-height: 44px;
+            padding: 10px 15px;
+            margin: 0;
+            color: #fff;
+            background: linear-gradient(135deg, #4d9cf7 0%, #2563eb 100%);
+            border-radius: 9px;
+            font-size: 0.92rem;
+            font-weight: 700;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.18);
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .button:hover {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            transform: translateY(-1px);
+        }
+
+        .button-secondary,
+        .button-success {
+            background: linear-gradient(135deg, #8bc9ff 0%, #3b82f6 100%);
+        }
+
+        .button-secondary:hover,
+        .button-success:hover {
+            background: linear-gradient(135deg, #6db8f5 0%, #2563eb 100%);
+        }
+
+        .button-danger {
+            background: linear-gradient(135deg, #f06b6b 0%, #dc2626 100%);
+        }
+
+        .button-danger:hover {
+            background: linear-gradient(135deg, #e95757 0%, #b91c1c 100%);
+        }
+
+        .section,
+        .control-panel {
+            min-height: 0;
+            padding: 16px 14px;
+            background: linear-gradient(145deg, #ffffff 0%, #eff8ff 100%);
+            border: 1px solid var(--mobile-border);
+            border-radius: var(--mobile-radius);
+            box-shadow: 0 10px 24px rgba(30, 64, 90, 0.08);
+        }
+
+        .control-panel {
+            padding: 14px;
+        }
+
+        .connection-selector {
+            margin-bottom: 18px;
+        }
+
+        .connection-list,
+        .online-user-list {
+            max-height: 42vh;
+            margin-top: 10px;
+            overflow-y: auto;
+            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%);
+            border: 1px solid var(--mobile-border);
+            border-radius: 10px;
+        }
+
+        .connection-item,
+        .online-user-item {
+            min-height: 56px;
+            padding: 10px 12px;
+            gap: 8px;
+            border-bottom-color: #e3eef8;
+        }
+
+        .connection-item > div:first-child,
+        .online-user-item > div:first-child {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .connection-item.selected,
+        .online-user-item.selected,
+        .schedule-item.selected {
+            background: #dff0ff;
+        }
+
+        .button-row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .button-row .button {
+            width: 100%;
+        }
+
+        .nav-tabs {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 7px;
+            margin: 0 0 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--mobile-border);
+        }
+
+        .nav-tab {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 9px 8px;
+            color: var(--mobile-muted);
+            background: #f5faff;
+            border: 1px solid #d8e8f7;
+            border-radius: 8px;
+            font-size: 0.86rem;
+            text-align: center;
+        }
+
+        .nav-tab.active {
+            color: #1d4ed8;
+            background: #e2f1ff;
+            border-color: #9bc9f2;
+        }
+
+        .command-panel {
+            min-height: 0;
+        }
+
+        .mobile-integrated-header {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center !important;
+            margin: -4px -4px 12px !important;
+            padding: 0 0 10px !important;
+            background: transparent !important;
+            border-bottom: 1px solid var(--mobile-border) !important;
+        }
+
+        .mobile-integrated-tabs {
+            display: flex !important;
+            min-width: 0;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .mobile-integrated-tabs::-webkit-scrollbar {
+            display: none;
+        }
+
+        .mobile-nav-btn {
+            flex: 0 0 auto;
+            min-height: 42px;
+            padding: 9px 12px !important;
+            margin: 0 !important;
+            border: 1px solid transparent !important;
+            border-radius: 8px;
+            white-space: nowrap;
+        }
+
+        .mobile-nav-btn.active {
+            color: #1d4ed8 !important;
+            background: #e2f1ff !important;
+            border-color: #9bc9f2 !important;
+        }
+
+        .mobile-refresh-wrap .button {
+            min-width: 62px;
+            padding: 9px 10px;
+        }
+
+        .mobile-tab-content {
+            min-height: 0;
+            padding: 0;
+            background: transparent;
+            border: 0;
+        }
+
+        .mobile-tab-content > .points-ranking-container,
+        #mobile-ride-records-container,
+        #mobile-gain-records-container {
+            max-height: 58vh !important;
+            padding: 10px !important;
+            overflow-y: auto;
+            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%) !important;
+            border: 1px solid var(--mobile-border) !important;
+            border-radius: 10px !important;
+        }
+
+        #mobile-my-ride-records-container {
+            max-height: 58vh;
+            overflow-y: auto;
+        }
+
+        #mobile-my-ride-records-container > div {
+            padding: 13px !important;
+            margin-bottom: 10px !important;
+            background: linear-gradient(145deg, #ffffff 0%, #f4faff 100%) !important;
+            border: 1px solid var(--mobile-border) !important;
+            border-radius: 10px !important;
+            box-shadow: 0 3px 9px rgba(30, 64, 90, 0.05);
+        }
+
+        #mobile-my-ride-records-container > div > div:first-child {
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        #mobile-my-ride-records-container > div > div:first-child > span,
+        #mobile-my-ride-records-container > div > div:first-child > div {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #mobile-points-ranking-container > div {
+            display: grid !important;
+            grid-template-columns: 34px minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            min-height: 48px;
+            padding: 9px 4px !important;
+            border-bottom-color: #e3eef8 !important;
+        }
+
+        #mobile-points-ranking-container > div > span:first-child {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #mobile-points-ranking-container > div > span:last-child {
+            white-space: nowrap;
+        }
+
+        .mobile-ride-filters {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px !important;
+            margin-bottom: 10px !important;
+        }
+
+        .mobile-ride-filters select {
+            min-width: 0 !important;
+            width: 100%;
+        }
+
+        .mobile-gain-toolbar {
+            margin-bottom: 10px;
+        }
+
+        .mobile-gain-tabs {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px !important;
+            margin-bottom: 8px !important;
+        }
+
+        .mobile-gain-tabs .button {
+            width: 100%;
+            min-width: 0;
+            padding: 9px 4px;
+        }
+
+        .mobile-gain-date {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px !important;
+        }
+
+        .mobile-gain-date input {
+            min-width: 0 !important;
+            width: 100%;
+        }
+
+        .mobile-gain-date .button {
+            white-space: nowrap;
+        }
+
+        #mobile-gain-records-container {
+            overflow-x: hidden !important;
+        }
+
+        #mobile-gain-records-container table {
+            width: 100% !important;
+            table-layout: fixed !important;
+            font-size: 0.8rem !important;
+        }
+
+        #mobile-gain-records-container th,
+        #mobile-gain-records-container td {
+            width: auto !important;
+            min-width: 0 !important;
+            padding: 9px 5px !important;
+            overflow-wrap: anywhere;
+            white-space: normal !important;
+        }
+
+        #mobile-gain-records-container th:nth-child(1),
+        #mobile-gain-records-container td:nth-child(1) {
+            width: 40px !important;
+        }
+
+        #mobile-gain-records-container th:nth-child(3),
+        #mobile-gain-records-container td:nth-child(3),
+        #mobile-gain-records-container th:nth-child(4),
+        #mobile-gain-records-container td:nth-child(4) {
+            width: 64px !important;
+        }
+
+        .no-connection,
+        .loading {
+            padding: 18px 10px;
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border-top-color: #3b82f6;
+        }
+
+        .error-message,
+        .success-message {
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 360px) {
+            .login-container,
+            .mobile-container {
+                width: 100%;
+            }
+
+            .section,
+            .control-panel {
+                padding: 13px 11px;
+                border-radius: 12px;
+            }
+
+            .nav-tabs {
+                grid-template-columns: 1fr;
+            }
+
+            .mobile-gain-date {
+                grid-template-columns: 1fr;
+            }
+
+            .mobile-gain-date .button {
+                width: 100%;
+            }
+
+            .mobile-ride-filters {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -362,7 +808,7 @@
             </div>
 
             <!-- 命令导航 -->
-            <div class="nav-tabs">
+            <div class="nav-tabs command-tabs">
                 <div class="nav-tab active" data-tab="online" onclick="switchTab('online')">上线</div>
                 <div class="nav-tab" data-tab="offline" onclick="switchTab('offline')">下线</div>
                 <div class="nav-tab" data-tab="process" onclick="switchTab('process')">关闭进程</div>
@@ -471,16 +917,16 @@
         </div>
 
         <!-- 集成功能面板 -->
-        <div class="section">
+        <div class="section integrated-section">
             <!-- 导航栏 -->
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
-                <div style="display: flex;">
+            <div class="mobile-integrated-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
+                <div class="mobile-integrated-tabs" style="display: flex;">
                     <button onclick="mobileShowTab('rooms')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 8px; font-weight: bold;" class="mobile-nav-btn active">房间信息</button>
                     <button onclick="mobileShowTab('points')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">积分排行榜</button>
                     <button onclick="mobileShowTab('ride')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">发车记录</button>
                     <button onclick="mobileShowTab('gain')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">收益排行</button>
                 </div>
-                <div style="display: flex; gap: 10px;">
+                <div class="mobile-refresh-wrap" style="display: flex; gap: 10px;">
                     <button class="button button-secondary" onclick="mobileRefreshCurrentTab()">刷新</button>
                 </div>
             </div>
@@ -501,7 +947,7 @@
 
             <!-- 发车记录 -->
             <div id="mobile-ride" class="mobile-tab-content hidden">
-                <div style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: nowrap;">
+                <div class="mobile-ride-filters" style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: nowrap;">
                     <select id="mobile-my-ride-filter-status" style="padding: 5px; flex: 1; min-width: 100px;" onchange="filterMyRideRecords()">
                         <option value="all">所有状态</option>
                         <option value="completed">已完成</option>
@@ -520,13 +966,13 @@
 
             <!-- 收益排行 -->
             <div id="mobile-gain" class="mobile-tab-content hidden">
-                <div style="margin-bottom: 10px;">
-                    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                <div class="mobile-gain-toolbar" style="margin-bottom: 10px;">
+                    <div class="mobile-gain-tabs" style="display: flex; gap: 5px; margin-bottom: 10px;">
                         <button class="button button-secondary" id="mobile-gain-tab-day" onclick="switchMobileGainTab('day')" style="background-color: #1976D2; color: white; flex: 1;">日榜</button>
                         <button class="button button-secondary" id="mobile-gain-tab-week" onclick="switchMobileGainTab('week')" style="flex: 1;">周榜</button>
                         <button class="button button-secondary" id="mobile-gain-tab-version" onclick="switchMobileGainTab('version')" style="flex: 1;">版榜</button>
                     </div>
-                    <div id="mobile-gain-date-section" style="display: flex; gap: 10px;">
+                    <div id="mobile-gain-date-section" class="mobile-gain-date" style="display: flex; gap: 10px;">
                         <input type="date" id="mobile-gain-date-input" style="padding: 5px; flex: 1; min-width: 120px;">
                         <button class="button button-secondary" onclick="loadMobileGainRecords()">查询</button>
                     </div>
