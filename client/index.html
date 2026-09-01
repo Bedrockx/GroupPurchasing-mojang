@@ -444,7 +444,7 @@
 
         <!-- 自动更新进度显示（登录界面） -->
         <div id="login-update-progress" style="display: none; margin-top: 20px; padding: 15px; background-color: #f0f8ff; border: 1px solid #bbdefb; border-radius: 4px;">
-            <div style="margin-bottom: 10px; color: #1976D2; font-weight: bold;">自动更新团购中...</div>
+            <div style="margin-bottom: 10px; color: #1976D2; font-weight: bold;">启动更新检查中...</div>
             <div id="login-update-status" style="margin-bottom: 10px; font-size: 14px;">准备下载...</div>
             <div style="width: 100%; height: 20px; background-color: #f0f0f0; border-radius: 10px; overflow: hidden;">
                 <div id="login-progress-bar" style="height: 100%; background-color: #2f8bd1; width: 0%; transition: width 0.3s ease;"></div>
@@ -558,6 +558,10 @@
                     <button class="button" onclick="openChangePasswordModal()">修改密码</button>
                     <button class="button button-danger" onclick="logout()">退出登录</button>
                     <button class="button" onclick="openVersionCheckModal()">版本检查</button>
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px;">
+                        <input type="checkbox" id="auto-update-client">
+                        <label for="auto-update-client">启动时自动更新用户端</label>
+                    </div>
                     <div style="display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px;">
                         <input type="checkbox" id="auto-update-group" checked>
                         <label for="auto-update-group">自动更新团购</label>
@@ -983,8 +987,85 @@
         const SERVER_URL = 'http://121.41.2.163:41013';
         let config = {}; // 全局配置变量
         let startupMinimizeApplied = false; // 确保启动最小化只执行一次
+        let startupClientUpdateTriggered = false; // 防止启动更新后继续初始化主界面
+        let startupGroupUpdateAllowed = false; // 仅在检测到团购目标目录时执行自动更新
         let autoUpdateGroupCount = 0; // 记录自动更新团购的次数
         const MAX_AUTO_UPDATE_GROUP_COUNT = 5; // 最大自动更新团购次数
+        const CLIENT_UPDATE_STATE_KEY = 'mojang-client-update-state';
+
+        // 持久化启动更新状态，避免更新器失败后旧版本启动时反复重试。
+        function readClientUpdateState() {
+            try {
+                const rawState = localStorage.getItem(CLIENT_UPDATE_STATE_KEY);
+                if (!rawState) return null;
+                const state = JSON.parse(rawState);
+                if (!state || typeof state.targetVersion !== 'string' || compareVersions('0.0.0', state.targetVersion) === null) {
+                    localStorage.removeItem(CLIENT_UPDATE_STATE_KEY);
+                    return null;
+                }
+                return state;
+            } catch (error) {
+                console.warn('读取用户端更新状态失败:', error);
+                try { localStorage.removeItem(CLIENT_UPDATE_STATE_KEY); } catch (ignore) { /* 忽略存储异常 */ }
+                return null;
+            }
+        }
+
+        function markClientUpdatePending(targetVersion) {
+            if (typeof targetVersion !== 'string' || compareVersions('0.0.0', targetVersion) === null) {
+                addLog('无法记录用户端更新目标版本，跳过持久化状态', 'warning');
+                return false;
+            }
+            try {
+                localStorage.setItem(CLIENT_UPDATE_STATE_KEY, JSON.stringify({
+                    targetVersion,
+                    startedAt: new Date().toISOString()
+                }));
+                return true;
+            } catch (error) {
+                addLog(`记录用户端更新状态失败: ${error.message}`, 'warning');
+                return false;
+            }
+        }
+
+        function clearClientUpdateState(expectedVersion = null) {
+            try {
+                const state = readClientUpdateState();
+                if (!expectedVersion || !state || state.targetVersion === expectedVersion) {
+                    localStorage.removeItem(CLIENT_UPDATE_STATE_KEY);
+                }
+            } catch (error) {
+                console.warn('清理用户端更新状态失败:', error);
+            }
+        }
+
+        function clearCompletedClientUpdateState() {
+            const state = readClientUpdateState();
+            if (state && compareVersions(VERSION, state.targetVersion) >= 0) {
+                clearClientUpdateState(state.targetVersion);
+                addLog(`用户端已更新至 v${VERSION}，清理更新状态`, 'info');
+            }
+        }
+
+        function shouldSkipFailedClientAutoUpdate(serverVersion) {
+            const state = readClientUpdateState();
+            if (!state) return false;
+
+            const targetComparison = compareVersions(state.targetVersion, serverVersion);
+            if (targetComparison !== 0) {
+                // 服务端目标版本发生变化，旧的失败记录不再适用。
+                clearClientUpdateState(state.targetVersion);
+                return false;
+            }
+
+            if (compareVersions(VERSION, serverVersion) >= 0) {
+                clearClientUpdateState(state.targetVersion);
+                return false;
+            }
+
+            addLog(`上次用户端更新到 v${serverVersion} 未完成，跳过本次自动重试`, 'warning');
+            return true;
+        }
         
         // 重试队列管理
         const MAX_RETRY_COUNT = 10;
@@ -1759,6 +1840,7 @@
             document.getElementById('login-account').addEventListener('change', saveConfig);
             document.getElementById('login-password').addEventListener('change', saveConfig);
             document.getElementById('close-genshin-checkbox').addEventListener('change', saveConfig);
+            document.getElementById('auto-update-client').addEventListener('change', saveConfig);
             document.getElementById('auto-update-group').addEventListener('change', saveConfig);
             document.getElementById('minimize-on-start').addEventListener('change', saveConfig);
             
@@ -2382,6 +2464,8 @@
                                 if (config.autoUpdateGroup !== undefined) {
                                     document.getElementById('auto-update-group').checked = config.autoUpdateGroup;
                                 }
+                                // 新配置默认关闭，避免老配置在未明确选择时自动更新用户端
+                                document.getElementById('auto-update-client').checked = config.autoUpdateClient === true;
                                 if (config.minimizeOnStart !== undefined) {
                                     document.getElementById('minimize-on-start').checked = config.minimizeOnStart;
                                 }
@@ -2461,6 +2545,7 @@
                     bgiFolder: document.getElementById('bgi-folder-path').textContent,
                     dragonName: document.getElementById('dragon-name').value,
                     closeGenshin: document.getElementById('close-genshin-checkbox').checked,
+                    autoUpdateClient: document.getElementById('auto-update-client').checked,
                     autoUpdateGroup: document.getElementById('auto-update-group').checked,
                     minimizeOnStart: document.getElementById('minimize-on-start').checked,
                     connectionId: connectionId,
@@ -5041,55 +5126,48 @@
             // 先加载配置
             await loadConfig();
             addLog('配置加载完成', 'info');
-            
-            // 检查是否勾选了自动更新团购
-            const autoUpdateChecked = document.getElementById('auto-update-group')?.checked;
-            
-            if (!autoUpdateChecked) {
-                // 直接进入主界面
-                showMainApp();
-                return;
-            }
-            
+            clearCompletedClientUpdateState();
+
+            startupClientUpdateTriggered = false;
+            const autoUpdateClientChecked = document.getElementById('auto-update-client')?.checked === true;
+            const autoUpdateGroupChecked = document.getElementById('auto-update-group')?.checked === true;
+
             // 检查自动更新团购次数
-            if (autoUpdateGroupCount >= MAX_AUTO_UPDATE_GROUP_COUNT) {
+            if (autoUpdateGroupChecked && autoUpdateGroupCount >= MAX_AUTO_UPDATE_GROUP_COUNT) {
                 addLog('自动更新团购次数已达上限，禁用自动检查', 'warning');
                 const autoUpdateCheckbox = document.getElementById('auto-update-group');
                 if (autoUpdateCheckbox) autoUpdateCheckbox.checked = false;
                 saveConfig();
-                showMainApp();
-                return;
             }
-            
-            // 有自动更新团购，先检查一下是否有有效路径
-            const path = require('path');
-            const fs = require('fs');
-            
+
+            // 只有启用团购自动更新时才需要检查本地团购目录
             let foundPath = false;
-            
-            // 优先在调度中寻找
-            const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-            for (const schedule of schedules) {
-                if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                    foundPath = true;
-                    break;
+
+            if (autoUpdateGroupChecked && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
+                // 优先在调度中寻找
+                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
+                for (const schedule of schedules) {
+                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
+                        foundPath = true;
+                        break;
+                    }
+                }
+
+                // 如果没有，检查BGI文件夹
+                if (!foundPath) {
+                    const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
+                    if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                        foundPath = true;
+                    }
                 }
             }
-            
-            // 如果没有，检查BGI文件夹
-            if (!foundPath) {
-                const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                    foundPath = true;
-                }
-            }
-            
-            if (!foundPath) {
-                addLog('无有效文件路径，跳过自动更新团购', 'info');
+
+            startupGroupUpdateAllowed = autoUpdateGroupChecked && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT && foundPath;
+            if (!autoUpdateClientChecked && !startupGroupUpdateAllowed) {
                 showMainApp();
                 return;
             }
-            
+
             // 显示更新界面
             showUpdateUI();
             
@@ -5101,7 +5179,7 @@
             
             // 设置超时保护
             autoUpdateTimeoutId = setTimeout(() => {
-                addLog('获取版本信息超时，跳过自动更新', 'warning');
+                addLog('获取版本信息超时，跳过启动自动更新', 'warning');
                 cleanupAutoUpdate();
                 hideUpdateUI();
                 showMainApp();
@@ -5159,15 +5237,41 @@
                 const localClientVersion = VERSION;
                 addLog(`本地用户端版本: ${localClientVersion}`, 'info');
                 
+                // 用户端启动更新优先于团购更新，避免旧版本继续执行后续初始化
+                const autoUpdateClientChecked = document.getElementById('auto-update-client')?.checked === true;
+                const clientComparison = compareVersions(VERSION, serverVersion);
+                const skipFailedClientAutoUpdate = autoUpdateClientChecked && shouldSkipFailedClientAutoUpdate(serverVersion);
+                if (autoUpdateClientChecked && clientComparison < 0 && !skipFailedClientAutoUpdate) {
+                    addLog(`用户端版本 ${VERSION} 落后于服务器版本 ${serverVersion}，准备启动更新`, 'info');
+                    updateUpdateStatus(`发现用户端新版本 v${serverVersion}，准备下载...`);
+                    try {
+                        await downloadUpdate(`${SERVER_URL}/client/mojang.zip`, {
+                            startup: true,
+                            targetVersion: serverVersion
+                        });
+                    } catch (error) {
+                        addLog(`启动自动更新用户端失败: ${error.message}`, 'error');
+                    }
+                    if (startupClientUpdateTriggered) return;
+                } else if (skipFailedClientAutoUpdate) {
+                    updateUpdateStatus(`上次更新未完成，已跳过自动重试（当前 v${VERSION}）`);
+                }
+
                 // 获取本地团购版本
-                const localGroupVersion = checkLocalGroupVersion();
+                let localGroupVersion = null;
+                if (startupGroupUpdateAllowed) {
+                    try {
+                        localGroupVersion = checkLocalGroupVersion();
+                    } catch (error) {
+                        addLog(`读取本地团购版本失败: ${error.message}`, 'warning');
+                    }
+                }
                 
                 // 检查版本检查窗口是否打开
                 const versionCheckModal = document.getElementById('version-check-modal');
                 const isModalOpen = versionCheckModal && versionCheckModal.style.display === 'flex';
                 
-                // 检查用户端是否需要更新
-                const clientComparison = compareVersions(localClientVersion, serverVersion);
+                // 检查用户端是否需要更新（启动自动更新关闭时，仅展示手动更新状态）
                 if (clientComparison < 0) {
                     addLog(`用户端版本 ${localClientVersion} 落后于服务器版本 ${serverVersion}，可以更新`, 'info');
                     if (isModalOpen) {
@@ -5252,7 +5356,7 @@
                 }
                 
                 // 检查是否需要自动更新团购
-                if (serverGroupVersion && compareVersions('0.0.0', serverGroupVersion) !== null && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
+                if (startupGroupUpdateAllowed && serverGroupVersion && compareVersions('0.0.0', serverGroupVersion) !== null && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
                     let needUpdate = false;
                     if (!localGroupVersion) {
                         needUpdate = true;
@@ -5572,13 +5676,18 @@
                     throw new Error(`找不到updater.ps1脚本，路径: ${updaterPath}`);
                 }
                 
-                const { execSync } = require('child_process');
+                const { execFileSync } = require('child_process');
 
                 updateStatus.textContent = '正在解压更新包...';
 
                 // 执行更新脚本
                 addLog('开始执行更新脚本...', 'info');
-                execSync(`powershell.exe -ExecutionPolicy Bypass -File "${updaterPath}" "${tempZipPath}" "${targetDir}" groupPurchasing false`, {
+                execFileSync('powershell.exe', [
+                    '-NoProfile', '-NonInteractive',
+                    '-ExecutionPolicy', 'Bypass',
+                    '-File', updaterPath,
+                    tempZipPath, targetDir, 'groupPurchasing', 'false'
+                ], {
                     stdio: 'inherit'
                 });
                 addLog('更新脚本执行完成', 'info');
@@ -5647,7 +5756,8 @@
         }
         
         // 下载更新
-        async function downloadUpdate(updateUrl) {
+        async function downloadUpdate(updateUrl, options = {}) {
+            const isStartupUpdate = options.startup === true;
             try {
                 // 终止之前的下载（如果有）
                 if (currentDownloadController) {
@@ -5660,14 +5770,24 @@
                 currentDownloadController = new AbortController();
                 const signal = currentDownloadController.signal;
                 
-                document.getElementById('update-status').style.display = 'block';
-                document.getElementById('update-status-text').textContent = '准备下载...';
-                document.getElementById('download-progress').style.display = 'block';
-                document.getElementById('update-button').disabled = true;
-                
-                // 显示下载进度
-                const progressBar = document.getElementById('progress-bar');
-                const progressText = document.getElementById('progress-text');
+                let progressBar;
+                let progressText;
+                let updateStatus;
+                if (isStartupUpdate) {
+                    showUpdateUI();
+                    progressBar = document.getElementById('login-progress-bar');
+                    progressText = document.getElementById('login-progress-text');
+                    updateStatus = document.getElementById('login-update-status');
+                    updateStatus.textContent = '准备下载用户端更新...';
+                } else {
+                    document.getElementById('update-status').style.display = 'block';
+                    document.getElementById('update-status-text').textContent = '准备下载...';
+                    document.getElementById('download-progress').style.display = 'block';
+                    document.getElementById('update-button').disabled = true;
+                    progressBar = document.getElementById('progress-bar');
+                    progressText = document.getElementById('progress-text');
+                    updateStatus = document.getElementById('update-status-text');
+                }
                 
                 // 下载更新包
                 const response = await fetch(updateUrl, {
@@ -5719,7 +5839,7 @@
                             const downloaded = formatFileSize(receivedSize);
                             const total = formatFileSize(totalSize);
                             
-                            document.getElementById('update-status-text').textContent = `下载中... ${progress}% (${downloaded}/${total}, ${speed})`;
+                            updateStatus.textContent = `下载中... ${progress}% (${downloaded}/${total}, ${speed})`;
                             
                             lastTime = currentTime;
                             lastReceivedSize = receivedSize;
@@ -5730,7 +5850,7 @@
                 // 合并二进制数据
                 const blob = new Blob(chunks);
                 
-                document.getElementById('update-status-text').textContent = '下载完成，保存文件...';
+                updateStatus.textContent = '下载完成，保存文件...';
                 
                 // 直接保存到 mojang 文件夹
                 if (typeof require !== 'undefined') {
@@ -5775,8 +5895,14 @@
                         fs.writeFileSync(updateZipPath, buffer);
                         addLog('文件保存成功', 'info');
                         
-                        document.getElementById('update-status-text').textContent = '文件保存完成，准备更新...';
+                        updateStatus.textContent = '文件保存完成，准备更新...';
                         
+                        // 启动更新器前标记流程，避免版本检查完成后继续进入主界面
+                        if (isStartupUpdate) {
+                            markClientUpdatePending(options.targetVersion);
+                            startupClientUpdateTriggered = true;
+                        }
+
                         // 自动启动更新器
                         setTimeout(() => {
                             try {
@@ -5794,48 +5920,72 @@
                                 addLog(`启动更新器: ${updaterPath}`, 'info');
                                 addLog(`参数: ${updateZipPath} ${currentDir}`, 'info');
                                 
-                                // 使用 start 命令启动新的独立窗口运行 PowerShell 脚本
-                                const { exec } = require('child_process');
-                                const command = `start "" /wait powershell.exe -ExecutionPolicy Bypass -File "${updaterPath}" "${updateZipPath}" "${currentDir}" main true`;
-                                
-                                addLog(`执行命令: ${command}`, 'info');
-                                
-                                // 启动更新器
-                                exec(command, (error, stdout, stderr) => {
-                                    // 更新器执行完成后的回调
-                                    if (error) {
-                                        addLog(`更新器执行出错: ${error.message}`, 'error');
-                                    } else {
-                                        addLog('更新器执行完成', 'info');
-                                    }
+                                // 通过参数数组启动独立更新器，避免路径空格和命令行转义问题
+                                const { spawn } = require('child_process');
+                                const updaterProcess = spawn('powershell.exe', [
+                                    '-NoProfile', '-NonInteractive',
+                                    '-ExecutionPolicy', 'Bypass',
+                                    '-File', updaterPath,
+                                    updateZipPath, currentDir, 'main', 'true'
+                                ], {
+                                    detached: true,
+                                    stdio: 'ignore',
+                                    windowsHide: true
                                 });
-                                
-                                // 关闭当前应用
-                                setTimeout(() => {
-                                    addLog('关闭当前应用...', 'info');
-                                    if (typeof window !== 'undefined' && window.close) {
-                                        window.close();
-                                    } else if (typeof process !== 'undefined' && process.exit) {
-                                        process.exit(0);
-                                    } else if (typeof require !== 'undefined') {
-                                        try {
-                                            const electron = require('electron');
-                                            if (electron.app) {
-                                                electron.app.quit();
+                                let updaterStarted = false;
+                                updaterProcess.once('spawn', () => {
+                                    updaterStarted = true;
+                                    updaterProcess.unref();
+                                    addLog('更新器启动成功，准备关闭当前应用', 'info');
+                                    setTimeout(() => {
+                                        addLog('关闭当前应用...', 'info');
+                                        if (typeof window !== 'undefined' && window.close) {
+                                            window.close();
+                                        } else if (typeof process !== 'undefined' && process.exit) {
+                                            process.exit(0);
+                                        } else if (typeof require !== 'undefined') {
+                                            try {
+                                                const electron = require('electron');
+                                                if (electron.app) electron.app.quit();
+                                            } catch (e) {
+                                                addLog(`关闭应用失败: ${e.message}`, 'error');
                                             }
-                                        } catch (e) {
-                                            addLog(`关闭应用失败: ${e.message}`, 'error');
+                                        }
+                                    }, 1000);
+                                });
+                                updaterProcess.once('error', (error) => {
+                                    addLog(`启动更新器失败: ${error.message}`, 'error');
+                                    if (!updaterStarted) {
+                                        clearClientUpdateState(options.targetVersion || null);
+                                        startupClientUpdateTriggered = false;
+                                        reconnectDisabled = false;
+                                        if (isStartupUpdate) {
+                                            hideUpdateUI();
+                                            showMainApp();
+                                        } else {
+                                            closeVersionCheckModal();
                                         }
                                     }
-                                }, 1000);
-                                
+                                });
+
                             } catch (error) {
                                 addLog(`启动更新器失败: ${error.message}`, 'error');
+                                clearClientUpdateState(options.targetVersion || null);
+                                startupClientUpdateTriggered = false;
+                                reconnectDisabled = false;
+                                if (isStartupUpdate) {
+                                    hideUpdateUI();
+                                    showMainApp();
+                                    return;
+                                }
                                 alert('启动更新器失败，请手动运行 updater.ps1 文件。');
                                 closeVersionCheckModal();
                             }
                         }, 1000);
                     } catch (error) {
+                        if (isStartupUpdate) {
+                            throw error;
+                        }
                         addLog(`保存文件失败: ${error.message}`, 'error');
                         // 回退到浏览器下载
                         const url = URL.createObjectURL(blob);
@@ -5851,6 +6001,9 @@
                         closeVersionCheckModal();
                     }
                 } else {
+                    if (isStartupUpdate) {
+                        throw new Error('当前环境不支持启动自动更新');
+                    }
                     // 其他环境，使用浏览器下载
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -5873,6 +6026,11 @@
                 currentDownloadController = null;
                 
                 addLog(`更新失败: ${error.message}`, 'error');
+                if (isStartupUpdate) {
+                    reconnectDisabled = false;
+                    updateUpdateStatus(`用户端更新失败：${error.message}`);
+                    throw error;
+                }
                 document.getElementById('update-status-text').textContent = '更新失败';
                 document.getElementById('update-button').textContent = '检查更新';
                 document.getElementById('update-button').disabled = false;
