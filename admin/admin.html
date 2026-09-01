@@ -1874,6 +1874,7 @@
         let socket;
         const SERVER_URL = 'http://121.41.2.163:41013';
         let currentAccount = null;
+        let currentPassword = null;
         let currentUser = null; // 当前操作的用户
         let currentRoom = null; // 当前操作的房间
         let moveUserInfo = null; // 移动用户的信息
@@ -1938,22 +1939,32 @@
             }
             
             // 创建登录连接
-            const loginSocket = io(SERVER_URL);
+            const loginSocket = io(SERVER_URL, { reconnection: false });
             
             loginSocket.on('connect', function() {
                 // 发送管理员登录请求
                 loginSocket.emit('message', {
-                    type: 'admin-login',
-                    account: account,
-                    password: password
+                    type: 'login',
+                    accountId: account,
+                    isAdminLogin: true
                 });
             });
             
             // 统一监听消息事件
             loginSocket.on('message', function(data) {
-                if (data.type === 'login-success') {
+                if (data.type === 'login-key') {
+                    const hashedPassword = CryptoJS.SHA256(password + data.key).toString();
+                    loginSocket.emit('message', {
+                        type: 'login',
+                        accountId: account,
+                        password: hashedPassword,
+                        key: data.key,
+                        isAdminLogin: true
+                    });
+                } else if (data.type === 'login-success') {
                     if (data.isAdmin) {
                         currentAccount = account;
+                        currentPassword = password;
                         
                         // 保存登录信息到localStorage
                         localStorage.setItem('admin_account', account);
@@ -1974,7 +1985,7 @@
                         loginError.textContent = '该账号不是管理员账号';
                         loginSocket.disconnect();
                     }
-                } else if (data.type === 'login-failed') {
+                } else if (data.type === 'login-failed' || data.type === 'login-error') {
                     loginError.textContent = '账号或密码错误';
                     loginSocket.disconnect();
                 }
@@ -2037,18 +2048,16 @@
         // 初始化
         function init() {
             // 连接服务器
-            socket = io(SERVER_URL, {
-                query: { type: 'admin', account: currentAccount }
-            });
+            socket = io(SERVER_URL, { reconnection: false });
             
             socket.on('connect', function() {
                 console.log('Admin connected to server');
-                // 自动刷新房间状态
-                refreshRoomsStatus();
-                // 加载所有用户
-                loadAllAccounts();
-                // 加载所有房间
-                loadAllRooms();
+                // 主连接必须再次完成管理员认证，不使用未校验的握手参数重连
+                socket.emit('message', {
+                    type: 'login',
+                    accountId: currentAccount,
+                    isAdminLogin: true
+                });
             });
             
             socket.on('connect_error', function(error) {
@@ -2058,6 +2067,25 @@
             // 统一监听消息事件
             socket.on('message', function(data) {
                 console.log('收到消息:', data);
+
+                if (data.type === 'login-key') {
+                    const hashedPassword = CryptoJS.SHA256(currentPassword + data.key).toString();
+                    socket.emit('message', {
+                        type: 'login',
+                        accountId: currentAccount,
+                        password: hashedPassword,
+                        key: data.key,
+                        isAdminLogin: true
+                    });
+                    return;
+                }
+
+                if (data.type === 'login-success' && data.isAdmin) {
+                    refreshRoomsStatus();
+                    loadAllAccounts();
+                    loadAllRooms();
+                    return;
+                }
                 
                 if (data.type === 'rooms-status') {
                     const roomsContainer = document.getElementById('rooms-container');

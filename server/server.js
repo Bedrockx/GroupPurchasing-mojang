@@ -99,67 +99,87 @@ function bandwidthLimitMiddleware(req, res, next) {
     log(`带宽限制应用于: ${req.path}`, LOG_TYPES.INFO, { path: req.path, type: 'bandwidth' });
     log(`限速配置: 350KB/s (全局总和)`, LOG_TYPES.INFO, { speed: '350KB/s', type: 'bandwidth', mode: 'global' });
     
-    // 重写 res.write 方法
+    // 使用异步队列等待令牌，避免忙等阻塞 Node.js 事件循环
     const originalWrite = res.write;
+    const originalEnd = res.end;
+    const queue = [];
+    let draining = false;
+    let ended = false;
+    let endArgs = null;
     let bytesSent = 0;
     let startTime = Date.now();
     let lastLogTime = Date.now();
     let responseEnded = false;
-    
-    // 监听响应结束事件
+
     res.on('finish', () => {
       responseEnded = true;
       log(`响应已结束: ${req.path}`, LOG_TYPES.INFO, { path: req.path, type: 'bandwidth' });
     });
-    
-    res.write = function(chunk, encoding, callback) {
-      // 检查响应是否已经结束
-      if (responseEnded) {
-        log(`响应已结束，跳过写入: ${req.path}`, LOG_TYPES.WARN, { path: req.path, type: 'bandwidth' });
-        if (typeof callback === 'function') {
-          callback();
-        }
-        return false;
-      }
-      
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
-      const chunkSize = buffer.length;
-      
-      bytesSent += chunkSize;
-      
-      // 从全局令牌桶获取令牌
-      while (!globalTokenBucket.consume(chunkSize)) {
-        // 等待令牌，短暂延迟
-        const start = Date.now();
-        while (Date.now() - start < 10) {
-          // 空循环，等待
-        }
-        
-        // 再次检查响应是否已经结束
+
+    const drain = () => {
+      if (draining || responseEnded) return;
+      draining = true;
+      const step = () => {
         if (responseEnded) {
-          log(`响应已结束，跳过写入: ${req.path}`, LOG_TYPES.WARN, { path: req.path, type: 'bandwidth' });
-          if (typeof callback === 'function') {
-            callback();
-          }
-          return false;
+          queue.length = 0;
+          draining = false;
+          return;
         }
-      }
-      
-      // 每2秒记录一次速度
-      const now = Date.now();
-      if (now - lastLogTime > 2000) {
-        const elapsed = (now - startTime) / 1000; // 秒
-        const currentSpeed = bytesSent / elapsed / 1024; // KB/s
-        log(`当前速度: ${currentSpeed.toFixed(2)} KB/s, 已发送: ${(bytesSent/1024/1024).toFixed(2)} MB`, LOG_TYPES.INFO, {
-          speed: `${currentSpeed.toFixed(2)} KB/s`,
-          sent: `${(bytesSent/1024/1024).toFixed(2)} MB`,
-          type: 'bandwidth',
-          mode: 'global'
-        });
-        lastLogTime = now;
-      }
-      
-      return originalWrite.call(this, buffer, encoding, callback);
+        const item = queue[0];
+        if (!item) {
+          draining = false;
+          if (ended && endArgs) {
+            const args = endArgs;
+            endArgs = null;
+            originalEnd.apply(res, args);
+          }
+          return;
+        }
+
+        const remaining = item.buffer.length - item.offset;
+        const size = Math.min(remaining, globalTokenBucket.capacity);
+        if (!globalTokenBucket.consume(size)) {
+          const deficit = size - globalTokenBucket.tokens;
+          setTimeout(step, Math.max(10, Math.ceil(deficit / globalTokenBucket.fillRate * 1000)));
+          return;
+        }
+
+        const part = item.buffer.subarray(item.offset, item.offset + size);
+        item.offset += size;
+        bytesSent += size;
+        originalWrite.call(res, part);
+        if (item.offset >= item.buffer.length) {
+          queue.shift();
+          if (item.callback) item.callback();
+        }
+
+        const now = Date.now();
+        if (now - lastLogTime > 2000) {
+          const elapsed = (now - startTime) / 1000;
+          const currentSpeed = bytesSent / elapsed / 1024;
+          log(`当前速度: ${currentSpeed.toFixed(2)} KB/s, 已发送: ${(bytesSent/1024/1024).toFixed(2)} MB`, LOG_TYPES.INFO, {
+            speed: `${currentSpeed.toFixed(2)} KB/s`, sent: `${(bytesSent/1024/1024).toFixed(2)} MB`, type: 'bandwidth', mode: 'global'
+          });
+          lastLogTime = now;
+        }
+        setImmediate(step);
+      };
+      step();
+    };
+
+    res.write = function(chunk, encoding, callback) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+      queue.push({ buffer, offset: 0, callback: typeof callback === 'function' ? callback : null });
+      drain();
+      return queue.length < 16;
+    };
+
+    res.end = function(chunk, encoding, callback) {
+      if (chunk) res.write(chunk, encoding);
+      ended = true;
+      endArgs = typeof callback === 'function' ? [callback] : [];
+      drain();
+      return res;
     };
     
     next();
@@ -179,6 +199,16 @@ const logDir = path.join(__dirname, 'log');
 const rideRecordsDir = path.join(__dirname, 'rideRecords');
 const gainRecordsDir = path.join(__dirname, 'gainRecords');
 
+const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
+const MAX_UPLOAD_CHUNKS = 10000;
+const UPLOAD_TIMEOUT = 10 * 60 * 1000;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const VERSION_PATTERN = /^\d+(?:\.\d+){1,3}$/;
+
+function createUploadStorage() {
+  return { chunks: [], totalSize: 0, fileName: '', ownerSocketId: null, startedAt: 0 };
+}
+
 // 默认版本号
 const DEFAULT_VERSIONS = {
   clientVersion: '1.0.0',
@@ -190,8 +220,8 @@ let versions = { ...DEFAULT_VERSIONS };
 
 // 上传存储（用于分片上传）
 const uploadStorage = {
-  clientPackage: { chunks: [], totalSize: 0, fileName: '' },
-  groupPurchasingPackage: { chunks: [], totalSize: 0, fileName: '' }
+  clientPackage: createUploadStorage(),
+  groupPurchasingPackage: createUploadStorage()
 };
 
 // 下载锁（上传时锁定下载）
@@ -199,6 +229,23 @@ const downloadLocks = {
   client: false,
   groupPurchasing: false
 };
+
+function resetUploadStorageState(storage) {
+  storage.chunks = [];
+  storage.totalSize = 0;
+  storage.fileName = '';
+  storage.ownerSocketId = null;
+  storage.startedAt = 0;
+}
+
+function resetUploadStorage(key) {
+  if (key === 'clientPackage' || key === 'groupPurchasingPackage') {
+    resetUploadStorageState(uploadStorage[key]);
+    downloadLocks[key === 'clientPackage' ? 'client' : 'groupPurchasing'] = false;
+  } else {
+    delete uploadStorage[key];
+  }
+}
 
 // 下载跟踪（用于终止正在进行的下载）
 const activeDownloads = new Map();
@@ -259,6 +306,7 @@ const crashTimers = new Map();
 const roomRideCheckTimers = new Map();
 const rideRecords = [];
 const crashReports = [];
+const processedCrashRides = new Set();
 // 首程加分用户记录（服务端启动时为空，存储已获得首程加分的用户 accountId）
 const firstRideBonusUsers = [];
 
@@ -531,6 +579,97 @@ function getConnectionBySocketId(socketId) {
   }
   
   return null;
+}
+
+function emitSocketError(socket, message) {
+  if (socket && socket.connected !== false) {
+    socket.emit('message', { type: 'error', message });
+  }
+}
+
+function requireAuthenticated(socket) {
+  const connection = socket && getConnectionBySocketId(socket.id);
+  if (!connection) {
+    emitSocketError(socket, '请先登录');
+    return null;
+  }
+  return connection;
+}
+
+function requireAdmin(socket) {
+  const connection = requireAuthenticated(socket);
+  if (!connection || !connection.isAdmin) {
+    if (connection) emitSocketError(socket, '权限不足');
+    return null;
+  }
+  return connection;
+}
+
+function resolvePathWithin(baseDir, relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath) return null;
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(baseDir, relativePath);
+  return resolved === base || resolved.startsWith(`${base}${path.sep}`) ? resolved : null;
+}
+
+function isValidDateString(value) {
+  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
+}
+
+function isValidVersion(value) {
+  return typeof value === 'string' && VERSION_PATTERN.test(value) && value.length <= 32;
+}
+
+function isValidRoomName(value) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 64 && !/[\\/\u0000-\u001f]/.test(value);
+}
+
+function validateUploadChunk(data, storage, expectedFileName, socket) {
+  const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize } = data || {};
+  let hasActiveUpload = Boolean(storage.ownerSocketId && storage.startedAt);
+  if (hasActiveUpload && Date.now() - storage.startedAt > UPLOAD_TIMEOUT) {
+    resetUploadStorageState(storage);
+    hasActiveUpload = false;
+  }
+
+  if (fileName !== expectedFileName || typeof fileData !== 'string' ||
+      !Number.isInteger(offset) || offset < 0 || !Number.isInteger(totalSize) ||
+      totalSize <= 0 || totalSize > MAX_UPLOAD_SIZE ||
+      (!isFirstChunk && !storage.ownerSocketId) ||
+      (!isFirstChunk && storage.ownerSocketId !== socket.id) ||
+      (isFirstChunk && offset !== 0) ||
+      (isFirstChunk && hasActiveUpload && storage.ownerSocketId !== socket.id) ||
+      (!isFirstChunk && storage.totalSize !== totalSize) ||
+      (!isFirstChunk && storage.fileName !== fileName)) {
+    return false;
+  }
+  const buffer = Buffer.from(fileData, 'base64');
+  if (!buffer.length || buffer.length > MAX_UPLOAD_SIZE || offset + buffer.length > totalSize) return false;
+  if (isFirstChunk) {
+    storage.chunks = [];
+    storage.totalSize = totalSize;
+    storage.fileName = fileName;
+    storage.ownerSocketId = socket.id;
+    storage.startedAt = Date.now();
+  }
+  const expectedOffset = storage.chunks.reduce((sum, chunk) => sum + chunk.data.length, 0);
+  if (offset !== expectedOffset) return false;
+  if (storage.chunks.length >= MAX_UPLOAD_CHUNKS) return false;
+  storage.chunks.push({ offset, data: buffer });
+  return true;
+}
+
+function assembleUploadBuffer(storage) {
+  const chunks = [...storage.chunks].sort((a, b) => a.offset - b.offset);
+  let expectedOffset = 0;
+  for (const chunk of chunks) {
+    if (chunk.offset !== expectedOffset) return null;
+    expectedOffset += chunk.data.length;
+  }
+  if (expectedOffset !== storage.totalSize) return null;
+  return Buffer.concat(chunks.map(chunk => chunk.data), storage.totalSize);
 }
 
 /**
@@ -970,7 +1109,7 @@ async function loadData(filePath, defaultValue) {
     return defaultValue;
   } catch (error) {
     handleError(error, 'loadData');
-    return defaultValue;
+    throw error;
   }
 }
 
@@ -984,9 +1123,16 @@ async function loadData(filePath, defaultValue) {
  * await saveData(ROOMS_FILE, rooms);
  */
 async function saveData(filePath, data) {
+  const tempPath = `${filePath}.${process.pid}.tmp`;
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tempPath, filePath);
   } catch (error) {
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch (_) {
+      // 保留原始保存错误
+    }
     handleError(error, 'saveData');
     throw error;
   }
@@ -1018,8 +1164,15 @@ async function saveAllData() {
  */
 function cleanupData() {
   try {
-        // 清理过期的炸车定时器
     const now = Date.now();
+    for (const [key, storage] of Object.entries(uploadStorage)) {
+      if (storage.startedAt && now - storage.startedAt > UPLOAD_TIMEOUT) {
+        resetUploadStorage(key);
+        log(`清理过期上传缓存: ${key}`, LOG_TYPES.CLEANUP);
+      }
+    }
+
+    // 清理过期的炸车定时器
     for (const [rideKey, timerInfo] of crashTimers.entries()) {
       const { startTime, delay } = timerInfo;
       // 检查定时器是否到期
@@ -1439,43 +1592,7 @@ function handleUserLogin(data, socket) {
  * handleAdminLogin({ account: 'mno', password: '144466' }, socket);
  */
 function handleAdminLogin(data, socket) {
-  const { account, password } = data;
-
-  const adminAccount = adminAccounts[account];
-  if (adminAccount && adminAccount.password === password) {
-    // 更新管理员连接管理
-    if (!adminConnections.has(account)) {
-      adminConnections.set(account, {
-        adminInfo: {
-          username: adminAccount.username,
-          accountId: account
-        },
-        connections: []
-      });
-    }
-    adminConnections.get(account).connections.push({
-      socketId: socket.id,
-      roomName: ''
-    });
-
-    // 计算连接ID（当前连接数）
-    const adminConnection = adminConnections.get(account);
-    const connectionId = adminConnection ? adminConnection.connections.length : 1;
-
-    socket.emit('message', {
-      type: 'login-success',
-      isAdmin: true,
-      accountId: account,
-      username: adminAccount.username,
-      connectionId: connectionId
-    });
-    log(`管理员 ${account} 登录成功，连接ID: ${connectionId}`, LOG_TYPES.ADMIN, { accountId: account, connectionId: connectionId });
-  } else {
-    socket.emit('message', {
-      type: 'login-failed',
-      message: '账号或密码错误'
-    });
-  }
+  return handleUserLogin({ ...data, accountId: data.account, isAdminLogin: true }, socket);
 }
 
 // ==================== 8. 用户管理函数 ====================
@@ -1677,6 +1794,12 @@ async function handleRegisterUser(data, socket) {
  */
 async function handleChangePassword(data, socket) {
   const { oldPassword, newPassword } = data;
+
+  if (typeof oldPassword !== 'string' || typeof newPassword !== 'string' ||
+      newPassword.length < 6 || newPassword.length > 128) {
+    emitSocketError(socket, '密码格式无效');
+    return;
+  }
 
   // 检查是否已登录
   const socketData = getConnectionBySocketId(socket.id);
@@ -2498,7 +2621,7 @@ function countOnlineUsers(roomName) {
  */
 function saveRideRecord(rideRecord) {
   try {
-    const date = getBeijingTime();
+    const date = getBeijingTime(new Date(rideRecord.createdAt || Date.now()));
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -2535,7 +2658,9 @@ function saveRideRecord(rideRecord) {
       log(`创建发车记录目录: ${rideRecordsDir}`, LOG_TYPES.INFO);
     }
     
-    fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
+    const tempPath = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(records, null, 2), 'utf8');
+    fs.renameSync(tempPath, filePath);
     log(`发车记录已保存到 ${filePath}`, LOG_TYPES.FILE, { filePath: filePath });
 
     // 清理42天前的发车记录文件
@@ -2670,7 +2795,11 @@ async function handleReceivedMessage(socket, message) {
           handleGetRoomsStatus(socket);
           break;
         case 'get-online-users':
-          handleGetOnlineUsers(socket);
+          if (message.data && message.data.targetConnectionId) {
+            handleGetOnlineUsersForTarget(message, socket);
+          } else {
+            handleGetOnlineUsers(socket);
+          }
           break;
         case 'get-points-ranking':
           handleGetPointsRanking(socket);
@@ -2687,6 +2816,11 @@ async function handleReceivedMessage(socket, message) {
         case 'ride-ready': {
           // 处理发车准备状态
           const { rideId, ready, uid } = message;
+          const riderConnection = requireAuthenticated(socket);
+          if (!riderConnection || riderConnection.isAdmin || typeof uid !== 'string' || typeof ready !== 'boolean') {
+            emitSocketError(socket, '发车准备请求无效');
+            break;
+          }
           const ride = RideManager.activeRides.get(rideId);
           if (ride) {
             // 找到房主
@@ -2698,7 +2832,7 @@ async function handleReceivedMessage(socket, message) {
               // 通过uid找到对应的骑手
               rider = ride.riders.find(r => r.uid === uid);
             }
-            if (rider) {
+            if (rider && rider.accountId === riderConnection.accountId) {
               if (!ride.readyStatus) {
                 ride.readyStatus = new Map();
               }
@@ -2873,12 +3007,22 @@ async function handleReceivedMessage(socket, message) {
         case 'ride-image': {
           // 处理队员发送的图片
           const { rideId: imageRideId, username, uid, imageData, fileName, hasImage } = message;
+          const imageSender = requireAuthenticated(socket);
+          if (!imageSender || imageSender.isAdmin || typeof uid !== 'string') {
+            emitSocketError(socket, '图片上报请求无效');
+            break;
+          }
           const imageRide = RideManager.activeRides.get(imageRideId);
           if (imageRide) {
+            const imageRider = imageRide.riders.find(r => r.uid === uid && r.accountId === imageSender.accountId);
+            if (!imageRider) {
+              emitSocketError(socket, '无权提交该发车的图片');
+              break;
+            }
             if (hasImage === false) {
               // 队员没有图片
               log(`队员 ${username} (${uid}) 没有图片`, LOG_TYPES.RIDE, { username: username, uid: uid, rideId: imageRideId });
-            } else if (imageData && fileName) {
+            } else if (imageData && fileName && fileName.length <= 128 && !fileName.includes('..') && imageData.length <= 10 * 1024 * 1024) {
               // 队员有图片，保存到发车信息中
               if (!imageRide.memberImages) {
                 imageRide.memberImages = [];
@@ -2972,62 +3116,6 @@ async function handleReceivedMessage(socket, message) {
           break;
         case 'move-user':
           await handleMoveUser(message, socket);
-          break;
-        // 其他事件
-        case 'get-online-users':
-          // 移动端获取已上线用户
-          if (message.data && message.data.targetConnectionId) {
-            const { targetConnectionId } = message.data;
-            log(`处理移动端获取已上线用户请求，targetConnectionId: ${targetConnectionId}`, LOG_TYPES.INFO);
-            // 查找目标连接
-            let targetConn = null;
-            for (const userConn of userConnections.values()) {
-              for (const conn of userConn.connections) {
-                if (conn.connectionId === targetConnectionId) {
-                  targetConn = conn;
-                  log(`找到目标连接: ${conn.connectionName}, socketId: ${conn.socketId}`, LOG_TYPES.INFO);
-                  break;
-                }
-              }
-              if (targetConn) break;
-            }
-            
-            if (!targetConn) {
-              log(`未找到目标连接: ${targetConnectionId}`, LOG_TYPES.ERROR);
-              socket.emit('message', {
-                type: 'online-users',
-                data: { success: false, message: '目标连接不存在' }
-              });
-              return;
-            }
-            
-            // 获取该连接的已上线用户
-            const onlineUsers = [];
-            log(`开始遍历房间查找用户，目标socketId: ${targetConn.socketId}`, LOG_TYPES.INFO);
-            for (const [roomName, room] of roomUsers) {
-              log(`检查房间: ${roomName}, 用户数: ${room.users.length}`, LOG_TYPES.INFO);
-              for (const user of room.users) {
-                log(`检查用户: ${user.username}, socketId: ${user.socketId}`, LOG_TYPES.INFO);
-                if (user.socketId === targetConn.socketId) {
-                  log(`找到匹配用户: ${user.username}`, LOG_TYPES.INFO);
-                  onlineUsers.push({
-                    username: user.username,
-                    uid: user.uid,
-                    room: roomName,
-                    notHost: user.notHost
-                  });
-                }
-              }
-            }
-            
-            log(`找到 ${onlineUsers.length} 个已上线用户`, LOG_TYPES.INFO);
-            socket.emit('message', {
-              type: 'online-users',
-              data: { success: true, users: onlineUsers }
-            });
-          } else {
-            handleGetOnlineUsers(socket);
-          }
           break;
         case 'get-log-files':
           handleGetLogFiles(socket);
@@ -3129,7 +3217,7 @@ async function handleCreateRoom(data, socket) {
 
   const { roomName, roomMode = 'random', roomCount = 4 } = data; // 'random' 表示顺序发车
   
-  if (!roomName) {
+  if (!isValidRoomName(roomName)) {
     socket.emit('message', {
       type: 'error',
       message: '房间名称不能为空'
@@ -3145,11 +3233,21 @@ async function handleCreateRoom(data, socket) {
     return;
   }
   
+  if (!['random', 'points', 'vip', 'none'].includes(roomMode)) {
+    emitSocketError(socket, '房间模式无效');
+    return;
+  }
+  const normalizedRoomCount = Number(roomCount);
+  if (!Number.isInteger(normalizedRoomCount) || normalizedRoomCount < 1 || normalizedRoomCount > 20) {
+    emitSocketError(socket, '发车人数必须为1到20之间的整数');
+    return;
+  }
+
   // 创建新房间对象
   const newRoom = {
     name: roomName,
     mode: roomMode,
-    count: parseInt(roomCount)
+    count: normalizedRoomCount
   };
   
   rooms.push(newRoom);
@@ -3491,7 +3589,7 @@ async function handleEditRoomName(data, socket) {
 
   const { roomName, newRoomName } = data;
   
-  if (!roomName || !newRoomName) {
+  if (!isValidRoomName(roomName) || !isValidRoomName(newRoomName)) {
     socket.emit('message', {
       type: 'error',
       message: '房间名称不能为空'
@@ -3584,7 +3682,7 @@ async function handleEditRoomProperties(data, socket) {
 
   const { roomName, newRoomName, roomMode, roomCount } = data;
   
-  if (!roomName || !newRoomName) {
+  if (!isValidRoomName(roomName) || !isValidRoomName(newRoomName)) {
     socket.emit('message', {
       type: 'error',
       message: '房间名称不能为空'
@@ -3609,10 +3707,20 @@ async function handleEditRoomProperties(data, socket) {
     return;
   }
   
+  if (!['random', 'points', 'vip', 'none'].includes(roomMode)) {
+    emitSocketError(socket, '房间模式无效');
+    return;
+  }
+  const normalizedRoomCount = Number(roomCount);
+  if (!Number.isInteger(normalizedRoomCount) || normalizedRoomCount < 1 || normalizedRoomCount > 20) {
+    emitSocketError(socket, '发车人数必须为1到20之间的整数');
+    return;
+  }
+
   // 更新房间属性
   rooms[roomIndex].name = newRoomName;
   rooms[roomIndex].mode = roomMode;
-  rooms[roomIndex].count = parseInt(roomCount);
+  rooms[roomIndex].count = normalizedRoomCount;
   await saveData(ROOMS_FILE, rooms);
   resetDataChangeTimer();
   
@@ -3985,7 +4093,7 @@ async function handleMobileCommand(message, socket) {
   
   // 获取当前socket的连接信息
   const socketData = getConnectionBySocketId(socket.id);
-  if (!socketData) {
+  if (!socketData || socketData.isAdmin || !socketData.connection?.isMobile) {
     socket.emit('message', {
       type: 'mobile-command-result',
       data: {
@@ -4000,19 +4108,15 @@ async function handleMobileCommand(message, socket) {
   let targetSocket = null;
   let targetConnData = null;
   
-  for (const [accountId, userConn] of userConnections.entries()) {
-    for (const conn of userConn.connections) {
-      if (conn.connectionId === targetConnectionId) {
-        targetSocket = io.sockets.sockets.get(conn.socketId);
-        targetConnData = {
-          accountId,
-          connection: conn,
-          userInfo: userConn.userInfo
-        };
-        break;
-      }
-    }
-    if (targetSocket) break;
+  const accountConnection = userConnections.get(socketData.accountId);
+  const targetConn = accountConnection?.connections.find(conn => conn.connectionId === targetConnectionId);
+  if (targetConn) {
+    targetSocket = io.sockets.sockets.get(targetConn.socketId);
+    targetConnData = {
+      accountId: socketData.accountId,
+      connection: targetConn,
+      userInfo: accountConnection.userInfo
+    };
   }
   
   if (!targetSocket || !targetConnData) {
@@ -4143,6 +4247,32 @@ function handleMobileCommandExecutionResult(message, socket) {
 }
 
 // 处理获取在线用户连接信息
+function handleGetOnlineUsersForTarget(message, socket) {
+  const socketData = requireAuthenticated(socket);
+  if (!socketData || socketData.isAdmin || !socketData.connection?.isMobile) {
+    emitSocketError(socket, '仅允许已登录的移动端连接查询目标连接');
+    return;
+  }
+
+  const targetConnectionId = message.data.targetConnectionId;
+  const accountConnection = userConnections.get(socketData.accountId);
+  const targetConn = accountConnection?.connections.find(conn => conn.connectionId === targetConnectionId);
+  if (!targetConn) {
+    socket.emit('message', { type: 'online-users', data: { success: false, message: '目标连接不存在' } });
+    return;
+  }
+
+  const onlineUsers = [];
+  for (const [roomName, room] of roomUsers) {
+    for (const user of room.users) {
+      if (user.socketId === targetConn.socketId) {
+        onlineUsers.push({ username: user.username, uid: user.uid, room: roomName, notHost: user.notHost });
+      }
+    }
+  }
+  socket.emit('message', { type: 'online-users', data: { success: true, users: onlineUsers } });
+}
+
 function handleGetOnlineUsers(socket) {
   // 检查是否已登录且是管理员
   const socketData = getConnectionBySocketId(socket.id);
@@ -4307,7 +4437,21 @@ function processExcessiveGain(value) {
 
 function handleReportGain(message, socket) {
   try {
+    const socketData = requireAuthenticated(socket);
+    if (!socketData || socketData.isAdmin) return;
     let { gameAccount, expGain, moraGain } = message;
+
+    if (typeof gameAccount !== 'string' || gameAccount.length === 0 || gameAccount.length > 128 ||
+        typeof expGain !== 'number' || !Number.isFinite(expGain) || expGain < 0 ||
+        typeof moraGain !== 'number' || !Number.isFinite(moraGain) || moraGain < 0) {
+      emitSocketError(socket, '收益报告参数无效');
+      return;
+    }
+    if (message.accountId && message.accountId !== socketData.accountId) {
+      emitSocketError(socket, '无权为其他账户上报收益');
+      return;
+    }
+    const accountId = socketData.accountId;
 
     // 对过高的收益值进行处理
     expGain = processExcessiveGain(expGain);
@@ -4324,19 +4468,6 @@ function handleReportGain(message, socket) {
       }
       return;
     }
-
-    // 从消息中直接获取accountId
-    if (!message.accountId) {
-      log('收益报告缺少accountId', LOG_TYPES.POINTS);
-      if (socket) {
-        socket.emit('message', {
-          type: 'error',
-          message: '收益报告缺少accountId'
-        });
-      }
-      return;
-    }
-    const accountId = message.accountId;
 
     // 获取今天的日期字符串
     const dateStr = getTodayDateStr();
@@ -4405,6 +4536,8 @@ function handleReportGain(message, socket) {
  */
 function handleReportCrash(message, socket) {
   try {
+    const socketData = requireAuthenticated(socket);
+    if (!socketData || socketData.isAdmin) return;
     const { crashInfo, rideIdentifier } = message;
 
     if (!crashInfo) {
@@ -4432,6 +4565,25 @@ function handleReportCrash(message, socket) {
     // 保存炸车报告
     let finalRideIdentifier = actualRideIdentifier;
     if (relevantRide) {
+      if (!relevantRide.riders?.some(rider => rider.accountId === socketData.accountId)) {
+        emitSocketError(socket, '无权提交该发车的炸车报告');
+        return;
+      }
+      if (processedCrashRides.has(relevantRide.rideId) || crashReports.some(report => report.rideIdentifier === relevantRide.rideId && report.accountId === socketData.accountId)) {
+        emitSocketError(socket, '该账户已提交过此发车的炸车报告');
+        return;
+      }
+    } else {
+      emitSocketError(socket, '未找到对应的发车记录');
+      return;
+    }
+
+    if (!actualRideIdentifier) {
+      emitSocketError(socket, '炸车报告缺少发车标识');
+      return;
+    }
+
+    if (relevantRide) {
       finalRideIdentifier = relevantRide.rideId;
     }
 
@@ -4439,7 +4591,8 @@ function handleReportCrash(message, socket) {
       ...actualCrashInfo,
       rideIdentifier: finalRideIdentifier,
       reportedAt: Date.now(),
-      socketId: socket.id
+      socketId: socket.id,
+      accountId: socketData.accountId
     });
 
     // 限制crashReports数组大小，只保留最近的1000条记录
@@ -4509,6 +4662,9 @@ function processCrashReports(rideKey, ride) {
       log('没有找到对应的炸车报告');
       return;
     }
+
+    if (processedCrashRides.has(rideKey)) return;
+    processedCrashRides.add(rideKey);
 
     // 分析炸车报告，确定过错方
     let atFaultUids = new Set();
@@ -4995,7 +5151,15 @@ function handleGetPointsRanking(socket) {
  * @param {Object} socket - Socket.io连接对象
  */
 function handleGetMyRideRecords(message, socket) {
-  const { accountId } = message;
+  const socketData = requireAuthenticated(socket);
+  if (!socketData) return;
+  const requestedAccountId = message.accountId;
+  const accountId = socketData.isAdmin ? requestedAccountId : socketData.accountId;
+
+  if (!accountId || (!socketData.isAdmin && requestedAccountId && requestedAccountId !== socketData.accountId)) {
+    emitSocketError(socket, '无权查询其他账户的发车记录');
+    return;
+  }
 
   if (!accountId) {
     socket.emit('message', {
@@ -5041,8 +5205,10 @@ function handleGetMyRideRecords(message, socket) {
 async function handleEditUserPoints(message, socket) {
   const { accountId, pointsChange } = message;
 
+  if (!requireAdmin(socket)) return;
+
   // 验证参数
-  if (!accountId || pointsChange === undefined) {
+  if (!accountId || typeof pointsChange !== 'number' || !Number.isFinite(pointsChange)) {
     socket.emit('message', {
       type: 'error',
       message: '缺少必要参数'
@@ -5342,11 +5508,10 @@ const timerManager = {
 
   setTimeout(callback, delay, ...args) {
     const timer = setTimeout(() => {
-      try {
-        callback(...args);
-      } catch (error) {
+      this.timers.delete(timer);
+      Promise.resolve().then(() => callback(...args)).catch(error => {
         handleError(error, 'timerCallback');
-      }
+      });
     }, delay, ...args);
     this.timers.add(timer);
     return timer;
@@ -5354,11 +5519,9 @@ const timerManager = {
 
   setInterval(callback, interval, ...args) {
     const timer = setInterval(() => {
-      try {
-        callback(...args);
-      } catch (error) {
+      Promise.resolve().then(() => callback(...args)).catch(error => {
         handleError(error, 'intervalCallback');
-      }
+      });
     }, interval, ...args);
     this.timers.add(timer);
     return timer;
@@ -5759,8 +5922,15 @@ function handleGetVersions(socket) {
  */
 async function handleUpdateVersions(data, socket) {
   try {
+    if (!requireAdmin(socket)) return;
     const { clientVersion, groupPurchasingVersion } = data;
     log(`处理更新版本信息请求, socketId: ${socket.id}`, LOG_TYPES.INFO);
+
+    if ((clientVersion !== undefined && !isValidVersion(clientVersion)) ||
+        (groupPurchasingVersion !== undefined && !isValidVersion(groupPurchasingVersion))) {
+      emitSocketError(socket, '版本号格式无效');
+      return;
+    }
 
     if (clientVersion) {
       versions.clientVersion = clientVersion;
@@ -5803,6 +5973,7 @@ async function handleUpdateVersions(data, socket) {
  */
 async function handleUploadClientPackage(data, socket) {
   try {
+    if (!requireAdmin(socket)) return;
     const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize } = data;
     
     // 验证文件名
@@ -5819,6 +5990,12 @@ async function handleUploadClientPackage(data, socket) {
 
     const storage = uploadStorage.clientPackage;
 
+    if (!validateUploadChunk(data, storage, 'mojang.zip', socket)) {
+      if (!storage.ownerSocketId) downloadLocks.client = false;
+      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
+      return;
+    }
+
     if (isFirstChunk) {
       // 终止正在进行的用户端下载
       const terminatedCount = terminateDownloads('client');
@@ -5828,23 +6005,22 @@ async function handleUploadClientPackage(data, socket) {
       
       downloadLocks.client = true;
       log(`用户端下载已被锁定`, LOG_TYPES.INFO);
-      storage.chunks = [];
-      storage.totalSize = totalSize;
-      storage.fileName = fileName;
-    }
-
-    if (fileData) {
-      const buffer = Buffer.from(fileData, 'base64');
-      storage.chunks.push({ offset, data: buffer });
     }
 
     if (isLastChunk) {
+      const fullBuffer = assembleUploadBuffer(storage);
+      if (!fullBuffer) {
+        resetUploadStorage('clientPackage');
+        emitSocketError(socket, '上传分片不完整');
+        return;
+      }
       downloadLocks.client = false;
       log(`用户端下载已解锁`, LOG_TYPES.INFO);
-      storage.chunks.sort((a, b) => a.offset - b.offset);
-      const fullBuffer = Buffer.concat(storage.chunks.map(c => c.data));
       const filePath = path.join(__dirname, 'client', 'mojang.zip');
-      fs.writeFileSync(filePath, fullBuffer);
+      const tempPath = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tempPath, fullBuffer);
+      fs.renameSync(tempPath, filePath);
+      resetUploadStorage('clientPackage');
 
       socket.emit('message', {
         type: 'upload-client-package-result',
@@ -5872,7 +6048,7 @@ async function handleUploadClientPackage(data, socket) {
       });
     }
   } catch (error) {
-    downloadLocks.client = false;
+    resetUploadStorage('clientPackage');
     handleError(error, 'handleUploadClientPackage');
     socket.emit('message', {
       type: 'error',
@@ -5894,6 +6070,7 @@ async function handleUploadClientPackage(data, socket) {
  */
 async function handleUploadGroupPurchasingPackage(data, socket) {
   try {
+    if (!requireAdmin(socket)) return;
     const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize } = data;
     
     // 验证文件名
@@ -5910,6 +6087,12 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
 
     const storage = uploadStorage.groupPurchasingPackage;
 
+    if (!validateUploadChunk(data, storage, 'ArtifactsGroupPurchasing.zip', socket)) {
+      if (!storage.ownerSocketId) downloadLocks.groupPurchasing = false;
+      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
+      return;
+    }
+
     if (isFirstChunk) {
       // 终止正在进行的团购下载
       const terminatedCount = terminateDownloads('groupPurchasing');
@@ -5919,23 +6102,22 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
       
       downloadLocks.groupPurchasing = true;
       log(`团购下载已被锁定`, LOG_TYPES.INFO);
-      storage.chunks = [];
-      storage.totalSize = totalSize;
-      storage.fileName = fileName;
-    }
-
-    if (fileData) {
-      const buffer = Buffer.from(fileData, 'base64');
-      storage.chunks.push({ offset, data: buffer });
     }
 
     if (isLastChunk) {
+      const fullBuffer = assembleUploadBuffer(storage);
+      if (!fullBuffer) {
+        resetUploadStorage('groupPurchasingPackage');
+        emitSocketError(socket, '上传分片不完整');
+        return;
+      }
       downloadLocks.groupPurchasing = false;
       log(`团购下载已解锁`, LOG_TYPES.INFO);
-      storage.chunks.sort((a, b) => a.offset - b.offset);
-      const fullBuffer = Buffer.concat(storage.chunks.map(c => c.data));
       const filePath = path.join(__dirname, 'JsScript', 'ArtifactsGroupPurchasing.zip');
-      fs.writeFileSync(filePath, fullBuffer);
+      const tempPath = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tempPath, fullBuffer);
+      fs.renameSync(tempPath, filePath);
+      resetUploadStorage('groupPurchasingPackage');
 
       socket.emit('message', {
         type: 'upload-group-purchasing-package-result',
@@ -5963,7 +6145,7 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
       });
     }
   } catch (error) {
-    downloadLocks.groupPurchasing = false;
+    resetUploadStorage('groupPurchasingPackage');
     handleError(error, 'handleUploadGroupPurchasingPackage');
     socket.emit('message', {
       type: 'error',
@@ -6068,6 +6250,7 @@ function extractAsarSources(asarBuffer, wantedFiles) {
  */
 async function handleUploadAsar(data, socket) {
   try {
+    if (!requireAdmin(socket)) return;
     const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize, version } = data;
     
     if (fileName !== 'app.asar') {
@@ -6075,8 +6258,8 @@ async function handleUploadAsar(data, socket) {
       return;
     }
     
-    if (!version) {
-      socket.emit('message', { type: 'error', message: '缺少版本号' });
+    if (!isValidVersion(version)) {
+      socket.emit('message', { type: 'error', message: '版本号格式无效' });
       return;
     }
 
@@ -6086,14 +6269,10 @@ async function handleUploadAsar(data, socket) {
     }
     const storage = uploadStorage[storageKey];
 
-    if (isFirstChunk) {
-      storage.chunks = [];
-      storage.totalSize = totalSize;
-    }
-
-    if (fileData) {
-      const buffer = Buffer.from(fileData, 'base64');
-      storage.chunks.push({ offset, data: buffer });
+    if (!validateUploadChunk(data, storage, 'app.asar', socket)) {
+      if (!storage.ownerSocketId && isValidVersion(version)) resetUploadStorage(`asar_${version}`);
+      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
+      return;
     }
 
     socket.emit('message', {
@@ -6102,27 +6281,35 @@ async function handleUploadAsar(data, socket) {
     });
 
     if (isLastChunk) {
-      storage.chunks.sort((a, b) => a.offset - b.offset);
-      const fullBuffer = Buffer.concat(storage.chunks.map(c => c.data));
+      const fullBuffer = assembleUploadBuffer(storage);
+      if (!fullBuffer) {
+        resetUploadStorage(storageKey);
+        emitSocketError(socket, '上传分片不完整');
+        return;
+      }
       
       const versionDir = path.join(ASAR_DIR, version);
       if (!fs.existsSync(versionDir)) {
         fs.mkdirSync(versionDir, { recursive: true });
       }
       const filePath = path.join(versionDir, 'app.asar');
-      fs.writeFileSync(filePath, fullBuffer);
+      const tempPath = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tempPath, fullBuffer);
+      fs.renameSync(tempPath, filePath);
       
       // 从 asar 中提取源码并保存 source.txt（纯 Node.js 解析，无需额外依赖）
       const sourceText = extractAsarSources(fullBuffer, ['index.html', 'main.js', 'preload.js']);
       if (sourceText) {
         const sourcePath = path.join(versionDir, 'source.txt');
-        fs.writeFileSync(sourcePath, sourceText, 'utf8');
+        const sourceTempPath = `${sourcePath}.${process.pid}.tmp`;
+        fs.writeFileSync(sourceTempPath, sourceText, 'utf8');
+        fs.renameSync(sourceTempPath, sourcePath);
         log(`从 app.asar 中提取源码成功，保存到 ${sourcePath}，大小: ${sourceText.length} 字符`, LOG_TYPES.INFO);
       } else {
         log(`警告: 无法从版本 ${version} 的 app.asar 中提取源码（extractAsarSources 返回 null）`, LOG_TYPES.ERROR);
       }
       
-      delete uploadStorage[storageKey];
+      resetUploadStorage(storageKey);
 
       socket.emit('message', {
         type: 'upload-asar-result',
@@ -6131,6 +6318,7 @@ async function handleUploadAsar(data, socket) {
       log(`app.asar 已上传: ${filePath}, 大小: ${fullBuffer.length} bytes`, LOG_TYPES.ADMIN);
     }
   } catch (error) {
+    if (data && isValidVersion(data.version)) resetUploadStorage(`asar_${data.version}`);
     handleError(error, 'handleUploadAsar');
     socket.emit('message', { type: 'error', message: '上传 app.asar 失败' });
   }
@@ -6139,9 +6327,13 @@ async function handleUploadAsar(data, socket) {
 // 应用带宽限制中间件
 app.use(bandwidthLimitMiddleware);
 
-// 静态文件服务，提供其他静态文件
-// 注意：带宽限制中间件会优先处理 /client/mojang.zip 和 /server/client/mojang.zip 请求
-app.use('/server', express.static(__dirname));
+// 兼容旧客户端的用户端安装包路径，仅暴露明确文件
+app.get('/server/client/mojang.zip', (req, res) => {
+  if (downloadLocks.client) {
+    return res.status(503).json({ error: 'download-locked', message: '正在上传中，请稍后再试' });
+  }
+  res.sendFile(path.join(__dirname, 'client', 'mojang.zip'));
+});
 
 // 用户端下载中间件（带下载锁检查和跟踪）
 app.use('/client/mojang.zip', (req, res, next) => {
@@ -6308,7 +6500,15 @@ async function handleGetLogFileContent(data, socket) {
 
   const fs = require('fs');
   const logDir = path.join(__dirname, 'log');
-  const filePath = path.join(logDir, fileName);
+  if (!/^\d{4}-\d{2}-\d{2}\.log$/.test(fileName)) {
+    emitSocketError(socket, '日志文件名无效');
+    return;
+  }
+  const filePath = resolvePathWithin(logDir, fileName);
+  if (!filePath) {
+    emitSocketError(socket, '日志文件路径无效');
+    return;
+  }
 
   try {
     const content = await fs.promises.readFile(filePath, 'utf8');
@@ -6351,7 +6551,15 @@ async function handleDownloadLogFile(data, socket) {
 
   const fs = require('fs');
   const logDir = path.join(__dirname, 'log');
-  const filePath = path.join(logDir, fileName);
+  if (!/^\d{4}-\d{2}-\d{2}\.log$/.test(fileName)) {
+    emitSocketError(socket, '日志文件名无效');
+    return;
+  }
+  const filePath = resolvePathWithin(logDir, fileName);
+  if (!filePath) {
+    emitSocketError(socket, '日志文件路径无效');
+    return;
+  }
 
   try {
     // 检查文件是否存在
@@ -6396,7 +6604,7 @@ async function handleGetRideRecords(data, socket) {
 
   const { date } = data;
 
-  if (!date) {
+  if (!isValidDateString(date)) {
     socket.emit('message', {
       type: 'error',
       message: '日期不能为空'
@@ -6405,7 +6613,7 @@ async function handleGetRideRecords(data, socket) {
   }
 
   try {
-    const filePath = path.join(rideRecordsDir, `${date}.json`);
+    const filePath = resolvePathWithin(rideRecordsDir, `${date}.json`);
 
     if (fs.existsSync(filePath)) {
       const content = await fs.promises.readFile(filePath, 'utf8');
@@ -6454,6 +6662,7 @@ async function handleGetGainRecords(data, socket) {
 
     // 获取指定日期的收益文件路径列表
     function getDateFiles(targetDate) {
+      if (!isValidDateString(targetDate)) return [];
       const filePath = path.join(gainRecordsDir, `${targetDate}.json`);
       if (fs.existsSync(filePath)) {
         return [filePath];
@@ -6492,6 +6701,10 @@ async function handleGetGainRecords(data, socket) {
           type: 'error',
           message: '日期不能为空'
         });
+        return;
+      }
+      if (!isValidDateString(date)) {
+        emitSocketError(socket, '日期格式无效');
         return;
       }
       filesToRead = getDateFiles(date);
@@ -6680,30 +6893,6 @@ io.on('connection', (socket) => {
   // 保存超时ID，以便清除
   socket.authTimeout = authTimeout;
 
-  // 检查是否是管理员重连
-  const query = socket.handshake.query;
-  if (query.type === 'admin' && query.account) {
-    const adminAccount = adminAccounts[query.account];
-    if (adminAccount) {
-      // 更新管理员连接管理
-      if (!adminConnections.has(query.account)) {
-        adminConnections.set(query.account, {
-          adminInfo: {
-            username: adminAccount.username,
-            accountId: query.account
-          },
-          connections: []
-        });
-      }
-      adminConnections.get(query.account).connections.push({
-        socketId: socket.id,
-        roomName: ''
-      });
-
-      log(`管理员 ${query.account} 已重连`);
-    }
-  }
-
   // 统一处理消息
   socket.on('message', async (data) => {
     await handleReceivedMessage(socket, data);
@@ -6751,6 +6940,12 @@ io.on('connection', (socket) => {
       // 清理loginKeys
       loginKeys.delete(socket.id);
 
+      for (const [key, storage] of Object.entries(uploadStorage)) {
+        if (storage.ownerSocketId === socket.id) {
+          resetUploadStorage(key);
+        }
+      }
+
       // 保存账户ID用于后续操作
       const operatorAccountId = accountId;
 
@@ -6796,19 +6991,24 @@ io.on('connection', (socket) => {
 });
 
 // ==================== 13. 错误处理和进程管理 ====================
-// 全局错误捕获，防止服务端因错误而终止
+let shuttingDown = false;
+
+// 未捕获异常后停止接收新请求，由外部进程管理器负责重启
 process.on('uncaughtException', (error) => {
   handleError(error, 'uncaughtException');
-
-  // 不退出进程，继续运行
-  log('服务继续运行，未捕获的异常已记录', 'warning');
+  if (!shuttingDown) {
+    shuttingDown = true;
+    cleanupAndExit();
+  }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   const error = reason instanceof Error ? reason : new Error(String(reason));
   handleError(error, 'unhandledRejection');
-
-  log('服务继续运行，未处理的Promise拒绝已记录', 'warning');
+  if (!shuttingDown) {
+    shuttingDown = true;
+    cleanupAndExit();
+  }
 });
 
 // 未捕获的异常监听器（Node.js 12+）
