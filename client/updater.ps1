@@ -1,210 +1,165 @@
-# Updater Script - PowerShell Version
+# 用户端更新器
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [string]$UpdateZipPath,
+    [Parameter(Mandatory = $true, Position = 1)]
+    [string]$TargetDir,
+    [Parameter(Position = 2)]
+    [ValidateSet('main', 'groupPurchasing')]
+    [string]$UpdateType = 'main',
+    [Parameter(Position = 3)]
+    [ValidateSet('true', 'false')]
+    [string]$CloseMojang = 'false'
+)
 
-# Ensure script runs in window
-if (-not $Host.UI.RawUI.WindowTitle) {
-    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File '$PSCommandPath' $($args -join ' ')" -WindowStyle Minimized
-    exit
-}
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$shouldCloseMojang = $CloseMojang -eq 'true'
 
-# Clear screen
-Clear-Host
-
-# Show title
-Write-Host "====================================" -ForegroundColor Cyan
-Write-Host "        Mojang Updater" -ForegroundColor Green
-Write-Host "====================================" -ForegroundColor Cyan
-Write-Host ""
-
-Write-Host "Starting update..." -ForegroundColor Green
-Write-Host ""
-
-# Get parameters
-$updateZipPath = $args[0]
-$targetDir = $args[1]
-$updateType = $args[2]
-$closeMojang = $args[3] -eq "true"
-
-if (-not $updateZipPath) {
-    Write-Host "Error: Missing update package path" -ForegroundColor Red
-    Read-Host "Press Enter to exit..."
-    exit 1
-}
-
-if (-not $targetDir) {
-    Write-Host "Error: Missing target directory" -ForegroundColor Red
-    Read-Host "Press Enter to exit..."
-    exit 1
-}
-
-Write-Host "Update package path: $updateZipPath" -ForegroundColor Cyan
-Write-Host "Target directory: $targetDir" -ForegroundColor Cyan
-Write-Host "Update type: $updateType" -ForegroundColor Cyan
-Write-Host "Close mojang.exe: $closeMojang" -ForegroundColor Cyan
-Write-Host ""
-
-# Check if file exists
-if (-not (Test-Path $updateZipPath)) {
-    Write-Host "Error: Update package not found: $updateZipPath" -ForegroundColor Red
-    Read-Host "Press Enter to exit..."
-    exit 1
-}
-
-# Check if target directory exists
-if (-not (Test-Path $targetDir)) {
-    Write-Host "Error: Target directory not found: $targetDir" -ForegroundColor Red
-    Read-Host "Press Enter to exit..."
-    exit 1
-}
-
-# Close mojang.exe processes by exact path (fix multi-instance issue)
-if ($closeMojang -eq "true") {
-    Write-Host "Waiting 3 seconds before checking for running mojang.exe processes..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 3
-    
-    Write-Host "Finding mojang.exe processes in target directory..." -ForegroundColor Yellow
-    
-    $targetExePath = Join-Path $targetDir "mojang.exe"
-    $resolvedPath = (Resolve-Path $targetExePath -ErrorAction SilentlyContinue).Path
-    
-    if (-not $resolvedPath) {
-        Write-Host "Target file not found, no need to close" -ForegroundColor Yellow
-    } else {
-        # Loop until no matching processes (handle multi-instance + rapid process changes)
-        $maxAttempts = 5
-        $attempt = 0
-        $hasError = $false
-        
-        while ($attempt -lt $maxAttempts) {
-            # Re-query each loop to avoid stale objects
-            $targetProcesses = Get-CimInstance Win32_Process -Filter "Name = 'mojang.exe'" | 
-                Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $resolvedPath) }
-            
-            if (-not $targetProcesses) {
-                Write-Host "All mojang.exe processes in target directory closed" -ForegroundColor Green
-                break
-            }
-            
-            foreach ($proc in $targetProcesses) {
-                Write-Host "Found target process: PID=$($proc.ProcessId) Path=$($proc.ExecutablePath)" -ForegroundColor Yellow
-                
-                try {
-                    # Method 1: Use Stop-Process (most reliable)
-                    Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
-                    Write-Host "Terminated process PID: $($proc.ProcessId)" -ForegroundColor Green
-                } catch {
-                    # Method 2: If Stop-Process fails, use taskkill /F /PID
-                    Write-Host "Stop-Process failed, trying taskkill PID: $($proc.ProcessId)..." -ForegroundColor Yellow
-                    $taskkillResult = & taskkill /F /PID $proc.ProcessId 2>&1
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Host "Taskkill successfully terminated PID: $($proc.ProcessId)" -ForegroundColor Green
-                    } else {
-                        Write-Host "Warning: Failed to terminate PID $($proc.ProcessId): $taskkillResult" -ForegroundColor Red
-                        $hasError = $true
-                    }
-                }
-            }
-            
-            $attempt++
-            if ($attempt -lt $maxAttempts) {
-                Start-Sleep -Milliseconds 500  # Short wait before re-query
-            }
+function Write-UpdateLog {
+    param([string]$Message)
+    Write-Host $Message
+    try {
+        if ($script:TargetDir -and (Test-Path -LiteralPath $script:TargetDir -PathType Container)) {
+            Add-Content -LiteralPath (Join-Path $script:TargetDir 'updater.log') -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message" -Encoding UTF8
         }
-        
-        if ($hasError -and $attempt -ge $maxAttempts) {
-            Write-Host "Error: Some processes could not be terminated, update may fail" -ForegroundColor Red
-            Read-Host "Press Enter to exit..."
-            exit 1
-        }
+    } catch {
+        # 日志写入失败不应影响更新流程
     }
 }
 
-# Extract update package
-Write-Host "Extracting update package..." -ForegroundColor Yellow
+function Stop-TargetMojangProcesses {
+    $targetExePath = Join-Path $script:TargetDir 'mojang.exe'
+    if (-not (Test-Path -LiteralPath $targetExePath -PathType Leaf)) {
+        Write-UpdateLog '未找到目标 mojang.exe，跳过进程关闭。'
+        return
+    }
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($targetExePath)
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        $targetProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'mojang.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $resolvedPath) })
+        if ($targetProcesses.Count -eq 0) {
+            Write-UpdateLog '目标目录中的 mojang.exe 已全部退出。'
+            return
+        }
+
+        foreach ($processInfo in $targetProcesses) {
+            Write-UpdateLog "关闭目标进程 PID=$($processInfo.ProcessId)。"
+            Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 300
+    } while ((Get-Date) -lt $deadline)
+
+    $remaining = @(Get-CimInstance Win32_Process -Filter "Name = 'mojang.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $resolvedPath) })
+    if ($remaining.Count -gt 0) {
+        throw "目标目录中的 mojang.exe 未能在15秒内退出。"
+    }
+}
+
+function Assert-ZipEntriesSafe {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($script:UpdateZipPath)
+    try {
+        $targetRoot = ([System.IO.Path]::GetFullPath($script:TargetDir)).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+        foreach ($entry in $archive.Entries) {
+            $entryPath = [System.IO.Path]::GetFullPath((Join-Path $script:TargetDir $entry.FullName))
+            if (-not $entryPath.StartsWith($targetRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "更新包包含越界路径: $($entry.FullName)"
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+}
+
+Write-UpdateLog '开始执行用户端更新。'
+
 try {
-    # For ArtifactsGroupPurchasing update, delete assets folder first
-    if ($updateType -eq "groupPurchasing") {
-        $assetsPath = Join-Path $targetDir "assets"
-        if (Test-Path $assetsPath) {
-            Write-Host "Deleting existing assets folder: $assetsPath" -ForegroundColor Yellow
-            Remove-Item -Path $assetsPath -Recurse -Force -ErrorAction Stop
-            Write-Host "Assets folder deleted successfully" -ForegroundColor Green
-        }
-    }
-    
-    Write-Host "Executing: Expand-Archive -Path '$updateZipPath' -DestinationPath '$targetDir' -Force" -ForegroundColor Gray
-    Expand-Archive -Path $updateZipPath -DestinationPath $targetDir -Force -ErrorAction Stop
-    Write-Host "Extraction successful" -ForegroundColor Green
+    $script:UpdateZipPath = [System.IO.Path]::GetFullPath($UpdateZipPath)
+    $script:TargetDir = [System.IO.Path]::GetFullPath($TargetDir)
 } catch {
-    Write-Host "Extraction failed: $($_.Exception.Message)" -ForegroundColor Red
-    Read-Host "Press Enter to exit..."
+    Write-UpdateLog "参数路径无效: $($_.Exception.Message)"
     exit 1
 }
 
-# Start mojang.exe using cmd /c (avoid PowerShell waiting for child process)
+if (-not (Test-Path -LiteralPath $script:UpdateZipPath -PathType Leaf)) {
+    Write-UpdateLog "更新包不存在: $script:UpdateZipPath"
+    exit 1
+}
+
+if (-not (Test-Path -LiteralPath $script:TargetDir -PathType Container)) {
+    Write-UpdateLog "目标目录不存在: $script:TargetDir"
+    exit 1
+}
+
+Write-UpdateLog "更新包: $script:UpdateZipPath"
+Write-UpdateLog "目标目录: $script:TargetDir"
+Write-UpdateLog "更新类型: $UpdateType"
+Write-UpdateLog "关闭用户端进程: $shouldCloseMojang"
+
+# 仅关闭目标目录中的用户端进程，避免误杀其他安装目录的实例
+if ($shouldCloseMojang) {
+    Start-Sleep -Seconds 2
+    try {
+        Stop-TargetMojangProcesses
+    } catch {
+        Write-UpdateLog "关闭用户端进程失败: $($_.Exception.Message)"
+        exit 1
+    }
+}
+
+# 校验压缩包路径后仍直接覆盖目标目录
+try {
+    Assert-ZipEntriesSafe
+    Write-UpdateLog '更新包路径校验通过。'
+
+    # 团购更新需要先删除旧 assets 目录
+    if ($updateType -eq "groupPurchasing") {
+        $assetsPath = Join-Path $script:TargetDir "assets"
+        if (Test-Path -LiteralPath $assetsPath) {
+            Write-UpdateLog "删除旧 assets 目录: $assetsPath"
+            Remove-Item -LiteralPath $assetsPath -Recurse -Force -ErrorAction Stop
+        }
+    }
+    
+    Write-UpdateLog '开始覆盖解压更新包。'
+    Expand-Archive -LiteralPath $script:UpdateZipPath -DestinationPath $script:TargetDir -Force -ErrorAction Stop
+    Write-UpdateLog '更新包解压完成。'
+} catch {
+    Write-UpdateLog "更新包处理失败: $($_.Exception.Message)"
+    exit 1
+}
+
+# 更新主程序时启动新进程；团购更新不启动主程序
 if ($updateType -eq "main") {
-    $mojangExePath = Join-Path $targetDir "mojang.exe"
-    Write-Host "Starting mojang.exe: $mojangExePath" -ForegroundColor Yellow
-    if (Test-Path $mojangExePath) {
+    $mojangExePath = Join-Path $script:TargetDir "mojang.exe"
+    Write-UpdateLog "启动用户端: $mojangExePath"
+    if (Test-Path -LiteralPath $mojangExePath -PathType Leaf) {
         try {
-            # Use cmd /c to start, completely detach from current PowerShell process
-            $cmdArgs = "/c cd /d `"$targetDir`" && start /min `"`" `"mojang.exe`""
-            Write-Host "Executing: cmd.exe $cmdArgs" -ForegroundColor Gray
-            
-            Start-Process -FilePath "cmd.exe" -ArgumentList $cmdArgs -WindowStyle Hidden
-            
-            Write-Host "Start successful" -ForegroundColor Green
-            Write-Host "Updater will exit now, mojang.exe will continue running" -ForegroundColor Cyan
-            Start-Sleep -Milliseconds 300
+            Start-Process -FilePath $mojangExePath -WorkingDirectory $script:TargetDir -WindowStyle Minimized -ErrorAction Stop | Out-Null
+            Write-UpdateLog '用户端启动成功。'
         } catch {
-            Write-Host "Start failed: $($_.Exception.Message)" -ForegroundColor Red
-            Read-Host "Press Enter to exit..."
+            Write-UpdateLog "启动用户端失败: $($_.Exception.Message)"
             exit 1
         }
     } else {
-        Write-Host "Error: mojang.exe not found: $mojangExePath" -ForegroundColor Red
-        Read-Host "Press Enter to exit..."
+        Write-UpdateLog "用户端程序不存在: $mojangExePath"
         exit 1
     }
 } else {
-    Write-Host "Update type is not main, skipping mojang.exe start" -ForegroundColor Yellow
+    Write-UpdateLog '团购更新完成，跳过启动用户端。'
 }
 
-# Clean temporary files
-Write-Host "Cleaning temporary files..." -ForegroundColor Yellow
+# 仅在更新流程完成后删除下载包，失败时保留现场便于排查
 try {
-    if (Test-Path $updateZipPath) {
-        Remove-Item -Path $updateZipPath -Force -ErrorAction Stop
-        Write-Host "Cleaning successful" -ForegroundColor Green
-    } else {
-        Write-Host "File not found, no cleaning needed" -ForegroundColor Yellow
-    }
+    Remove-Item -LiteralPath $script:UpdateZipPath -Force -ErrorAction Stop
+    Write-UpdateLog '临时更新包清理完成。'
 } catch {
-    Write-Host "Warning: Cleaning failed, file may be in use: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-UpdateLog "临时更新包清理失败: $($_.Exception.Message)"
 }
 
-Write-Host ""
-Write-Host "====================================" -ForegroundColor Cyan
-Write-Host "        Update Complete!" -ForegroundColor Green
-Write-Host "====================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Window will close automatically in 3 seconds, or press Enter to close immediately..." -ForegroundColor Yellow
-
-# Wait for 3 seconds, can be interrupted by Enter key
-$waitSeconds = 3
-$startTime = Get-Date
-
-while (((Get-Date) - $startTime).TotalSeconds -lt $waitSeconds) {
-    # Check if key is pressed
-    if ($host.UI.RawUI.KeyAvailable) {
-        $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        # Only respond to Enter key
-        if ($key.VirtualKeyCode -eq 13) {
-            Write-Host ""
-            Write-Host "Enter key detected, closing..." -ForegroundColor Green
-            break
-        }
-    }
-    Start-Sleep -Milliseconds 100
-}
-
+Write-UpdateLog '更新流程完成。'
 exit 0

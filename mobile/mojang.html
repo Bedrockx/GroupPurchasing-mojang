@@ -313,6 +313,452 @@
             padding: 20px;
             color: #999;
         }
+
+        /* 手机竖屏优先：与管理端保持淡蓝渐变视觉 */
+        :root {
+            --mobile-bg: #d9effc;
+            --mobile-surface: #ffffff;
+            --mobile-surface-muted: #e8f5fd;
+            --mobile-border: #a5cce5;
+            --mobile-text: #214765;
+            --mobile-muted: #5d7e98;
+            --mobile-primary: #358dca;
+            --mobile-primary-light: #6bb5df;
+            --mobile-danger: #dc2626;
+            --mobile-radius: 14px;
+        }
+
+        html {
+            min-height: 100%;
+            background: var(--mobile-bg);
+        }
+
+        body {
+            min-height: 100vh;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            color: var(--mobile-text);
+            font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(160deg, #d5edfb 0%, #bfdef3 48%, #eef8ff 100%);
+            background-attachment: fixed;
+        }
+
+        .login-container,
+        .mobile-container {
+            width: min(100%, 620px);
+            max-width: 620px;
+            margin: 0 auto;
+        }
+
+        .login-container {
+            min-height: 0;
+            margin-top: clamp(28px, 10vh, 96px);
+            margin-bottom: 24px;
+            padding: 26px 20px 22px;
+            background: linear-gradient(145deg, #ffffff 0%, #e6f4fd 100%);
+            border: 1px solid var(--mobile-border);
+            border-top: 4px solid #60a5fa;
+            border-radius: 18px;
+            box-shadow: 0 16px 36px rgba(44, 104, 145, 0.16);
+        }
+
+        h1 {
+            color: #164e79;
+            font-size: clamp(1.6rem, 7vw, 2rem);
+            letter-spacing: 0;
+        }
+
+        h2 {
+            color: #164e79;
+            margin-bottom: 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--mobile-border);
+            font-size: 1.14rem;
+        }
+
+        h3 {
+            color: #245d88;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        input[type="date"],
+        select {
+            min-height: 44px;
+            padding: 10px 12px !important;
+            color: var(--mobile-text);
+            background: linear-gradient(180deg, #ffffff 0%, #eaf6fd 100%);
+            border: 1px solid #b9d3ea !important;
+            border-radius: 9px !important;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--mobile-primary) !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #3f8fd0;
+        }
+
+        .button {
+            min-height: 44px;
+            padding: 10px 15px;
+            margin: 0;
+            color: #fff;
+            background: linear-gradient(135deg, #69b8e3 0%, #358dca 100%);
+            border-radius: 9px;
+            font-size: 0.92rem;
+            font-weight: 700;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.18);
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .button:hover {
+            background: linear-gradient(135deg, #4b9fd0 0%, #2f76a8 100%);
+            transform: translateY(-1px);
+        }
+
+        .button-secondary,
+        .button-success {
+            background: linear-gradient(135deg, #91d0ef 0%, #4b9fd0 100%);
+        }
+
+        .button-secondary:hover,
+        .button-success:hover {
+            background: linear-gradient(135deg, #72b9df 0%, #3e86b4 100%);
+        }
+
+        .button-danger {
+            background: linear-gradient(135deg, #f06b6b 0%, #dc2626 100%);
+        }
+
+        .button-danger:hover {
+            background: linear-gradient(135deg, #e95757 0%, #b91c1c 100%);
+        }
+
+        .section,
+        .control-panel {
+            min-height: 0;
+            padding: 16px 14px;
+            background: linear-gradient(145deg, #ffffff 0%, #e5f3fc 100%);
+            border: 1px solid var(--mobile-border);
+            border-radius: var(--mobile-radius);
+            box-shadow: 0 10px 24px rgba(44, 104, 145, 0.12);
+        }
+
+        .control-panel {
+            padding: 14px;
+        }
+
+        .connection-selector {
+            margin-bottom: 18px;
+        }
+
+        .connection-list,
+        .online-user-list {
+            max-height: 42vh;
+            margin-top: 10px;
+            overflow-y: auto;
+            background: linear-gradient(145deg, #ffffff 0%, #e8f5fd 100%);
+            border: 1px solid var(--mobile-border);
+            border-radius: 10px;
+        }
+
+        .connection-item,
+        .online-user-item {
+            min-height: 56px;
+            padding: 10px 12px;
+            gap: 8px;
+            border-bottom-color: #e3eef8;
+        }
+
+        .connection-item > div:first-child,
+        .online-user-item > div:first-child {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .connection-item.selected,
+        .online-user-item.selected,
+        .schedule-item.selected {
+            background: #dff0ff;
+        }
+
+        .button-row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .button-row .button {
+            width: 100%;
+        }
+
+        .nav-tabs {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 7px;
+            margin: 0 0 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--mobile-border);
+        }
+
+        .nav-tab {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 9px 8px;
+            color: var(--mobile-muted);
+            background: #f5faff;
+            border: 1px solid #d8e8f7;
+            border-radius: 8px;
+            font-size: 0.86rem;
+            text-align: center;
+        }
+
+        .nav-tab.active {
+            color: #2f77ad;
+            background: #e2f1ff;
+            border-color: #9bc9f2;
+        }
+
+        .command-panel {
+            min-height: 0;
+        }
+
+        .mobile-integrated-header {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center !important;
+            margin: -4px -4px 12px !important;
+            padding: 0 0 10px !important;
+            background: transparent !important;
+            border-bottom: 1px solid var(--mobile-border) !important;
+        }
+
+        .mobile-integrated-tabs {
+            display: flex !important;
+            min-width: 0;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .mobile-integrated-tabs::-webkit-scrollbar {
+            display: none;
+        }
+
+        .mobile-nav-btn {
+            flex: 0 0 auto;
+            min-height: 42px;
+            padding: 9px 12px !important;
+            margin: 0 !important;
+            border: 1px solid transparent !important;
+            border-radius: 8px;
+            white-space: nowrap;
+        }
+
+        .mobile-nav-btn.active {
+            color: #2f77ad !important;
+            background: #e2f1ff !important;
+            border-color: #9bc9f2 !important;
+        }
+
+        .mobile-refresh-wrap .button {
+            min-width: 62px;
+            padding: 9px 10px;
+        }
+
+        .mobile-tab-content {
+            min-height: 0;
+            padding: 0;
+            background: transparent;
+            border: 0;
+        }
+
+        .mobile-tab-content > .points-ranking-container,
+        #mobile-ride-records-container,
+        #mobile-gain-records-container {
+            max-height: 58vh !important;
+            padding: 10px !important;
+            overflow-y: auto;
+            background: linear-gradient(145deg, #ffffff 0%, #e8f5fd 100%) !important;
+            border: 1px solid var(--mobile-border) !important;
+            border-radius: 10px !important;
+        }
+
+        #mobile-my-ride-records-container {
+            max-height: 58vh;
+            overflow-y: auto;
+        }
+
+        #mobile-my-ride-records-container > div {
+            padding: 13px !important;
+            margin-bottom: 10px !important;
+            background: linear-gradient(145deg, #ffffff 0%, #e8f5fd 100%) !important;
+            border: 1px solid var(--mobile-border) !important;
+            border-radius: 10px !important;
+            box-shadow: 0 3px 9px rgba(30, 64, 90, 0.05);
+        }
+
+        #mobile-my-ride-records-container > div > div:first-child {
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        #mobile-my-ride-records-container > div > div:first-child > span,
+        #mobile-my-ride-records-container > div > div:first-child > div {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #mobile-points-ranking-container > div {
+            display: grid !important;
+            grid-template-columns: 34px minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            min-height: 48px;
+            padding: 9px 4px !important;
+            border-bottom-color: #e3eef8 !important;
+        }
+
+        #mobile-points-ranking-container > div > span:first-child {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        #mobile-points-ranking-container > div > span:last-child {
+            white-space: nowrap;
+        }
+
+        .mobile-ride-filters {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px !important;
+            margin-bottom: 10px !important;
+        }
+
+        .mobile-ride-filters select {
+            min-width: 0 !important;
+            width: 100%;
+        }
+
+        .mobile-gain-toolbar {
+            margin-bottom: 10px;
+        }
+
+        .mobile-gain-tabs {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px !important;
+            margin-bottom: 8px !important;
+        }
+
+        .mobile-gain-tabs .button {
+            width: 100%;
+            min-width: 0;
+            padding: 9px 4px;
+        }
+
+        .mobile-gain-date {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px !important;
+        }
+
+        .mobile-gain-date input {
+            min-width: 0 !important;
+            width: 100%;
+        }
+
+        .mobile-gain-date .button {
+            white-space: nowrap;
+        }
+
+        #mobile-gain-records-container {
+            overflow-x: hidden !important;
+        }
+
+        #mobile-gain-records-container table {
+            width: 100% !important;
+            table-layout: fixed !important;
+            font-size: 0.8rem !important;
+        }
+
+        #mobile-gain-records-container th,
+        #mobile-gain-records-container td {
+            width: auto !important;
+            min-width: 0 !important;
+            padding: 9px 5px !important;
+            overflow-wrap: anywhere;
+            white-space: normal !important;
+        }
+
+        #mobile-gain-records-container th:nth-child(1),
+        #mobile-gain-records-container td:nth-child(1) {
+            width: 40px !important;
+        }
+
+        #mobile-gain-records-container th:nth-child(3),
+        #mobile-gain-records-container td:nth-child(3),
+        #mobile-gain-records-container th:nth-child(4),
+        #mobile-gain-records-container td:nth-child(4) {
+            width: 64px !important;
+        }
+
+        .no-connection,
+        .loading {
+            padding: 18px 10px;
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border-top-color: #3b82f6;
+        }
+
+        .error-message,
+        .success-message {
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 360px) {
+            .login-container,
+            .mobile-container {
+                width: 100%;
+            }
+
+            .section,
+            .control-panel {
+                padding: 13px 11px;
+                border-radius: 12px;
+            }
+
+            .nav-tabs {
+                grid-template-columns: 1fr;
+            }
+
+            .mobile-gain-date {
+                grid-template-columns: 1fr;
+            }
+
+            .mobile-gain-date .button {
+                width: 100%;
+            }
+
+            .mobile-ride-filters {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -362,7 +808,7 @@
             </div>
 
             <!-- 命令导航 -->
-            <div class="nav-tabs">
+            <div class="nav-tabs command-tabs">
                 <div class="nav-tab active" data-tab="online" onclick="switchTab('online')">上线</div>
                 <div class="nav-tab" data-tab="offline" onclick="switchTab('offline')">下线</div>
                 <div class="nav-tab" data-tab="process" onclick="switchTab('process')">关闭进程</div>
@@ -471,16 +917,16 @@
         </div>
 
         <!-- 集成功能面板 -->
-        <div class="section">
+        <div class="section integrated-section">
             <!-- 导航栏 -->
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
-                <div style="display: flex;">
-                    <button onclick="mobileShowTab('rooms')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 8px; font-weight: bold;" class="mobile-nav-btn active">房间信息</button>
-                    <button onclick="mobileShowTab('points')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">积分排行榜</button>
-                    <button onclick="mobileShowTab('ride')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">发车记录</button>
-                    <button onclick="mobileShowTab('gain')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">收益排行</button>
+            <div class="mobile-integrated-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
+                <div class="mobile-integrated-tabs" style="display: flex;">
+                    <button onclick="mobileShowTab('rooms', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 8px; font-weight: bold;" class="mobile-nav-btn active">房间信息</button>
+                    <button onclick="mobileShowTab('points', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">积分排行榜</button>
+                    <button onclick="mobileShowTab('ride', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">发车记录</button>
+                    <button onclick="mobileShowTab('gain', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">收益排行</button>
                 </div>
-                <div style="display: flex; gap: 10px;">
+                <div class="mobile-refresh-wrap" style="display: flex; gap: 10px;">
                     <button class="button button-secondary" onclick="mobileRefreshCurrentTab()">刷新</button>
                 </div>
             </div>
@@ -501,11 +947,11 @@
 
             <!-- 发车记录 -->
             <div id="mobile-ride" class="mobile-tab-content hidden">
-                <div style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: nowrap;">
+                <div class="mobile-ride-filters" style="margin-bottom: 10px; display: flex; gap: 10px; flex-wrap: nowrap;">
                     <select id="mobile-my-ride-filter-status" style="padding: 5px; flex: 1; min-width: 100px;" onchange="filterMyRideRecords()">
                         <option value="all">所有状态</option>
                         <option value="completed">已完成</option>
-                        <option value="waiting">等待中</option>
+                        <option value="waiting_for_ready">等待中</option>
                         <option value="crashed">已炸车</option>
                         <option value="cancelled">已取消</option>
                     </select>
@@ -520,13 +966,13 @@
 
             <!-- 收益排行 -->
             <div id="mobile-gain" class="mobile-tab-content hidden">
-                <div style="margin-bottom: 10px;">
-                    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                <div class="mobile-gain-toolbar" style="margin-bottom: 10px;">
+                    <div class="mobile-gain-tabs" style="display: flex; gap: 5px; margin-bottom: 10px;">
                         <button class="button button-secondary" id="mobile-gain-tab-day" onclick="switchMobileGainTab('day')" style="background-color: #1976D2; color: white; flex: 1;">日榜</button>
                         <button class="button button-secondary" id="mobile-gain-tab-week" onclick="switchMobileGainTab('week')" style="flex: 1;">周榜</button>
                         <button class="button button-secondary" id="mobile-gain-tab-version" onclick="switchMobileGainTab('version')" style="flex: 1;">版榜</button>
                     </div>
-                    <div id="mobile-gain-date-section" style="display: flex; gap: 10px;">
+                    <div id="mobile-gain-date-section" class="mobile-gain-date" style="display: flex; gap: 10px;">
                         <input type="date" id="mobile-gain-date-input" style="padding: 5px; flex: 1; min-width: 120px;">
                         <button class="button button-secondary" onclick="loadMobileGainRecords()">查询</button>
                     </div>
@@ -591,6 +1037,13 @@
             setTimeout(() => {
                 msgEl.style.display = 'none';
             }, 3000);
+        }
+
+        function getDateInputValue(date = new Date()) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
         }
 
         function mobileLogout() {
@@ -666,12 +1119,16 @@
                 isLoggingIn = false;
                 loginBtn.disabled = false;
                 loginBtn.textContent = '连接';
+                loginSocket.disconnect();
             });
 
             loginSocket.on('disconnect', function(reason) {
                 console.log('断开连接:', reason);
                 isLoggedIn = false;
                 isLoggingIn = false;
+                if (socket === loginSocket) {
+                    showCmdMessage('连接已断开，请重新登录');
+                }
             });
 
             loginSocket.on('message', function(data) {
@@ -699,11 +1156,11 @@
                     loggedInAccountId = data.accountId || account;
 
                     // 保存登录信息
-                    const account = document.getElementById('login-account').value.trim();
+                    const loginAccount = document.getElementById('login-account').value.trim();
                     const rememberPassword = document.getElementById('remember-password').checked;
                     const autoLogin = document.getElementById('auto-login').checked;
                     
-                    localStorage.setItem('mobileAccount', account);
+                    localStorage.setItem('mobileAccount', loginAccount);
                     if (rememberPassword) {
                         localStorage.setItem('mobilePassword', password);
                     } else {
@@ -719,8 +1176,7 @@
                     document.getElementById('main-container').classList.remove('hidden');
 
                     // 设置收益排行榜日期选择的默认值为今天
-                    const today = new Date();
-                    const todayStr = today.toISOString().split('T')[0];
+                    const todayStr = getDateInputValue();
                     const dateInput = document.getElementById('mobile-gain-date-input');
                     if (dateInput) {
                         dateInput.value = todayStr;
@@ -743,6 +1199,7 @@
                     isLoggingIn = false;
                     loginBtn.disabled = false;
                     loginBtn.textContent = '连接';
+                    loginSocket.disconnect();
                 }
             });
         }
@@ -750,19 +1207,29 @@
         function handleMessage(data) {
             console.log('收到消息:', data);
 
+            if (!data || !data.type) return;
+
             if (data.type === 'mobile-connections-list') {
-                connections = data.data.connections || [];
+                const payload = data.data || {};
+                connections = Array.isArray(payload.connections) ? payload.connections : [];
                 renderConnections();
             } else if (data.type === 'mobile-command-result') {
-                if (data.data.success) {
-                    showCmdMessage(data.data.message || '命令执行成功', 'success');
+                const result = data.data || {};
+                if (result.success) {
+                    showCmdMessage(result.message || '命令已发送', 'success');
                     loadConnections();
                     if (selectedConnectionId) {
                         loadOnlineUsers();
                     }
                 } else {
-                    showCmdMessage(data.data.message || '命令执行失败');
+                    showCmdMessage(result.message || '命令执行失败');
                 }
+            } else if (data.type === 'error') {
+                showCmdMessage(data.message || '服务器处理失败');
+                ['connection-loading', 'offline-loading', 'schedule-loading'].forEach(id => {
+                    const element = document.getElementById(id);
+                    if (element) element.classList.add('hidden');
+                });
             } else if (data.type === 'rooms-status') {
                 const rooms = data.data || {};
                 const allOnlineItems = data.allOnlineItems || [];
@@ -776,7 +1243,7 @@
             } else if (data.type === 'available-rooms') {
                 const roomSelect = document.getElementById('online-room');
                 roomSelect.innerHTML = '';
-                data.data.forEach(room => {
+                (Array.isArray(data.data) ? data.data : []).forEach(room => {
                     const option = document.createElement('option');
                     option.value = room;
                     option.textContent = room;
@@ -799,7 +1266,7 @@
                     loadMobileRooms();
                 }
             } else if (data.type === 'schedules-list') {
-                schedules = data.data.schedules || [];
+                schedules = data.data && Array.isArray(data.data.schedules) ? data.data.schedules : [];
                 renderSchedules();
             }
         }
@@ -927,6 +1394,7 @@
         }
 
         function loadConnections() {
+            if (!socket || !socket.connected || !isLoggedIn) return;
             document.getElementById('connection-loading').classList.remove('hidden');
             document.getElementById('connection-list').classList.add('hidden');
             document.getElementById('no-connection').classList.add('hidden');
@@ -963,6 +1431,11 @@
                         </div>
                     </div>
                 `).join('');
+                if (selectedConnectionId && connections.some(conn => conn.connectionId === selectedConnectionId)) {
+                    selectConnection(selectedConnectionId);
+                } else if (selectedConnectionId) {
+                    selectedConnectionId = null;
+                }
             }
         }
 
@@ -1059,6 +1532,10 @@
         }
 
         function sendScheduleCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1099,26 +1576,29 @@
             }
         }
 
-        function mobileShowTab(tabId) {
+        function mobileShowTab(tabId, button) {
             // 隐藏所有标签内容
             document.querySelectorAll('.mobile-tab-content').forEach(content => {
                 content.classList.add('hidden');
             });
 
             // 更新所有导航按钮的样式
-            document.querySelectorAll('.mobile-nav-btn').forEach(button => {
-                button.style.color = '#666';
-                button.style.borderBottom = '2px solid transparent';
-                button.style.fontWeight = '500';
+            document.querySelectorAll('.mobile-nav-btn').forEach(navButton => {
+                navButton.classList.remove('active');
+                navButton.style.removeProperty('color');
+                navButton.style.removeProperty('border-bottom');
+                navButton.style.removeProperty('font-weight');
             });
 
             // 显示选中的标签内容
             document.getElementById('mobile-' + tabId).classList.remove('hidden');
 
             // 更新点击按钮的样式
-            event.target.style.color = '#1976D2';
-            event.target.style.borderBottom = '2px solid #1976D2';
-            event.target.style.fontWeight = 'bold';
+            const activeButton = button || Array.from(document.querySelectorAll('.mobile-nav-btn'))
+                .find(item => item.getAttribute('onclick')?.includes(`'${tabId}'`));
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
 
             // 加载对应标签的数据
             if (tabId === 'rooms') {
@@ -1381,7 +1861,7 @@
                     recordDiv.style.borderColor = '#1976D2';
                 } else if (record.status === 'crashed' || record.status === 'cancelled') {
                     recordDiv.style.borderColor = '#f44336';
-                } else if (record.status === 'waiting') {
+                } else if (record.status === 'waiting_for_ready') {
                     recordDiv.style.borderColor = '#4CAF50';
                 }
 
@@ -1409,7 +1889,7 @@
                     <div style="margin-top: 8px; font-size: 13px; color: #666;">
                         <div>房主: ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${maskUid(host.uid)})` : '无'}</div>
                         <div>队员: ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${maskUid(m.uid)})`).join(', ') : '无'}</div>
-                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting' ? '等待中' : record.status}</div>
+                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : record.status}</div>
                     </div>
                 `;
                 container.appendChild(recordDiv);
@@ -1417,6 +1897,10 @@
         }
 
         function sendOnlineCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1448,6 +1932,10 @@
         }
 
         function sendOfflineCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1473,6 +1961,10 @@
         }
 
         function sendProcessCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1490,6 +1982,10 @@
         }
 
         function sendYJLCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;

@@ -5,453 +5,420 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>莫酱妙妙屋</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
         :root {
             font-size: 16px;
+            color-scheme: light;
+            --blue-950: #245575;
+            --blue-800: #3178aa;
+            --blue-700: #3b8fc8;
+            --blue-600: #58abe0;
+            --blue-200: #a9d5ef;
+            --blue-100: #e4f4ff;
+            --blue-050: #f1f9ff;
+            --ink-900: #214765;
+            --ink-600: #5d7e98;
+            --line: #afd2e9;
+            --danger: #d9485f;
+            --danger-dark: #b8324a;
+            --shadow: 0 18px 48px rgba(55, 116, 157, 0.14);
+            --soft-shadow: 0 7px 18px rgba(55, 116, 157, 0.09);
         }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        html { min-width: 320px; background: #f4fbff; }
+
         body {
-            font-family: Arial, sans-serif;
             margin: 0;
-            padding: 0;
-            background-color: #e3f2fd;
-            color: #333;
-            overflow-x: hidden;
-            overflow-y: auto;
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
+            overflow-x: hidden;
+            color: var(--ink-900);
+            font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+            background:
+                radial-gradient(circle at 12% 5%, rgba(255, 255, 255, 0.9), transparent 32%),
+                linear-gradient(135deg, #edf9ff 0%, #d4edfc 48%, #f4fbff 100%);
         }
+
+        button, input, select { font: inherit; }
+        button { -webkit-tap-highlight-color: transparent; }
+
+        .hidden { display: none !important; }
+
         .main-wrapper {
             width: 100%;
-            display: flex;
             min-height: 100vh;
+            padding: 28px clamp(14px, 4vw, 56px) 44px;
         }
-        .left-space {
-            width: 15%;
-            min-height: 100vh;
-        }
+
+        .left-space, .right-space { display: none; }
+
         .content-area {
-            width: 70%;
-            max-width: 1400px;
-            min-height: 100vh;
-            background-color: white;
-            padding: 20px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
+            width: min(100%, 1500px);
+            min-height: calc(100vh - 72px);
+            margin: 0 auto;
+            padding: clamp(18px, 2.5vw, 34px);
+            display: grid;
+            grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+            grid-template-rows: auto 1fr;
+            gap: 22px;
+            background: rgba(242, 250, 255, 0.95);
+            border: 1px solid #b3d8ed;
+            border-radius: 22px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(18px);
         }
-        .right-space {
-            width: 15%;
-            min-height: 100vh;
-        }
-        .left-panel {
-            flex: 0 0 30%;
-            min-width: 300px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        .right-panel {
-            flex: 1;
-            min-width: 400px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-        .login-container {
-            width: 500px;
-            min-height: 300px;
-            margin: auto;
-            background-color: white;
-            padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            position: relative;
-            z-index: 1;
-        }
+
         h1 {
-            text-align: center;
-            color: #1976D2;
-            margin: 0 0 20px 0;
-            font-size: 2rem;
-            width: 100%;
+            grid-column: 1 / -1;
+            margin: 0;
+            padding: 0 4px 4px;
+            color: var(--blue-950);
+            font-size: clamp(1.45rem, 2vw, 2rem);
+            font-weight: 750;
+            letter-spacing: 0;
         }
-        .section {
-            padding: 15px;
-            border: 1px solid #bbdefb;
-            border-radius: 5px;
-            background-color: #f5f9ff;
-            min-height: 100px;
+
+        h1 span { color: var(--blue-700) !important; font-weight: 600; }
+
+        .left-panel, .right-panel {
+            min-width: 0;
             display: flex;
             flex-direction: column;
+            gap: 18px;
         }
+
+        .right-panel { min-height: 0; }
+
+        .section {
+            min-height: 0;
+            padding: 20px;
+            overflow: hidden;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.99), rgba(240, 249, 255, 0.98));
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            box-shadow: var(--soft-shadow);
+        }
+
         .section h2 {
-            color: #1976D2;
-            margin-top: 0;
-            margin-bottom: 15px;
-            border-bottom: 1px solid #bbdefb;
-            padding-bottom: 8px;
-            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin: 0 0 18px;
+            padding: 0 0 13px;
+            color: var(--blue-950);
+            border-bottom: 1px solid var(--line);
+            font-size: 1.05rem;
+            font-weight: 750;
         }
-        .form-group {
-            margin-bottom: 12px;
+
+        .section h2::before {
+            width: 4px;
+            height: 18px;
+            flex: 0 0 4px;
+            content: "";
+            border-radius: 4px;
+            background: linear-gradient(180deg, var(--blue-600), var(--blue-800));
         }
-        .form-group:last-child {
-            margin-bottom: 0;
-        }
+
+        .account-section { background: linear-gradient(155deg, #ffffff 0%, #f5fbff 100%); }
+        #account-info { margin-bottom: 14px !important; padding: 11px 13px !important; background: var(--blue-050); border: 1px solid var(--line); border-radius: 10px; }
+        #account-info > div { margin-bottom: 0 !important; padding: 8px 0; border-bottom: 1px solid #cfe4f2; }
+        #account-info > div:last-child { border-bottom: 0; }
+        #account-info strong { color: var(--ink-600); font-weight: 650; }
+        #account-info .button { min-height: 36px; padding: 7px 12px; font-size: 0.78rem; }
+        .account-actions { gap: 8px !important; }
+        .account-actions .button { width: 100%; margin: 0; }
+        .account-actions > div { color: var(--ink-600); font-size: 0.78rem; }
+
+        .online-section, .automation-section { background: linear-gradient(155deg, #ffffff 0%, #f7fcff 100%); }
+        .online-section > div:first-of-type, .automation-section > div:first-of-type { padding: 2px 0 13px !important; border-bottom: 1px solid var(--line); }
+        .online-section h3 { color: var(--blue-800) !important; font-size: 0.84rem !important; }
+        .schedule-section { min-height: 0; }
+        .schedule-section > div:first-child { gap: 14px; }
+        .schedule-section > div:first-child > div { display: flex; flex-wrap: wrap; gap: 8px !important; }
+        .schedule-section > div:first-child .button { margin: 0; }
+        .integrated-section { min-height: 0; }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group:last-child { margin-bottom: 0; }
+
         label {
             display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-            color: #333;
-            font-size: 0.9rem;
+            margin-bottom: 7px;
+            color: var(--ink-600);
+            font-size: 0.82rem;
+            font-weight: 650;
         }
-        input[type="text"], input[type="password"], select {
+
+        input[type="text"], input[type="password"], input[type="date"], select {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            font-size: 0.9rem;
+            min-height: 40px;
+            padding: 9px 12px;
+            color: var(--ink-900);
+            background: #ffffff;
+            border: 1px solid #cfe6f4;
+            border-radius: 9px;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
         }
+
+        input[type="text"]:focus, input[type="password"]:focus, input[type="date"]:focus, select:focus {
+            background: white;
+            border-color: var(--blue-600);
+            box-shadow: 0 0 0 3px rgba(47, 139, 209, 0.14);
+        }
+
+        input::placeholder { color: #9aafc1; }
+        input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 0; accent-color: var(--blue-700); cursor: pointer; }
+
         .button {
-            background-color: #1976D2;
+            min-height: 40px;
+            padding: 9px 15px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1.2;
             color: white;
-            padding: 8px 15px;
-            border: none;
-            border-radius: 4px;
+            background: linear-gradient(135deg, var(--blue-600), #449bd5);
+            border: 0;
+            border-radius: 9px;
+            box-shadow: 0 5px 12px rgba(25, 118, 200, 0.16);
             cursor: pointer;
-            margin-right: 8px;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
+            font-size: 0.84rem;
+            font-weight: 650;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
         }
-        .button:hover {
-            background-color: #1565C0;
+
+        .button:hover:not(:disabled) {
+            filter: brightness(1.05);
+            box-shadow: 0 8px 18px rgba(25, 118, 200, 0.22);
+            transform: translateY(-1px);
         }
-        .button-danger {
-            background-color: #f44336;
-        }
-        .button-danger:hover {
-            background-color: #da190b;
-        }
+
+        .button:active:not(:disabled) { transform: translateY(0); }
+        .button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+
         .button-secondary {
-            background-color: #64B5F6;
+            color: var(--blue-800);
+            background: var(--blue-100);
+            border: 1px solid var(--blue-200);
+            box-shadow: none;
         }
-        .button-secondary:hover {
-            background-color: #42A5F5;
-        }
-        .button-success {
-            background-color: #4CAF50;
-        }
-        .button-success:hover {
-            background-color: #45a049;
-        }
-        .button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
-        .button-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-        }
-        .hidden {
-            display: none;
-        }
+
+        .button-secondary:hover:not(:disabled) { background: #e1f4fd; box-shadow: none; }
+        .button-success { background: linear-gradient(135deg, #78bee8, #449ad5); }
+        .button-danger { background: linear-gradient(135deg, var(--danger), var(--danger-dark)); }
+        .button-danger:hover:not(:disabled) { box-shadow: 0 8px 18px rgba(217, 72, 95, 0.22); }
+
+        .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+        .button-row .button { margin: 0; }
+
         .error-message {
-            color: red;
-            margin-top: 10px;
-            font-size: 0.9rem;
+            margin-top: 12px;
+            padding: 10px 12px;
+            color: #b8324a;
+            background: #fff0f2;
+            border: 1px solid #f4c4cc;
+            border-radius: 9px;
+            font-size: 0.82rem;
         }
-        
-        /* 子用户列表 */
-        .subuser-list {
-            max-height: 150px;
-            overflow-y: auto;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            background-color: white;
-            margin-top: 10px;
+
+        .success-message {
+            margin-top: 12px;
+            padding: 10px 12px;
+            color: #185a91;
+            background: var(--blue-100);
+            border: 1px solid var(--blue-200);
+            border-radius: 9px;
+            font-size: 0.82rem;
         }
+
+        .login-container {
+            width: min(440px, calc(100% - 28px));
+            min-height: 0;
+            margin: clamp(28px, 12vh, 120px) auto;
+            padding: clamp(26px, 5vw, 42px);
+            text-align: left;
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.98);
+            border-radius: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .login-container h1 { margin-bottom: 7px; text-align: left; }
+        .login-container h2 { margin: 0 0 26px; color: var(--ink-600); font-size: 0.95rem; font-weight: 550; }
+        .login-container > .button { width: 100%; min-height: 44px; margin-top: 7px; font-size: 0.9rem; }
+        .login-container .form-group[style*="align-items"] { margin-top: 3px; }
+
+        #login-update-progress {
+            background: var(--blue-050) !important;
+            border: 1px solid var(--blue-200) !important;
+            border-radius: 12px !important;
+        }
+
+        #login-update-progress > div:first-child { color: var(--blue-800) !important; }
+
+        .subuser-list, .schedule-list, .rooms-container, .points-ranking-container, .log-container {
+            overflow: auto;
+            background: var(--blue-050);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            scrollbar-color: #a9cde8 transparent;
+        }
+
+        #pools-container, #points-ranking-container, #my-ride-records-container, #gain-records-container, #log-container {
+            background: var(--blue-050) !important;
+            border-color: var(--line) !important;
+            border-radius: 10px !important;
+        }
+
+        .subuser-list { max-height: 210px; margin-top: 12px; }
+
         .subuser-item {
-            padding: 8px 10px;
-            border-bottom: 1px solid #e3f2fd;
+            min-height: 54px;
+            padding: 10px 12px;
+            border-bottom: 1px solid #e3eff8;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 0.9rem;
+            font-size: 0.83rem;
+            transition: background-color 0.18s ease;
         }
-        .subuser-item:last-child {
-            border-bottom: none;
-        }
-        .subuser-item:hover {
-            background-color: #e3f2fd;
-        }
-        .subuser-item.selected {
-            background-color: #bbdefb;
-        }
-        .subuser-delete {
-            color: #f44336;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
-        .subuser-delete:hover {
-            text-decoration: underline;
-        }
-        .subuser-edit {
-            color: #2196f3;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
-        .subuser-edit:hover {
-            text-decoration: underline;
-        }
-        .subuser-execute {
-            color: #2196f3;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
-        .subuser-execute:hover {
-            text-decoration: underline;
-        }
-        
-        /* 调度任务样式 */
-        .schedule-list {
-            flex: 1;
-            min-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            background-color: #f0f8ff;
-            padding: 0;
-        }
+
+        .subuser-item:last-child { border-bottom: 0; }
+        .subuser-item:hover, .subuser-item.selected { background: #e2f2fd; }
+        .subuser-delete, .subuser-edit, .subuser-execute { cursor: pointer; font-size: 0.76rem; font-weight: 650; }
+        .subuser-delete { color: var(--danger); }
+        .subuser-edit, .subuser-execute { color: var(--blue-700); }
+        .subuser-delete:hover, .subuser-edit:hover, .subuser-execute:hover { text-decoration: underline; }
+
+        .schedule-list { min-height: 240px; max-height: 420px; padding: 5px; }
+
         .schedule-item {
+            min-height: 68px;
+            margin: 5px;
+            padding: 13px 14px;
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            padding: 10px;
-            margin: 8px;
-            min-height: 50px;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            background-color: white;
+            gap: 14px;
+            background: white;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease;
         }
-        .schedule-info {
-            flex: 1;
-        }
-        .schedule-name {
-            font-weight: bold;
-            margin-bottom: 5px;
-            color: #1976D2;
-        }
-        .schedule-detail {
-            font-size: 0.8rem;
-            color: #1976D2;
-            margin-bottom: 3px;
-        }
-        .schedule-actions {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-            margin-left: 10px;
-        }
-        
-        /* 房间信息区 */
-        .rooms-container {
-            flex: 1;
-            height: 360px;
-            overflow-y: auto;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            background-color: #f0f8ff;
-            padding: 15px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
+
+        .schedule-item:hover { border-color: #8dc3e8; box-shadow: 0 5px 14px rgba(44, 112, 157, 0.1); }
+        .schedule-info { min-width: 0; flex: 1; }
+        .schedule-name { margin-bottom: 6px; color: var(--blue-800); font-weight: 750; }
+        .schedule-detail { margin-bottom: 4px; color: var(--ink-600); font-size: 0.77rem; line-height: 1.45; overflow-wrap: anywhere; }
+        .schedule-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: auto; }
+
+        .rooms-container { height: clamp(300px, 45vh, 520px); padding: 13px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+
         .room-card {
-            background-color: white;
-            padding: 12px;
-            border-radius: 4px;
-            border: 1px solid #bbdefb;
-            flex: 0 1 calc(50% - 8px);
-            min-width: 300px;
-            box-sizing: border-box;
+            min-width: 0;
+            padding: 15px;
+            background: white;
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            box-shadow: 0 4px 12px rgba(38, 103, 148, 0.06);
         }
-        .room-card h3 {
-            margin-top: 0;
-            margin-bottom: 8px;
-            color: #1976D2;
-            font-size: 1.1rem;
-            padding-bottom: 5px;
-        }
-        .room-users {
-            font-size: 0.9rem;
-        }
-        .room-user-item {
-            padding: 3px 0;
-            color: #666;
-        }
-        
-        /* 积分排行榜 */
-        .points-ranking-container {
-            height: 300px;
-            overflow-y: auto;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            background-color: #f0f8ff;
-            padding: 0;
-        }
-        .points-ranking-item {
-            display: flex;
-            justify-content: space-between;
+
+        .room-card h3 { margin: 0 0 10px; padding-bottom: 9px; color: var(--blue-800); border-bottom: 1px solid var(--line); font-size: 0.98rem; }
+        .room-users { color: var(--ink-600); font-size: 0.82rem; line-height: 1.55; }
+        .room-user-item { padding: 4px 0; overflow-wrap: anywhere; }
+
+        .points-ranking-container, .log-container { height: clamp(300px, 45vh, 520px); padding: 0; }
+        .points-ranking-item { min-height: 48px; padding: 11px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #cfe4f2; }
+        .points-ranking-item:last-child { border-bottom: 0; }
+        .points-ranking-item.self { background: #e6f4ff; }
+        .points-ranking-rank { flex: 0 0 34px; color: var(--blue-700); font-weight: 750; }
+        .points-ranking-account { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .points-ranking-points { flex: 0 0 60px; margin-left: auto; color: var(--blue-800); font-weight: 750; text-align: right; white-space: nowrap; }
+
+        .log-container { padding: 14px; color: var(--ink-600); font-family: "Cascadia Mono", "Courier New", monospace; font-size: 0.76rem; line-height: 1.65; }
+        .log-entry { margin-bottom: 7px; overflow-wrap: anywhere; }
+        .log-success { color: #216ab0; }
+        .log-error { color: var(--danger); }
+        .log-info { color: var(--blue-700); }
+        .log-warning { color: #b87819; }
+
+        .folder-display { min-height: 40px; padding: 10px 12px; color: var(--ink-600); background: var(--blue-050); border: 1px solid var(--line); border-radius: 9px; font-size: 0.78rem; overflow-wrap: anywhere; }
+
+        .status-indicator { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; }
+        .status-online { background: #2f8bd1; }
+        .status-offline { background: #aab9c5; }
+
+        .nav-button {
+            flex: 0 0 auto;
+            min-height: 40px;
+            padding: 11px 14px !important;
+            display: inline-flex;
             align-items: center;
-            padding: 8px 10px;
-            height: 36px;
-            box-sizing: border-box;
-            border-bottom: 1px solid #e3f2fd;
+            justify-content: center;
+            color: var(--ink-600) !important;
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            background: transparent !important;
+            font-size: 0.82rem !important;
+            font-weight: 650 !important;
+            white-space: nowrap;
         }
-        .points-ranking-item:last-child {
-            border-bottom: none;
+
+        .nav-button:hover { color: var(--blue-700) !important; background: var(--blue-050) !important; }
+        .nav-button.active { color: var(--blue-700) !important; border-bottom-color: var(--blue-700) !important; }
+        .integrated-header { gap: 12px; background: var(--blue-050) !important; border-bottom: 1px solid var(--line) !important; border-radius: 10px 10px 0 0; }
+        .integrated-tabs { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+        .integrated-tabs::-webkit-scrollbar { display: none; }
+        .integrated-actions { flex: 0 0 auto; }
+        .tab-content { min-height: 0; padding: 0; }
+        .tab-content.hidden { display: none !important; }
+
+        #change-password-modal, #version-check-modal, #custom-modal, #schedule-modal, #preset-modal { background: rgba(91, 154, 193, 0.28) !important; backdrop-filter: blur(5px); }
+        #change-password-modal > div, #version-check-modal > div, #custom-modal > div, #schedule-modal > div, #preset-modal > div { border: 1px solid var(--line); border-radius: 14px !important; box-shadow: var(--shadow); }
+
+        @media (max-width: 1080px) {
+            .content-area { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); gap: 16px; }
+            .section { padding: 17px; }
         }
-        .points-ranking-item.self {
-            background-color: #e3f2fd;
+
+        @media (max-width: 820px) {
+            .main-wrapper { padding: 12px 10px 24px; }
+            .content-area { min-height: 0; grid-template-columns: 1fr; grid-template-rows: auto auto auto; padding: 14px; border-radius: 16px; }
+            .left-panel, .right-panel { gap: 14px; }
+            .rooms-container, .points-ranking-container, .log-container { height: 360px; }
+            .schedule-list { max-height: 360px; }
         }
-        .points-ranking-rank {
-            font-weight: bold;
-            width: 30px;
-            color: #1976D2;
+
+        @media (max-width: 560px) {
+            .content-area { padding: 10px; }
+            .section { padding: 14px; border-radius: 12px; }
+            .section h2 { margin-bottom: 15px; }
+            .button-row { width: 100%; }
+            .button-row .button { flex: 1 1 auto; }
+            .schedule-actions { width: 100%; margin-top: 4px; margin-left: 0; justify-content: flex-start; }
+            .schedule-item { flex-direction: column; gap: 4px; }
+            .rooms-container { grid-template-columns: 1fr; height: 330px; padding: 9px; }
+            .points-ranking-container, .log-container { height: 330px; }
+            .points-ranking-item { gap: 6px; padding: 10px 11px; }
+            .points-ranking-rank { flex-basis: 26px; }
+            .points-ranking-points { flex-basis: 52px; }
+            .nav-button { padding: 10px 11px !important; }
+            .integrated-header { align-items: stretch !important; padding: 0 !important; }
+            .integrated-actions { padding: 8px 8px 8px 0; }
+            .integrated-actions .button { min-height: 40px; padding: 8px 10px; }
+            #gain-date-section { flex-wrap: wrap !important; }
+            #gain-date-section .button { width: 100%; margin: 0; }
+            #gain-date-input { flex: 1 1 100% !important; }
+            .login-container { margin: 20px auto; padding: 24px 20px; }
         }
-        .points-ranking-account {
-            flex: 1;
-        }
-        .points-ranking-points {
-            font-weight: bold;
-            color: #4CAF50;
-        }
-        
-        /* 日志窗口 */
-        .log-container {
-            height: 360px;
-            overflow-y: auto;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            background-color: #f0f8ff;
-            padding: 10px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.8rem;
-            line-height: 1.5;
-            box-sizing: border-box;
-        }
-        .log-entry {
-            margin-bottom: 5px;
-            word-wrap: break-word;
-        }
-        .log-success { color: #4CAF50; }
-        .log-error { color: #f44336; }
-        .log-info { color: #1976D2; }
-        .log-warning { color: #FF9800; }
-        
-        /* 文件夹路径显示 */
-        .folder-display {
-            background-color: white;
-            padding: 8px;
-            border: 1px solid #bbdefb;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            color: #666;
-            word-break: break-all;
-            min-height: 36px;
-        }
-        
-        /* 状态指示器 */
-        .status-indicator {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        .status-online { background-color: #4CAF50; }
-        .status-offline { background-color: #f44336; }
-        
-        /* 响应式设计 */
-        @media (max-width: 768px) {
-            .left-panel,
-            .right-panel {
-                flex: 1 1 100%;
-                min-width: 100%;
-            }
-            
-            .room-card {
-                flex: 1 1 100%;
-                min-width: 100%;
-            }
-            
-            .login-container {
-                max-width: 90%;
-                min-height: 250px;
-                margin: auto;
-                padding: 30px;
-            }
-        }
-        
-        /* 小窗口适配 */
-        @media (max-height: 600px) {
-            .section {
-                min-height: 150px;
-            }
-            
-            .schedule-list,
-            .points-ranking-container,
-            .log-container {
-                min-height: 150px;
-            }
-            
-            /* 导航按钮样式 */
-            .nav-button {
-                padding: 8px 15px;
-                border: none;
-                background: none;
-                cursor: pointer;
-                font-size: 14px;
-                color: #666;
-                border-bottom: 2px solid transparent;
-                margin-right: 10px;
-                font-weight: 500;
-            }
-            
-            .nav-button:hover {
-                color: #1976D2;
-                background-color: #f0f8ff;
-            }
-            
-            .nav-button.active {
-                color: #1976D2;
-                border-bottom-color: #1976D2;
-                font-weight: bold;
-                background-color: #f0f8ff;
-            }
-            
-            /* 标签内容样式 */
-            .tab-content {
-                min-height: 400px;
-                padding: 15px;
-                background-color: #f0f8ff;
-                border: 1px solid #bbdefb;
-                border-radius: 4px;
-            }
-            
-            .tab-content.hidden {
-                display: none;
-            }
+
+        @media (max-height: 600px) and (min-width: 821px) {
+            .main-wrapper { padding-top: 14px; padding-bottom: 18px; }
+            .content-area { min-height: 0; }
+            .rooms-container, .points-ranking-container, .log-container { height: 300px; }
         }
     </style>
 </head>
@@ -477,10 +444,10 @@
 
         <!-- 自动更新进度显示（登录界面） -->
         <div id="login-update-progress" style="display: none; margin-top: 20px; padding: 15px; background-color: #f0f8ff; border: 1px solid #bbdefb; border-radius: 4px;">
-            <div style="margin-bottom: 10px; color: #1976D2; font-weight: bold;">自动更新团购中...</div>
+            <div style="margin-bottom: 10px; color: #1976D2; font-weight: bold;">启动更新检查中...</div>
             <div id="login-update-status" style="margin-bottom: 10px; font-size: 14px;">准备下载...</div>
             <div style="width: 100%; height: 20px; background-color: #f0f0f0; border-radius: 10px; overflow: hidden;">
-                <div id="login-progress-bar" style="height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                <div id="login-progress-bar" style="height: 100%; background-color: #2f8bd1; width: 0%; transition: width 0.3s ease;"></div>
             </div>
             <div id="login-progress-text" style="margin-top: 5px; font-size: 12px; color: #666;">0%</div>
         </div>
@@ -490,12 +457,12 @@
     <div id="main-container" class="main-wrapper hidden">
         <div class="left-space"></div>
         <div class="content-area">
-            <h1>莫酱妙妙屋 <span id="version" style="font-size: 12px; color: #1976D2;"></span></h1>
+            <h1 class="app-title">莫酱妙妙屋 <span id="version" style="font-size: 12px; color: #1976D2;"></span></h1>
             <!-- 左侧功能区 -->
             <div class="left-panel">
             
             <!-- 手动上线管理 -->
-            <div class="section">
+            <div class="section online-section">
                 <h2>手动上线管理</h2>
                 <!-- 上线板块 -->
                 <div style="margin-bottom: 5px; padding-bottom: 5px;">
@@ -531,7 +498,7 @@
             </div>
             
             <!-- 3. BGI功能测试 -->
-            <div class="section">
+            <div class="section automation-section">
                 <h2>BGI功能测试</h2>
                 <div class="form-group">
                     <label>BGI文件夹：</label>
@@ -556,12 +523,12 @@
             </div>
             
             <!-- 账户管理 -->
-            <div class="section">
+            <div class="section account-section">
                 <h2>账户管理</h2>
                 <div id="account-info" style="margin-bottom: 5px; padding: 10px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span><strong>用户名：</strong><span id="account-username">-</span></span>
-                        <button class="button button-secondary" onclick="refreshAccountInfo()" style="padding: 4px 12px; font-size: 12px;">刷新</button>
+                        <button class="button button-secondary" onclick="refreshAccountInfo()">刷新</button>
                     </div>
                     <div style="margin-bottom: 8px;">
                         <strong>积分：</strong><span id="account-points">0</span>
@@ -582,18 +549,26 @@
                         <strong>自定义连接名称：</strong>
                         <div style="display: flex; gap: 5px; margin-top: 5px;">
                             <input type="text" id="connection-name-input" placeholder="留空则自动分配为连接1、连接2..." style="flex: 1; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
-                            <button class="button button-secondary" onclick="updateConnectionName()" style="padding: 4px 8px; font-size: 12px;">修改</button>
+                            <button class="button button-secondary" onclick="updateConnectionName()">修改</button>
                         </div>
                     </div>
                 </div>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 2px;">
+                <div class="account-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 2px;">
                     <button class="button" onclick="openChangePasswordModal()">修改密码</button>
                     <button class="button button-danger" onclick="logout()">退出登录</button>
                     <button class="button" onclick="openVersionCheckModal()">版本检查</button>
                     <div style="display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px;">
+                        <input type="checkbox" id="auto-update-client">
+                        <label for="auto-update-client">启动时自动更新用户端</label>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px;">
                         <input type="checkbox" id="auto-update-group" checked>
                         <label for="auto-update-group">自动更新团购</label>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px;">
+                        <input type="checkbox" id="minimize-on-start">
+                        <label for="minimize-on-start">启动后立即最小化</label>
                     </div>
                 </div>
             </div>
@@ -602,7 +577,7 @@
         <!-- 右侧显示区 -->
         <div class="right-panel">
             <!-- 上面：任务调度窗口 -->
-            <div class="section">
+            <div class="section schedule-section">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <h2>任务调度</h2>
                     <div style="display: flex; gap: 10px;">
@@ -616,17 +591,17 @@
             </div>
             
             <!-- 集成功能面板 -->
-            <div class="section">
+            <div class="section integrated-section">
                 <!-- 导航栏 -->
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
-                    <div style="display: flex;">
-                        <button onclick="showTab('rooms')" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 10px; font-weight: bold;" class="nav-button active">房间信息</button>
-                        <button onclick="showTab('logs')" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">日志</button>
-                        <button onclick="showTab('points')" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">积分排行榜</button>
-                        <button onclick="showTab('ride')" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">发车记录</button>
-                        <button onclick="showTab('gain')" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">收益排行榜</button>
+                <div class="integrated-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
+                    <div class="integrated-tabs" style="display: flex;">
+                        <button onclick="showTab('rooms', this)" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 10px; font-weight: bold;" class="nav-button active">房间信息</button>
+                        <button onclick="showTab('logs', this)" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">日志</button>
+                        <button onclick="showTab('points', this)" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">积分排行榜</button>
+                        <button onclick="showTab('ride', this)" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">发车记录</button>
+                        <button onclick="showTab('gain', this)" style="padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 16px; color: #666; border-bottom: 2px solid transparent; margin-right: 10px; font-weight: 500;" class="nav-button">收益排行榜</button>
                     </div>
-                    <div style="display: flex; gap: 10px;">
+                    <div class="integrated-actions" style="display: flex; gap: 10px;">
                         <button class="button button-secondary" onclick="refreshCurrentTab()">刷新</button>
                     </div>
                 </div>
@@ -668,7 +643,7 @@
                         <select id="my-ride-filter-status" style="padding: 5px; flex: 1; min-width: 120px;" onchange="filterMyRideRecords()">
                             <option value="all">所有状态</option>
                             <option value="completed">已完成</option>
-                            <option value="waiting">等待中</option>
+                            <option value="waiting_for_ready">等待中</option>
                             <option value="crashed">已炸车</option>
                             <option value="cancelled">已取消</option>
                         </select>
@@ -758,7 +733,7 @@
             <div class="form-group" id="download-progress" style="display: none;">
                 <label>下载进度：</label>
                 <div style="width: 100%; height: 20px; background-color: #f0f0f0; border-radius: 10px; overflow: hidden;">
-                    <div id="progress-bar" style="height: 100%; background-color: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                    <div id="progress-bar" style="height: 100%; background-color: #2f8bd1; width: 0%; transition: width 0.3s ease;"></div>
                 </div>
                 <span id="progress-text" style="font-size: 12px; color: #666;">0%</span>
             </div>
@@ -950,7 +925,7 @@
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 5px;">1. 选择BGI文件夹</label>
                     <input type="text" id="modal-bgi-folder" value="未选择文件夹" style="width: 100%; padding: 8px; box-sizing: border-box;">
-                    <button type="button" onclick="selectFolder('modal-bgi-folder')" style="margin-top: 5px; padding: 5px 10px;">浏览</button>
+                    <button type="button" class="button button-secondary" onclick="selectFolder('modal-bgi-folder')" style="margin-top: 5px;">浏览</button>
                 </div>
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 5px;">2. 你的游戏名称</label>
@@ -987,7 +962,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '1.8.2';
+        const VERSION = '2.0.0';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -1011,8 +986,86 @@
         let currentDownloadController = null; // 当前下载控制器，用于终止下载
         const SERVER_URL = 'http://121.41.2.163:41013';
         let config = {}; // 全局配置变量
+        let startupMinimizeApplied = false; // 确保启动最小化只执行一次
+        let startupClientUpdateTriggered = false; // 防止启动更新后继续初始化主界面
+        let startupGroupUpdateAllowed = false; // 仅在检测到团购目标目录时执行自动更新
         let autoUpdateGroupCount = 0; // 记录自动更新团购的次数
         const MAX_AUTO_UPDATE_GROUP_COUNT = 5; // 最大自动更新团购次数
+        const CLIENT_UPDATE_STATE_KEY = 'mojang-client-update-state';
+
+        // 持久化启动更新状态，避免更新器失败后旧版本启动时反复重试。
+        function readClientUpdateState() {
+            try {
+                const rawState = localStorage.getItem(CLIENT_UPDATE_STATE_KEY);
+                if (!rawState) return null;
+                const state = JSON.parse(rawState);
+                if (!state || typeof state.targetVersion !== 'string' || compareVersions('0.0.0', state.targetVersion) === null) {
+                    localStorage.removeItem(CLIENT_UPDATE_STATE_KEY);
+                    return null;
+                }
+                return state;
+            } catch (error) {
+                console.warn('读取用户端更新状态失败:', error);
+                try { localStorage.removeItem(CLIENT_UPDATE_STATE_KEY); } catch (ignore) { /* 忽略存储异常 */ }
+                return null;
+            }
+        }
+
+        function markClientUpdatePending(targetVersion) {
+            if (typeof targetVersion !== 'string' || compareVersions('0.0.0', targetVersion) === null) {
+                addLog('无法记录用户端更新目标版本，跳过持久化状态', 'warning');
+                return false;
+            }
+            try {
+                localStorage.setItem(CLIENT_UPDATE_STATE_KEY, JSON.stringify({
+                    targetVersion,
+                    startedAt: new Date().toISOString()
+                }));
+                return true;
+            } catch (error) {
+                addLog(`记录用户端更新状态失败: ${error.message}`, 'warning');
+                return false;
+            }
+        }
+
+        function clearClientUpdateState(expectedVersion = null) {
+            try {
+                const state = readClientUpdateState();
+                if (!expectedVersion || !state || state.targetVersion === expectedVersion) {
+                    localStorage.removeItem(CLIENT_UPDATE_STATE_KEY);
+                }
+            } catch (error) {
+                console.warn('清理用户端更新状态失败:', error);
+            }
+        }
+
+        function clearCompletedClientUpdateState() {
+            const state = readClientUpdateState();
+            if (state && compareVersions(VERSION, state.targetVersion) >= 0) {
+                clearClientUpdateState(state.targetVersion);
+                addLog(`用户端已更新至 v${VERSION}，清理更新状态`, 'info');
+            }
+        }
+
+        function shouldSkipFailedClientAutoUpdate(serverVersion) {
+            const state = readClientUpdateState();
+            if (!state) return false;
+
+            const targetComparison = compareVersions(state.targetVersion, serverVersion);
+            if (targetComparison !== 0) {
+                // 服务端目标版本发生变化，旧的失败记录不再适用。
+                clearClientUpdateState(state.targetVersion);
+                return false;
+            }
+
+            if (compareVersions(VERSION, serverVersion) >= 0) {
+                clearClientUpdateState(state.targetVersion);
+                return false;
+            }
+
+            addLog(`上次用户端更新到 v${serverVersion} 未完成，跳过本次自动重试`, 'warning');
+            return true;
+        }
         
         // 重试队列管理
         const MAX_RETRY_COUNT = 10;
@@ -1391,18 +1444,29 @@
                         } else if (data.type === 'version-check-result') {
                             console.log('收到版本检查结果:', data);
                             addLog('收到版本检查结果', 'info');
+
+                            if (!data.data) {
+                                addLog('版本检查响应缺少版本数据', 'error');
+                                return;
+                            }
                             
                             // 处理主版本
                             const latestVersion = data.data.version;
                             document.getElementById('latest-version').textContent = `v${latestVersion}`;
                             
                             // 版本号比较逻辑
-                            if (compareVersions(VERSION, latestVersion) < 0) {
+                            const clientComparison = compareVersions(VERSION, latestVersion);
+                            if (clientComparison === null) {
+                                addLog(`服务端用户端版本格式无效: ${latestVersion}`, 'error');
+                                document.getElementById('update-button').textContent = '版本无效';
+                                document.getElementById('update-button').onclick = null;
+                                document.getElementById('update-button').disabled = true;
+                            } else if (clientComparison < 0) {
                                 // 需要更新
                                 document.getElementById('update-button').textContent = '更新用户端';
                                 document.getElementById('update-button').onclick = () => downloadUpdate(`${SERVER_URL}/client/mojang.zip`);
                                 document.getElementById('update-button').disabled = false;
-                                document.getElementById('update-button').style.backgroundColor = 'green';
+                                document.getElementById('update-button').style.backgroundColor = '#2f8bd1';
                                 document.getElementById('update-button').style.color = 'white';
                             } else {
                                 // 已是最新版本
@@ -1415,7 +1479,7 @@
                             
                             // 处理团购版本
                             const latestGroupVersion = data.data.groupPurchasingVersion;
-                            if (latestGroupVersion) {
+                            if (latestGroupVersion && compareVersions('0.0.0', latestGroupVersion) !== null) {
                                 document.getElementById('latest-group-version').textContent = `v${latestGroupVersion}`;
                                 
                                 // 设置团购更新URL
@@ -1426,7 +1490,10 @@
                                     document.getElementById('current-group-version').textContent = currentGroupVersion ? `v${currentGroupVersion}` : '未找到';
                                     
                                     // 版本号比较逻辑
-                                    if (currentGroupVersion && compareVersions(currentGroupVersion, latestGroupVersion) < 0) {
+                                    const groupComparison = currentGroupVersion ? compareVersions(currentGroupVersion, latestGroupVersion) : null;
+                                    if (groupComparison === null && currentGroupVersion) {
+                                        addLog(`团购版本格式无效: ${currentGroupVersion} / ${latestGroupVersion}`, 'error');
+                                    } else if (currentGroupVersion && groupComparison < 0) {
                                         // 需要更新
                                         document.getElementById('update-group-button').textContent = '更新团购';
                                         document.getElementById('update-group-button').onclick = function() {
@@ -1434,7 +1501,7 @@
                                             downloadGroupUpdate();
                                         };
                                         document.getElementById('update-group-button').disabled = false;
-                                        document.getElementById('update-group-button').style.backgroundColor = 'green';
+                                        document.getElementById('update-group-button').style.backgroundColor = '#2f8bd1';
                                         document.getElementById('update-group-button').style.color = 'white';
                                         document.getElementById('update-group-button').style.display = 'inline-block';
                                     } else {
@@ -1459,7 +1526,7 @@
                                             downloadGroupUpdate();
                                         };
                                         document.getElementById('update-group-button').disabled = false;
-                                        document.getElementById('update-group-button').style.backgroundColor = 'green';
+                                        document.getElementById('update-group-button').style.backgroundColor = '#2f8bd1';
                                         document.getElementById('update-group-button').style.color = 'white';
                                         document.getElementById('update-group-button').style.display = 'inline-block';
                                     } else {
@@ -1472,6 +1539,11 @@
                                         document.getElementById('update-group-button').style.display = 'inline-block';
                                     }
                                 });
+                            } else if (latestGroupVersion) {
+                                addLog(`服务端团购版本格式无效: ${latestGroupVersion}`, 'error');
+                                document.getElementById('update-group-button').textContent = '版本无效';
+                                document.getElementById('update-group-button').onclick = null;
+                                document.getElementById('update-group-button').disabled = true;
                             }
                         }
                     });
@@ -1705,7 +1777,14 @@
         let appPath = '';
         
         // 显示标签
-        function showTab(tabId) {
+        function getDateInputValue(date = new Date()) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function showTab(tabId, button) {
             // 隐藏所有标签内容
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.add('hidden');
@@ -1713,18 +1792,16 @@
 
             // 更新所有导航按钮的样式
             document.querySelectorAll('.nav-button').forEach(button => {
-                button.style.color = '#666';
-                button.style.borderBottom = '2px solid transparent';
-                button.style.fontWeight = '500';
+                button.classList.remove('active');
             });
 
             // 显示选中的标签内容
             document.getElementById(tabId).classList.remove('hidden');
 
             // 更新点击按钮的样式
-            event.target.style.color = '#1976D2';
-            event.target.style.borderBottom = '2px solid #1976D2';
-            event.target.style.fontWeight = 'bold';
+            const activeButton = button || Array.from(document.querySelectorAll('.nav-button'))
+                .find(item => item.getAttribute('onclick')?.includes(`'${tabId}'`));
+            if (activeButton) activeButton.classList.add('active');
 
             // 切换到收益排行榜时，默认加载日榜
             if (tabId === 'gain') {
@@ -1763,7 +1840,9 @@
             document.getElementById('login-account').addEventListener('change', saveConfig);
             document.getElementById('login-password').addEventListener('change', saveConfig);
             document.getElementById('close-genshin-checkbox').addEventListener('change', saveConfig);
+            document.getElementById('auto-update-client').addEventListener('change', saveConfig);
             document.getElementById('auto-update-group').addEventListener('change', saveConfig);
+            document.getElementById('minimize-on-start').addEventListener('change', saveConfig);
             
             // 添加窗口大小变化监听器，实现自适应缩放
             window.addEventListener('resize', adjustScale);
@@ -1771,8 +1850,7 @@
             adjustScale();
 
             // 初始化收益记录日期输入框为今天
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getDateInputValue();
             document.getElementById('gain-date-input').value = todayStr;
         };
         
@@ -2347,22 +2425,10 @@
         function adjustScale() {
             const container = document.querySelector('.content-area');
             if (!container) return;
-            
-            const windowWidth = window.innerWidth;
-            const contentAreaWidth = windowWidth * 0.7; // 70% of window width
-            
-            // 计算缩放比例
-            let scale = 1;
-            if (contentAreaWidth < 1200) {
-                scale = contentAreaWidth / 1200;
-            }
-            
-            // 限制最小缩放比例
-            scale = Math.max(0.8, scale);
-            
-            // 应用缩放
-            container.style.transform = `scale(${scale})`;
-            container.style.transformOrigin = 'top center';
+
+            // 布局由 CSS 网格和视口断点控制，不再对整个页面做 transform 缩放。
+            container.style.transform = 'none';
+            container.style.transformOrigin = 'initial';
         }
         
         // 加载配置
@@ -2398,6 +2464,11 @@
                                 if (config.autoUpdateGroup !== undefined) {
                                     document.getElementById('auto-update-group').checked = config.autoUpdateGroup;
                                 }
+                                // 新配置默认关闭，避免老配置在未明确选择时自动更新用户端
+                                document.getElementById('auto-update-client').checked = config.autoUpdateClient === true;
+                                if (config.minimizeOnStart !== undefined) {
+                                    document.getElementById('minimize-on-start').checked = config.minimizeOnStart;
+                                }
                                 if (config.connectionId) {
                                     connectionId = config.connectionId;
                                     document.getElementById('connection-id').textContent = connectionId;
@@ -2428,12 +2499,24 @@
                                 console.error('配置数据解析失败:', e);
                             }
                         }
+                        applyStartupMinimize();
                         resolve();
                     });
                 } else {
+                    applyStartupMinimize();
                     resolve();
                 }
             });
+        }
+
+        // 按配置在应用启动后最小化窗口；登录流程再次加载配置时不会重复触发。
+        function applyStartupMinimize() {
+            if (startupMinimizeApplied) return;
+            startupMinimizeApplied = true;
+            const checkbox = document.getElementById('minimize-on-start');
+            if (checkbox?.checked && window.electronAPI?.minimizeWindow) {
+                setTimeout(() => window.electronAPI.minimizeWindow(), 0);
+            }
         }
         
         // 日志功能
@@ -2462,7 +2545,9 @@
                     bgiFolder: document.getElementById('bgi-folder-path').textContent,
                     dragonName: document.getElementById('dragon-name').value,
                     closeGenshin: document.getElementById('close-genshin-checkbox').checked,
+                    autoUpdateClient: document.getElementById('auto-update-client').checked,
                     autoUpdateGroup: document.getElementById('auto-update-group').checked,
+                    minimizeOnStart: document.getElementById('minimize-on-start').checked,
                     connectionId: connectionId,
                     connectionName: document.getElementById('connection-name-input').value.trim(),
                     schedules: schedules
@@ -2554,7 +2639,7 @@
 
         // 处理移动端上线命令
         function handleMobileOnlineCommand(data) {
-            const { uid, roomName, username, notHost } = data || {};
+            const { uid, roomName, username, notHost, targetSocketId } = data || {};
             
             if (!uid || !roomName) {
                 addLog('移动端上线命令缺少必要参数', 'error');
@@ -2578,6 +2663,7 @@
                 operatorAccountId: accountId
             };
             sendMessageToServer(onlineMessage);
+            reportMobileCommandResult({ targetSocketId }, true, '上线请求已提交', 'online');
         }
         
         // 下线
@@ -2716,7 +2802,7 @@
                 // 检查当前用户是否对该房间有权限
                 const hasPermission = userRooms.includes(roomName);
                 const permissionText = hasPermission ? '有权限' : '无权限';
-                const permissionColor = hasPermission ? '#4caf50' : '#f44336';
+                const permissionColor = hasPermission ? '#2f8bd1' : '#f44336';
                 
                 // 根据房间模式决定是否显示发车人数
                 let roomPropertiesHTML = `<span>${modeText}</span>`;
@@ -2802,32 +2888,61 @@
         function closeBGI() {
             addLog('正在关闭BGI...', 'info');
             if (window.electronAPI && window.electronAPI.closeProcess) {
-                window.electronAPI.closeProcess('BetterGI.exe');
+                return Promise.resolve(window.electronAPI.closeProcess('BetterGI.exe'))
+                    .then(success => Boolean(success))
+                    .catch(error => {
+                        addLog(`关闭BGI失败: ${error.message || error}`, 'error');
+                        return false;
+                    });
             } else {
                 addLog('BGI关闭功能仅在Electron环境中可用', 'warning');
+                return false;
             }
         }
         
         // 关闭原神
-        function closeGenshin() {
-            // 检查复选框状态
-            const shouldCloseGenshin = document.getElementById('close-genshin-checkbox').checked;
+        function closeGenshin(force = false) {
+            // 移动端明确下发关闭命令时强制执行，普通一条龙仍遵循本地配置
+            const closeOption = document.getElementById('close-genshin-checkbox');
+            const shouldCloseGenshin = force || (closeOption && closeOption.checked);
             if (!shouldCloseGenshin) {
                 addLog('未勾选关闭原神，跳过关闭操作', 'info');
-                return;
+                return false;
             }
 
             addLog('正在关闭原神...', 'info');
             if (window.electronAPI && window.electronAPI.closeProcess) {
-                window.electronAPI.closeProcess('YuanShen.exe');
+                return Promise.resolve(window.electronAPI.closeProcess('YuanShen.exe'))
+                    .then(success => Boolean(success))
+                    .catch(error => {
+                        addLog(`关闭原神失败: ${error.message || error}`, 'error');
+                        return false;
+                    });
             } else {
                 addLog('原神关闭功能仅在Electron环境中可用', 'warning');
+                return false;
+            }
+        }
+
+        function reportMobileCommandResult(params, success, resultMessage, command) {
+            if (!params || !params.targetSocketId || !socket || !isLoggedIn) return;
+            const sendResult = resolvedSuccess => sendMessageToServer({
+                type: 'mobile-command-execution-result',
+                targetSocketId: params.targetSocketId,
+                command: command || '',
+                success: Boolean(resolvedSuccess),
+                resultMessage: resultMessage
+            });
+            if (success && typeof success.then === 'function') {
+                success.then(sendResult).catch(() => sendResult(false));
+            } else {
+                sendResult(success);
             }
         }
 
         // 处理移动端控制命令
         function handleMobileControlCommand(command, params) {
-            const { uid, roomName, username, notHost, dragonName, scheduleId } = params || {};
+            const { uid, roomName, username, notHost, dragonName, closeGame, scheduleId } = params || {};
             switch(command) {
                 case 'online':
                     if (uid && roomName) {
@@ -2850,17 +2965,22 @@
                     break;
                 case 'yjl':
                     if (dragonName) {
-                        addDragonTask(dragonName);
+                        const bgiFolder = document.getElementById('bgi-folder-path')?.textContent;
+                        const canLaunch = bgiFolder && bgiFolder !== '未选择' && bgiFolder !== '未选择文件夹' &&
+                            window.electronAPI && window.electronAPI.startProcess;
+                        const accepted = Boolean(canLaunch) && addDragonTask(dragonName, false, { closeGame: Boolean(closeGame) });
+                        reportMobileCommandResult(params, accepted, accepted ? '一条龙任务已加入执行队列' : '一条龙任务未能加入执行队列', command);
                         addLog('收到移动端一条龙命令', 'info');
                     } else {
+                        reportMobileCommandResult(params, false, '一条龙名称为空', command);
                         addLog('收到移动端一条龙命令，但未配置一条龙名称', 'warning');
                     }
                     break;
                 case 'close-bgi':
-                    closeBGI();
+                    reportMobileCommandResult(params, closeBGI(), 'BGI关闭命令已处理', command);
                     break;
                 case 'close-game':
-                    closeGenshin();
+                    reportMobileCommandResult(params, closeGenshin(true), '原神关闭命令已处理', command);
                     break;
                 case 'get-schedules':
                     // 发送调度列表给移动端（通过服务端中转）
@@ -2872,6 +2992,7 @@
                         targetSocketId: params.targetSocketId // 添加目标socketId
                     };
                     sendMessageToServer(schedulesList);
+                    reportMobileCommandResult(params, true, '调度列表已发送', command);
                     addLog('收到移动端获取调度列表命令', 'info');
                     break;
                 case 'execute-schedule':
@@ -2880,9 +3001,13 @@
                         if (schedule) {
                             addLog(`收到移动端执行调度命令: ${schedule.name}`, 'info');
                             executeSchedule(schedule);
+                            reportMobileCommandResult(params, true, `调度“${schedule.name}”已加入执行`, command);
                         } else {
+                            reportMobileCommandResult(params, false, '调度不存在或已被删除', command);
                             addLog(`收到移动端执行调度命令，但调度不存在: ${scheduleId}`, 'warning');
                         }
+                    } else {
+                        reportMobileCommandResult(params, false, '调度编号为空', command);
                     }
                     break;
                 case 'report-gain':
@@ -2913,41 +3038,47 @@
         const RIDE_PROTECTION_MS = 120000; // 联机一条龙保护时间（2分钟）
         
         // 添加一条龙任务
-        function addDragonTask(configName, isRideTask = false) {
+        function addDragonTask(configName, isRideTask = false, options = {}) {
+            const closeGame = options.closeGame !== undefined
+                ? Boolean(options.closeGame)
+                : Boolean(document.getElementById('close-genshin-checkbox')?.checked);
             // 如果存在计时器，根据计时器类型处理
             if (dragonTimer) {
                 if (timerType === 'protection') {
                     // 保护期内忽略所有任务
                     addLog(`保护期内，忽略一条龙任务: ${configName}`, 'warning');
-                    return;
+                    return false;
                 } else {
                     // 冷却期内，新任务覆盖旧任务（联机任务优先级更高）
                     if (pendingDragonTask && pendingDragonTask.isRideTask && !isRideTask) {
                         addLog(`联机任务优先级更高，普通任务 "${configName}" 无法覆盖`, 'warning');
-                        return;
+                        return false;
                     }
                     pendingDragonTask = {
                         configName: configName,
-                        isRideTask: isRideTask
+                        isRideTask: isRideTask,
+                        closeGame: closeGame
                     };
                     addLog(`一条龙任务已更新为: ${configName}（覆盖旧任务）`, 'info');
-                    return;
+                    return true;
                 }
             }
             
             // 没有计时器，立即执行并启动对应类型的计时器
             const task = {
                 configName: configName,
-                isRideTask: isRideTask
+                isRideTask: isRideTask,
+                closeGame: closeGame
             };
             
             addLog(`一条龙任务已加入队列: ${configName}`, 'info');
             executeDragonWithTimer(task);
+            return true;
         }
         
         // 执行一条龙并启动计时器
         function executeDragonWithTimer(task) {
-            const { configName, isRideTask } = task;
+            const { configName, isRideTask, closeGame } = task;
             timerType = isRideTask ? 'protection' : 'cooldown';
             const timerMs = isRideTask ? RIDE_PROTECTION_MS : NORMAL_COOLDOWN_MS;
             
@@ -2956,7 +3087,7 @@
             }
             
             // 执行一条龙启动
-            executeDragonLaunch(configName);
+            executeDragonLaunch(configName, closeGame);
             
             // 启动计时器
             addLog(`一条龙已启动，进入${timerMs / 1000}秒${isRideTask ? '保护' : '冷却'}`, 'info');
@@ -2977,19 +3108,19 @@
         }
 
         // 实际执行一条龙启动
-        function executeDragonLaunch(configName) {
+        function executeDragonLaunch(configName, closeGame) {
             const bgiFolder = document.getElementById('bgi-folder-path').textContent;
-            if (bgiFolder === '未选择') {
+            if (!bgiFolder || bgiFolder === '未选择' || bgiFolder === '未选择文件夹') {
                 showAlertModal('提示', '请先选择BetterGI文件夹');
                 addLog('请先选择BGI文件夹', 'error');
-                return;
+                return false;
             }
             
             // BGI一定要关，不需要用户选择
             closeBGI();
             
             // 调用closeGenshin函数，内部会检查复选框状态
-            closeGenshin();
+            closeGenshin(Boolean(closeGame));
             
             if (window.electronAPI && window.electronAPI.startProcess) {
                 window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder).then(pid => {
@@ -3000,6 +3131,7 @@
             } else {
                 addLog('无法启动，Electron API不可用', 'error');
             }
+            return Boolean(window.electronAPI && window.electronAPI.startProcess);
         }
 
         // 启动联机等待一条龙（用户手动触发）
@@ -3175,7 +3307,7 @@
             });
             addLog('向服务端发送信息: 获取积分排行榜请求', 'info');
         }
-        
+
         // 更新积分排行榜显示
         function updatePointsRanking(ranking) {
             const container = document.getElementById('points-ranking-container');
@@ -3398,8 +3530,8 @@
                     recordDiv.style.borderColor = '#1976D2';
                 } else if (record.status === 'crashed' || record.status === 'cancelled') {
                     recordDiv.style.borderColor = '#f44336';
-                } else if (record.status === 'waiting') {
-                    recordDiv.style.borderColor = '#4CAF50';
+                } else if (record.status === 'waiting_for_ready') {
+                    recordDiv.style.borderColor = '#2f8bd1';
                 }
 
                 const startTime = new Date(record.createdAt).toLocaleString('zh-CN', {
@@ -3419,14 +3551,14 @@
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <strong>${record.roomName || '未知房间'}</strong>
-                            ${isHost ? '<span style="color: #f44336; margin-left: 8px;">[房主]</span>' : '<span style="color: #4CAF50; margin-left: 8px;">[队员]</span>'}
+                            ${isHost ? '<span style="color: #f44336; margin-left: 8px;">[房主]</span>' : '<span style="color: #2f8bd1; margin-left: 8px;">[队员]</span>'}
                         </div>
                         <span style="color: #666; font-size: 12px;">${startTime}</span>
                     </div>
                     <div style="margin-top: 8px; font-size: 13px; color: #666;">
                         <div>房主: ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${maskUID(host.uid)})` : '无'}</div>
                         <div>队员: ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${maskUID(m.uid)})`).join(', ') : '无'}</div>
-                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting' ? '等待中' : record.status}</div>
+                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : record.status}</div>
                     </div>
                 `;
                 container.appendChild(recordDiv);
@@ -3805,7 +3937,7 @@
                     <p>请自行前往修改队伍名和选择战斗策略</p>
                     <p>请自行前往向联机等待一条龙和联机后一条龙中添加其他等待联机和联机后需要执行的配置组等</p>
                     <div style="margin-top: 20px; text-align: center;">
-                        <button id="confirm-button" style="padding: 8px 16px; background-color: #1976D2; color: white; border: none; border-radius: 4px; cursor: pointer;">确认</button>
+                        <button id="confirm-button" class="button button-success">确认</button>
                     </div>
                 `;
                 
@@ -4790,6 +4922,9 @@
         // 检查更新
         function checkForUpdates() {
             try {
+                if (!socket || !isLoggedIn || !socket.connected) {
+                    throw new Error('当前未连接服务器，无法检查更新');
+                }
                 document.getElementById('latest-version').textContent = '检查中...';
                 document.getElementById('update-button').textContent = '检查中...';
                 document.getElementById('update-button').disabled = true;
@@ -4814,8 +4949,16 @@
         
         // 比较版本号
         function compareVersions(version1, version2) {
-            const v1 = version1.split('.').map(Number);
-            const v2 = version2.split('.').map(Number);
+            const parseVersion = (version) => {
+                if (typeof version !== 'string' && typeof version !== 'number') return null;
+                const normalized = String(version).trim().replace(/^v/i, '');
+                if (!normalized || !/^\d+(?:\.\d+)*$/.test(normalized)) return null;
+                return normalized.split('.').map(Number);
+            };
+
+            const v1 = parseVersion(version1);
+            const v2 = parseVersion(version2);
+            if (!v1 || !v2) return null;
             
             for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
                 const num1 = v1[i] || 0;
@@ -4875,6 +5018,11 @@
                     addLog('无有效文件路径，跳过自动更新团购', 'info');
                     return;
                 }
+
+                if (!socket || !isLoggedIn || !socket.connected) {
+                    addLog('当前未连接服务器，跳过自动更新团购', 'warning');
+                    return;
+                }
                 
                 // 4. 检查manifest文件是否存在
                 let localVersion = null;
@@ -4892,7 +5040,7 @@
                     
                     // 定义临时的消息处理函数
                     function handleVersionMessage(data) {
-                        if (data.type === 'version-info') {
+                        if (data.type === 'version-check-result') {
                             // 清除超时
                             if (timeoutId) {
                                 clearTimeout(timeoutId);
@@ -4902,7 +5050,10 @@
                             socket.off('message', handleVersionMessage);
                             
                             try {
-                                const serverGroupVersion = data.groupPurchasingVersion;
+                                const serverGroupVersion = data.data?.groupPurchasingVersion;
+                                if (compareVersions('0.0.0', serverGroupVersion) === null) {
+                                    throw new Error('服务端未返回有效的团购版本');
+                                }
                                 addLog(`服务器团购版本: ${serverGroupVersion}`, 'info');
                                 
                                 // 检查是否需要更新
@@ -4914,6 +5065,11 @@
                                 } else {
                                     // 比较版本号，只有本地版本落后时才更新
                                     const comparison = compareVersions(localVersion, serverGroupVersion);
+                                    if (comparison === null) {
+                                        addLog(`本地团购版本格式无效: ${localVersion}，跳过自动更新`, 'warning');
+                                        resolve();
+                                        return;
+                                    }
                                     if (comparison < 0) {
                                         needUpdate = true;
                                         addLog(`本地版本 ${localVersion} 落后于服务器版本 ${serverGroupVersion}，准备更新`, 'info');
@@ -4970,54 +5126,48 @@
             // 先加载配置
             await loadConfig();
             addLog('配置加载完成', 'info');
-            
-            // 检查是否勾选了自动更新团购
-            const autoUpdateChecked = document.getElementById('auto-update-group')?.checked;
-            
-            if (!autoUpdateChecked) {
-                // 直接进入主界面
-                showMainApp();
-                return;
-            }
-            
+            clearCompletedClientUpdateState();
+
+            startupClientUpdateTriggered = false;
+            const autoUpdateClientChecked = document.getElementById('auto-update-client')?.checked === true;
+            const autoUpdateGroupChecked = document.getElementById('auto-update-group')?.checked === true;
+
             // 检查自动更新团购次数
-            if (autoUpdateGroupCount >= MAX_AUTO_UPDATE_GROUP_COUNT) {
+            if (autoUpdateGroupChecked && autoUpdateGroupCount >= MAX_AUTO_UPDATE_GROUP_COUNT) {
                 addLog('自动更新团购次数已达上限，禁用自动检查', 'warning');
-                document.getElementById('auto-update-group')?.setAttribute('checked', false);
+                const autoUpdateCheckbox = document.getElementById('auto-update-group');
+                if (autoUpdateCheckbox) autoUpdateCheckbox.checked = false;
                 saveConfig();
-                showMainApp();
-                return;
             }
-            
-            // 有自动更新团购，先检查一下是否有有效路径
-            const path = require('path');
-            const fs = require('fs');
-            
+
+            // 只有启用团购自动更新时才需要检查本地团购目录
             let foundPath = false;
-            
-            // 优先在调度中寻找
-            const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-            for (const schedule of schedules) {
-                if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                    foundPath = true;
-                    break;
+
+            if (autoUpdateGroupChecked && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
+                // 优先在调度中寻找
+                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
+                for (const schedule of schedules) {
+                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
+                        foundPath = true;
+                        break;
+                    }
+                }
+
+                // 如果没有，检查BGI文件夹
+                if (!foundPath) {
+                    const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
+                    if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                        foundPath = true;
+                    }
                 }
             }
-            
-            // 如果没有，检查BGI文件夹
-            if (!foundPath) {
-                const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                    foundPath = true;
-                }
-            }
-            
-            if (!foundPath) {
-                addLog('无有效文件路径，跳过自动更新团购', 'info');
+
+            startupGroupUpdateAllowed = autoUpdateGroupChecked && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT && foundPath;
+            if (!autoUpdateClientChecked && !startupGroupUpdateAllowed) {
                 showMainApp();
                 return;
             }
-            
+
             // 显示更新界面
             showUpdateUI();
             
@@ -5029,7 +5179,7 @@
             
             // 设置超时保护
             autoUpdateTimeoutId = setTimeout(() => {
-                addLog('获取版本信息超时，跳过自动更新', 'warning');
+                addLog('获取版本信息超时，跳过启动自动更新', 'warning');
                 cleanupAutoUpdate();
                 hideUpdateUI();
                 showMainApp();
@@ -5069,31 +5219,66 @@
         // 处理版本信息
         async function handleVersionInfo(data) {
             try {
-                const serverVersion = data.data.version;
-                const serverGroupVersion = data.data.groupPurchasingVersion;
+                const versionData = data?.data;
+                if (!versionData) {
+                    throw new Error('服务端版本响应缺少 data 字段');
+                }
+                const serverVersion = versionData.version;
+                const serverGroupVersion = versionData.groupPurchasingVersion;
+                if (compareVersions('0.0.0', serverVersion) === null) {
+                    throw new Error(`服务端用户端版本格式无效: ${serverVersion}`);
+                }
                 addLog(`服务器用户端版本: ${serverVersion}`, 'info');
-                addLog(`服务器团购版本: ${serverGroupVersion}`, 'info');
+                if (serverGroupVersion) {
+                    addLog(`服务器团购版本: ${serverGroupVersion}`, 'info');
+                }
                 
                 // 获取本地用户端版本
                 const localClientVersion = VERSION;
                 addLog(`本地用户端版本: ${localClientVersion}`, 'info');
                 
+                // 用户端启动更新优先于团购更新，避免旧版本继续执行后续初始化
+                const autoUpdateClientChecked = document.getElementById('auto-update-client')?.checked === true;
+                const clientComparison = compareVersions(VERSION, serverVersion);
+                const skipFailedClientAutoUpdate = autoUpdateClientChecked && shouldSkipFailedClientAutoUpdate(serverVersion);
+                if (autoUpdateClientChecked && clientComparison < 0 && !skipFailedClientAutoUpdate) {
+                    addLog(`用户端版本 ${VERSION} 落后于服务器版本 ${serverVersion}，准备启动更新`, 'info');
+                    updateUpdateStatus(`发现用户端新版本 v${serverVersion}，准备下载...`);
+                    try {
+                        await downloadUpdate(`${SERVER_URL}/client/mojang.zip`, {
+                            startup: true,
+                            targetVersion: serverVersion
+                        });
+                    } catch (error) {
+                        addLog(`启动自动更新用户端失败: ${error.message}`, 'error');
+                    }
+                    if (startupClientUpdateTriggered) return;
+                } else if (skipFailedClientAutoUpdate) {
+                    updateUpdateStatus(`上次更新未完成，已跳过自动重试（当前 v${VERSION}）`);
+                }
+
                 // 获取本地团购版本
-                const localGroupVersion = checkLocalGroupVersion();
+                let localGroupVersion = null;
+                if (startupGroupUpdateAllowed) {
+                    try {
+                        localGroupVersion = checkLocalGroupVersion();
+                    } catch (error) {
+                        addLog(`读取本地团购版本失败: ${error.message}`, 'warning');
+                    }
+                }
                 
                 // 检查版本检查窗口是否打开
                 const versionCheckModal = document.getElementById('version-check-modal');
                 const isModalOpen = versionCheckModal && versionCheckModal.style.display === 'flex';
                 
-                // 检查用户端是否需要更新
-                const clientComparison = compareVersions(localClientVersion, serverVersion);
+                // 检查用户端是否需要更新（启动自动更新关闭时，仅展示手动更新状态）
                 if (clientComparison < 0) {
                     addLog(`用户端版本 ${localClientVersion} 落后于服务器版本 ${serverVersion}，可以更新`, 'info');
                     if (isModalOpen) {
                         document.getElementById('update-button').textContent = '更新用户端';
                         document.getElementById('update-button').onclick = () => downloadUpdate(`${SERVER_URL}/client/mojang.zip`);
                         document.getElementById('update-button').disabled = false;
-                        document.getElementById('update-button').style.backgroundColor = 'green';
+                        document.getElementById('update-button').style.backgroundColor = '#2f8bd1';
                         document.getElementById('update-button').style.color = 'white';
                     }
                 } else if (clientComparison === 0) {
@@ -5116,10 +5301,12 @@
                     }
                 }
                 
-                // 检查团购是否需要更新
-                if (localGroupVersion) {
+                // 检查团购是否需要更新。服务端未提供团购版本时跳过该项。
+                if (serverGroupVersion && compareVersions('0.0.0', serverGroupVersion) !== null && localGroupVersion) {
                     const groupComparison = compareVersions(localGroupVersion, serverGroupVersion);
-                    if (groupComparison < 0) {
+                    if (groupComparison === null) {
+                        addLog(`本地团购版本格式无效: ${localGroupVersion}`, 'warning');
+                    } else if (groupComparison < 0) {
                         addLog(`团购版本 ${localGroupVersion} 落后于服务器版本 ${serverGroupVersion}，可以更新`, 'info');
                         if (isModalOpen) {
                             document.getElementById('update-group-button').textContent = '更新团购';
@@ -5128,7 +5315,7 @@
                                 downloadGroupUpdate();
                             };
                             document.getElementById('update-group-button').disabled = false;
-                            document.getElementById('update-group-button').style.backgroundColor = 'green';
+                            document.getElementById('update-group-button').style.backgroundColor = '#2f8bd1';
                             document.getElementById('update-group-button').style.color = 'white';
                             document.getElementById('update-group-button').style.display = 'inline-block';
                         }
@@ -5153,7 +5340,7 @@
                             document.getElementById('update-group-button').style.display = 'inline-block';
                         }
                     }
-                } else {
+                } else if (serverGroupVersion && compareVersions('0.0.0', serverGroupVersion) !== null) {
                     addLog('未找到本地团购版本，准备更新', 'info');
                     if (isModalOpen) {
                         document.getElementById('update-group-button').textContent = '更新团购';
@@ -5162,21 +5349,21 @@
                             downloadGroupUpdate();
                         };
                         document.getElementById('update-group-button').disabled = false;
-                        document.getElementById('update-group-button').style.backgroundColor = 'green';
+                        document.getElementById('update-group-button').style.backgroundColor = '#2f8bd1';
                         document.getElementById('update-group-button').style.color = 'white';
                         document.getElementById('update-group-button').style.display = 'inline-block';
                     }
                 }
                 
                 // 检查是否需要自动更新团购
-                if (autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
+                if (startupGroupUpdateAllowed && serverGroupVersion && compareVersions('0.0.0', serverGroupVersion) !== null && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
                     let needUpdate = false;
                     if (!localGroupVersion) {
                         needUpdate = true;
                         addLog('未找到manifest文件，准备更新', 'info');
                     } else {
                         const groupComparison = compareVersions(localGroupVersion, serverGroupVersion);
-                        if (groupComparison < 0) {
+                        if (groupComparison !== null && groupComparison < 0) {
                             needUpdate = true;
                             addLog(`本地版本 ${localGroupVersion} 落后于服务器版本 ${serverGroupVersion}，准备更新`, 'info');
                         }
@@ -5305,6 +5492,8 @@
         
         // 下载团购更新
         async function downloadGroupUpdate() {
+            let downloadController = null;
+            let updateStatus = null;
             try {
                 // 终止之前的下载（如果有）
                 if (currentDownloadController) {
@@ -5314,8 +5503,9 @@
                 }
                 
                 // 创建新的控制器
-                currentDownloadController = new AbortController();
-                const signal = currentDownloadController.signal;
+                downloadController = new AbortController();
+                currentDownloadController = downloadController;
+                const signal = downloadController.signal;
                 
                 // 引入必要的模块
                 const path = require('path');
@@ -5364,7 +5554,7 @@
                 // 判断是否在登录界面，使用不同的UI元素
                 const isLoginView = !document.getElementById('main-container') || document.getElementById('main-container').classList.contains('hidden');
 
-                let progressBar, progressText, updateStatus;
+                let progressBar, progressText;
 
                 if (isLoginView) {
                     // 登录界面使用登录进度元素
@@ -5404,6 +5594,9 @@
                 }
                 
                 const totalSize = parseInt(response.headers.get('content-length') || 0);
+                if (!response.body || typeof response.body.getReader !== 'function') {
+                    throw new Error('下载响应不支持流式读取');
+                }
                 const reader = response.body.getReader();
                 let receivedSize = 0;
                 const chunks = [];
@@ -5460,7 +5653,12 @@
                 // 调用更新脚本
                 let updaterPath = path.join(__dirname, 'updater.ps1');
                 
-                // 检查updater.ps1是否存在，如果不存在，尝试使用当前工作目录
+                // 检查updater.ps1是否存在，如果不存在，尝试使用应用目录或当前工作目录
+                if (!fs.existsSync(updaterPath)) {
+                    const appDir = window.electronAPI?.getAppPath ? window.electronAPI.getAppPath() : null;
+                    if (appDir) updaterPath = path.join(appDir, 'updater.ps1');
+                }
+
                 if (!fs.existsSync(updaterPath)) {
                     updaterPath = path.join(process.cwd(), 'updater.ps1');
                 }
@@ -5478,13 +5676,18 @@
                     throw new Error(`找不到updater.ps1脚本，路径: ${updaterPath}`);
                 }
                 
-                const { execSync } = require('child_process');
+                const { execFileSync } = require('child_process');
 
                 updateStatus.textContent = '正在解压更新包...';
 
                 // 执行更新脚本
                 addLog('开始执行更新脚本...', 'info');
-                execSync(`powershell.exe -ExecutionPolicy Bypass -File "${updaterPath}" "${tempZipPath}" "${targetDir}" groupPurchasing false`, {
+                execFileSync('powershell.exe', [
+                    '-NoProfile', '-NonInteractive',
+                    '-ExecutionPolicy', 'Bypass',
+                    '-File', updaterPath,
+                    tempZipPath, targetDir, 'groupPurchasing', 'false'
+                ], {
                     stdio: 'inherit'
                 });
                 addLog('更新脚本执行完成', 'info');
@@ -5512,13 +5715,18 @@
                     showMainApp();
                 }, 1000);
 
+                if (currentDownloadController === downloadController) {
+                    currentDownloadController = null;
+                }
                 // 更新完成，立即resolve，重连在后台进行
                 return Promise.resolve();
 
             } catch (error) {
                 console.error('下载团购更新失败:', error);
                 addLog(`团购更新失败: ${error.message}`, 'error');
-                updateStatus.textContent = `更新失败: ${error.message}`;
+                if (updateStatus) {
+                    updateStatus.textContent = `更新失败: ${error.message}`;
+                }
 
                 // 启用重连
                 reconnectDisabled = false;
@@ -5530,10 +5738,9 @@
                     startConnection();
                 }, 1000);
 
-                // 重连在后台进行
-                setTimeout(() => {
-                    startConnection();
-                }, 5000);
+                if (currentDownloadController === downloadController) {
+                    currentDownloadController = null;
+                }
 
                 return Promise.reject(error);
             }
@@ -5549,7 +5756,8 @@
         }
         
         // 下载更新
-        async function downloadUpdate(updateUrl) {
+        async function downloadUpdate(updateUrl, options = {}) {
+            const isStartupUpdate = options.startup === true;
             try {
                 // 终止之前的下载（如果有）
                 if (currentDownloadController) {
@@ -5562,14 +5770,24 @@
                 currentDownloadController = new AbortController();
                 const signal = currentDownloadController.signal;
                 
-                document.getElementById('update-status').style.display = 'block';
-                document.getElementById('update-status-text').textContent = '准备下载...';
-                document.getElementById('download-progress').style.display = 'block';
-                document.getElementById('update-button').disabled = true;
-                
-                // 显示下载进度
-                const progressBar = document.getElementById('progress-bar');
-                const progressText = document.getElementById('progress-text');
+                let progressBar;
+                let progressText;
+                let updateStatus;
+                if (isStartupUpdate) {
+                    showUpdateUI();
+                    progressBar = document.getElementById('login-progress-bar');
+                    progressText = document.getElementById('login-progress-text');
+                    updateStatus = document.getElementById('login-update-status');
+                    updateStatus.textContent = '准备下载用户端更新...';
+                } else {
+                    document.getElementById('update-status').style.display = 'block';
+                    document.getElementById('update-status-text').textContent = '准备下载...';
+                    document.getElementById('download-progress').style.display = 'block';
+                    document.getElementById('update-button').disabled = true;
+                    progressBar = document.getElementById('progress-bar');
+                    progressText = document.getElementById('progress-text');
+                    updateStatus = document.getElementById('update-status-text');
+                }
                 
                 // 下载更新包
                 const response = await fetch(updateUrl, {
@@ -5588,6 +5806,9 @@
                 }
                 
                 const totalSize = parseInt(response.headers.get('content-length') || 0);
+                if (!response.body || typeof response.body.getReader !== 'function') {
+                    throw new Error('下载响应不支持流式读取');
+                }
                 const reader = response.body.getReader();
                 let receivedSize = 0;
                 const chunks = [];
@@ -5618,7 +5839,7 @@
                             const downloaded = formatFileSize(receivedSize);
                             const total = formatFileSize(totalSize);
                             
-                            document.getElementById('update-status-text').textContent = `下载中... ${progress}% (${downloaded}/${total}, ${speed})`;
+                            updateStatus.textContent = `下载中... ${progress}% (${downloaded}/${total}, ${speed})`;
                             
                             lastTime = currentTime;
                             lastReceivedSize = receivedSize;
@@ -5629,24 +5850,34 @@
                 // 合并二进制数据
                 const blob = new Blob(chunks);
                 
-                document.getElementById('update-status-text').textContent = '下载完成，保存文件...';
+                updateStatus.textContent = '下载完成，保存文件...';
                 
                 // 直接保存到 mojang 文件夹
                 if (typeof require !== 'undefined') {
                     try {
                         const fs = require('fs');
                         const path = require('path');
-                        
-                        // 获取当前目录
-                        let currentDir = process.cwd();
-                        
-                        // 确定 mojang 目录路径
-                        let mojangDir = currentDir;
-                        if (path.basename(currentDir) !== 'mojang') {
-                            mojangDir = path.join(currentDir, 'mojang');
+
+                        // 优先使用实际包含更新脚本的目录，避免打包运行时依赖不稳定的 cwd。
+                        const candidates = [];
+                        if (window.electronAPI?.getAppPath) candidates.push(window.electronAPI.getAppPath());
+                        candidates.push(__dirname, process.cwd());
+                        let mojangDir = null;
+                        for (const candidate of candidates) {
+                            if (!candidate) continue;
+                            const options = [candidate, path.join(candidate, 'mojang')];
+                            const match = options.find(item => fs.existsSync(path.join(item, 'updater.ps1')));
+                            if (match) {
+                                mojangDir = match;
+                                break;
+                            }
                         }
-                        
-                        // 确定 updater.ps1 的路径
+                        if (!mojangDir) {
+                            mojangDir = path.basename(process.cwd()).toLowerCase() === 'mojang'
+                                ? process.cwd()
+                                : path.join(process.cwd(), 'mojang');
+                        }
+
                         const updaterPath = path.join(mojangDir, 'updater.ps1');
                         
                         // 确定更新包路径
@@ -5664,8 +5895,14 @@
                         fs.writeFileSync(updateZipPath, buffer);
                         addLog('文件保存成功', 'info');
                         
-                        document.getElementById('update-status-text').textContent = '文件保存完成，准备更新...';
+                        updateStatus.textContent = '文件保存完成，准备更新...';
                         
+                        // 启动更新器前标记流程，避免版本检查完成后继续进入主界面
+                        if (isStartupUpdate) {
+                            markClientUpdatePending(options.targetVersion);
+                            startupClientUpdateTriggered = true;
+                        }
+
                         // 自动启动更新器
                         setTimeout(() => {
                             try {
@@ -5683,48 +5920,72 @@
                                 addLog(`启动更新器: ${updaterPath}`, 'info');
                                 addLog(`参数: ${updateZipPath} ${currentDir}`, 'info');
                                 
-                                // 使用 start 命令启动新的独立窗口运行 PowerShell 脚本
-                                const { exec } = require('child_process');
-                                const command = `start "" /wait powershell.exe -ExecutionPolicy Bypass -File "${updaterPath}" "${updateZipPath}" "${currentDir}" main true`;
-                                
-                                addLog(`执行命令: ${command}`, 'info');
-                                
-                                // 启动更新器
-                                exec(command, (error, stdout, stderr) => {
-                                    // 更新器执行完成后的回调
-                                    if (error) {
-                                        addLog(`更新器执行出错: ${error.message}`, 'error');
-                                    } else {
-                                        addLog('更新器执行完成', 'info');
-                                    }
+                                // 通过参数数组启动独立更新器，避免路径空格和命令行转义问题
+                                const { spawn } = require('child_process');
+                                const updaterProcess = spawn('powershell.exe', [
+                                    '-NoProfile', '-NonInteractive',
+                                    '-ExecutionPolicy', 'Bypass',
+                                    '-File', updaterPath,
+                                    updateZipPath, currentDir, 'main', 'true'
+                                ], {
+                                    detached: true,
+                                    stdio: 'ignore',
+                                    windowsHide: true
                                 });
-                                
-                                // 关闭当前应用
-                                setTimeout(() => {
-                                    addLog('关闭当前应用...', 'info');
-                                    if (typeof window !== 'undefined' && window.close) {
-                                        window.close();
-                                    } else if (typeof process !== 'undefined' && process.exit) {
-                                        process.exit(0);
-                                    } else if (typeof require !== 'undefined') {
-                                        try {
-                                            const electron = require('electron');
-                                            if (electron.app) {
-                                                electron.app.quit();
+                                let updaterStarted = false;
+                                updaterProcess.once('spawn', () => {
+                                    updaterStarted = true;
+                                    updaterProcess.unref();
+                                    addLog('更新器启动成功，准备关闭当前应用', 'info');
+                                    setTimeout(() => {
+                                        addLog('关闭当前应用...', 'info');
+                                        if (typeof window !== 'undefined' && window.close) {
+                                            window.close();
+                                        } else if (typeof process !== 'undefined' && process.exit) {
+                                            process.exit(0);
+                                        } else if (typeof require !== 'undefined') {
+                                            try {
+                                                const electron = require('electron');
+                                                if (electron.app) electron.app.quit();
+                                            } catch (e) {
+                                                addLog(`关闭应用失败: ${e.message}`, 'error');
                                             }
-                                        } catch (e) {
-                                            addLog(`关闭应用失败: ${e.message}`, 'error');
+                                        }
+                                    }, 1000);
+                                });
+                                updaterProcess.once('error', (error) => {
+                                    addLog(`启动更新器失败: ${error.message}`, 'error');
+                                    if (!updaterStarted) {
+                                        clearClientUpdateState(options.targetVersion || null);
+                                        startupClientUpdateTriggered = false;
+                                        reconnectDisabled = false;
+                                        if (isStartupUpdate) {
+                                            hideUpdateUI();
+                                            showMainApp();
+                                        } else {
+                                            closeVersionCheckModal();
                                         }
                                     }
-                                }, 1000);
-                                
+                                });
+
                             } catch (error) {
                                 addLog(`启动更新器失败: ${error.message}`, 'error');
+                                clearClientUpdateState(options.targetVersion || null);
+                                startupClientUpdateTriggered = false;
+                                reconnectDisabled = false;
+                                if (isStartupUpdate) {
+                                    hideUpdateUI();
+                                    showMainApp();
+                                    return;
+                                }
                                 alert('启动更新器失败，请手动运行 updater.ps1 文件。');
                                 closeVersionCheckModal();
                             }
                         }, 1000);
                     } catch (error) {
+                        if (isStartupUpdate) {
+                            throw error;
+                        }
                         addLog(`保存文件失败: ${error.message}`, 'error');
                         // 回退到浏览器下载
                         const url = URL.createObjectURL(blob);
@@ -5740,6 +6001,9 @@
                         closeVersionCheckModal();
                     }
                 } else {
+                    if (isStartupUpdate) {
+                        throw new Error('当前环境不支持启动自动更新');
+                    }
                     // 其他环境，使用浏览器下载
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -5753,12 +6017,20 @@
                     alert('更新包已下载，请手动将文件保存到 mojang 文件夹并运行 updater.ps1 文件。');
                     closeVersionCheckModal();
                 }
+
+                // 下载完成后释放控制器，避免后续检查误判为仍有下载任务。
+                currentDownloadController = null;
                 
             } catch (error) {
                 // 清理下载控制器
                 currentDownloadController = null;
                 
                 addLog(`更新失败: ${error.message}`, 'error');
+                if (isStartupUpdate) {
+                    reconnectDisabled = false;
+                    updateUpdateStatus(`用户端更新失败：${error.message}`);
+                    throw error;
+                }
                 document.getElementById('update-status-text').textContent = '更新失败';
                 document.getElementById('update-button').textContent = '检查更新';
                 document.getElementById('update-button').disabled = false;
