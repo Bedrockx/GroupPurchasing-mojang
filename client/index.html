@@ -12,16 +12,16 @@
             --blue-800: #3b83b8;
             --blue-700: #4b9bd0;
             --blue-600: #70b9e5;
-            --blue-200: #cceafa;
+            --blue-200: #b9def3;
             --blue-100: #edf8ff;
             --blue-050: #f9fdff;
             --ink-900: #254866;
             --ink-600: #6b879d;
-            --line: #dbeef9;
+            --line: #bdd9eb;
             --danger: #d9485f;
             --danger-dark: #b8324a;
-            --shadow: 0 18px 48px rgba(77, 145, 190, 0.1);
-            --soft-shadow: 0 7px 18px rgba(77, 145, 190, 0.06);
+            --shadow: 0 18px 48px rgba(55, 116, 157, 0.14);
+            --soft-shadow: 0 7px 18px rgba(55, 116, 157, 0.09);
         }
 
         *, *::before, *::after { box-sizing: border-box; }
@@ -61,8 +61,8 @@
             grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
             grid-template-rows: auto 1fr;
             gap: 22px;
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.95);
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid #c6e1f1;
             border-radius: 22px;
             box-shadow: var(--shadow);
             backdrop-filter: blur(18px);
@@ -93,7 +93,7 @@
             min-height: 0;
             padding: 20px;
             overflow: hidden;
-            background: rgba(255, 255, 255, 0.97);
+            background: rgba(255, 255, 255, 0.98);
             border: 1px solid var(--line);
             border-radius: 14px;
             box-shadow: var(--soft-shadow);
@@ -122,7 +122,7 @@
 
         .account-section { background: linear-gradient(155deg, #ffffff 0%, #f5fbff 100%); }
         #account-info { margin-bottom: 14px !important; padding: 11px 13px !important; background: var(--blue-050); border: 1px solid var(--line); border-radius: 10px; }
-        #account-info > div { margin-bottom: 0 !important; padding: 8px 0; border-bottom: 1px solid #e0eef8; }
+        #account-info > div { margin-bottom: 0 !important; padding: 8px 0; border-bottom: 1px solid #cfe4f2; }
         #account-info > div:last-child { border-bottom: 0; }
         #account-info strong { color: var(--ink-600); font-weight: 650; }
         #account-info .button { min-height: 36px; padding: 7px 12px; font-size: 0.78rem; }
@@ -331,7 +331,7 @@
         .room-user-item { padding: 4px 0; overflow-wrap: anywhere; }
 
         .points-ranking-container, .log-container { height: clamp(300px, 45vh, 520px); padding: 0; }
-        .points-ranking-item { min-height: 48px; padding: 11px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e3eff8; }
+        .points-ranking-item { min-height: 48px; padding: 11px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #cfe4f2; }
         .points-ranking-item:last-child { border-bottom: 0; }
         .points-ranking-item.self { background: #e6f4ff; }
         .points-ranking-rank { flex: 0 0 34px; color: var(--blue-700); font-weight: 750; }

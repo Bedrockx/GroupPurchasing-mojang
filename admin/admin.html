@@ -454,16 +454,16 @@
 
         /* 管理端统一视觉与响应式布局 */
         :root {
-            --admin-bg: #eef3f8;
+            --admin-bg: #e8f3fb;
             --admin-surface: #ffffff;
-            --admin-surface-muted: #f7f9fc;
-            --admin-border: #d9e2ec;
-            --admin-text: #1f2937;
-            --admin-muted: #64748b;
-            --admin-primary: #2563eb;
-            --admin-primary-dark: #1d4ed8;
-            --admin-secondary: #3b82f6;
-            --admin-secondary-dark: #2563eb;
+            --admin-surface-muted: #f3f9fe;
+            --admin-border: #b9d3e6;
+            --admin-text: #24445f;
+            --admin-muted: #607d94;
+            --admin-primary: #3f8fd0;
+            --admin-primary-dark: #3179b4;
+            --admin-secondary: #70b5df;
+            --admin-secondary-dark: #579fce;
             --admin-danger: #dc2626;
             --admin-warning: #4d9cf7;
             --admin-radius: 12px;
@@ -489,7 +489,7 @@
             background: var(--admin-surface-muted);
             border: 1px solid var(--admin-border);
             border-radius: 18px;
-            box-shadow: 0 16px 40px rgba(30, 64, 90, 0.08);
+            box-shadow: 0 16px 40px rgba(44, 104, 145, 0.12);
         }
 
         .login-container {
@@ -500,7 +500,7 @@
             background: var(--admin-surface);
             border: 1px solid var(--admin-border);
             border-radius: 18px;
-            box-shadow: 0 18px 42px rgba(30, 64, 90, 0.12);
+            box-shadow: 0 18px 42px rgba(44, 104, 145, 0.16);
         }
 
         h1 {
@@ -552,7 +552,7 @@
             background: var(--admin-surface);
             border: 1px solid var(--admin-border);
             border-radius: var(--admin-radius);
-            box-shadow: 0 8px 22px rgba(30, 64, 90, 0.05);
+            box-shadow: 0 8px 22px rgba(44, 104, 145, 0.09);
         }
 
         .button {
@@ -609,6 +609,12 @@
         input:focus, select:focus {
             border-color: var(--admin-primary) !important;
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--admin-primary);
         }
 
         label {
@@ -844,7 +850,7 @@
         #admin-gain-records-container,
         #ride-records-container,
         #log-content-container {
-            background: #fbfdff !important;
+            background: #f4faff !important;
             border: 1px solid var(--admin-border) !important;
             border-radius: 10px !important;
             box-shadow: inset 0 1px 2px rgba(30, 64, 90, 0.03);

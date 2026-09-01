@@ -316,14 +316,14 @@
 
         /* 手机竖屏优先：与管理端保持淡蓝渐变视觉 */
         :root {
-            --mobile-bg: #eaf5ff;
+            --mobile-bg: #e4f2fc;
             --mobile-surface: #ffffff;
-            --mobile-surface-muted: #f1f8ff;
-            --mobile-border: #c9def2;
-            --mobile-text: #1f2937;
-            --mobile-muted: #64748b;
-            --mobile-primary: #2563eb;
-            --mobile-primary-light: #8bc9ff;
+            --mobile-surface-muted: #edf7ff;
+            --mobile-border: #b6d2e8;
+            --mobile-text: #24445f;
+            --mobile-muted: #607d94;
+            --mobile-primary: #3f8fd0;
+            --mobile-primary-light: #79bce5;
             --mobile-danger: #dc2626;
             --mobile-radius: 14px;
         }
@@ -338,7 +338,7 @@
             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
             color: var(--mobile-text);
             font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
-            background: linear-gradient(160deg, #e8f4ff 0%, #dceeff 48%, #f8fcff 100%);
+            background: linear-gradient(160deg, #e1f1fc 0%, #d4eafb 48%, #f4fbff 100%);
             background-attachment: fixed;
         }
 
@@ -358,7 +358,7 @@
             border: 1px solid var(--mobile-border);
             border-top: 4px solid #60a5fa;
             border-radius: 18px;
-            box-shadow: 0 16px 36px rgba(30, 64, 90, 0.12);
+            box-shadow: 0 16px 36px rgba(44, 104, 145, 0.16);
         }
 
         h1 {
@@ -401,9 +401,9 @@
         }
 
         input[type="checkbox"] {
-            width: 17px;
-            height: 17px;
-            accent-color: #3b82f6;
+            width: 18px;
+            height: 18px;
+            accent-color: #3f8fd0;
         }
 
         .button {
@@ -411,7 +411,7 @@
             padding: 10px 15px;
             margin: 0;
             color: #fff;
-            background: linear-gradient(135deg, #4d9cf7 0%, #2563eb 100%);
+            background: linear-gradient(135deg, #75bce5 0%, #3f8fd0 100%);
             border-radius: 9px;
             font-size: 0.92rem;
             font-weight: 700;
@@ -420,18 +420,18 @@
         }
 
         .button:hover {
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            background: linear-gradient(135deg, #5aa7d6 0%, #3179b4 100%);
             transform: translateY(-1px);
         }
 
         .button-secondary,
         .button-success {
-            background: linear-gradient(135deg, #8bc9ff 0%, #3b82f6 100%);
+            background: linear-gradient(135deg, #a0d7f2 0%, #5aa7d6 100%);
         }
 
         .button-secondary:hover,
         .button-success:hover {
-            background: linear-gradient(135deg, #6db8f5 0%, #2563eb 100%);
+            background: linear-gradient(135deg, #82c5e6 0%, #478fbe 100%);
         }
 
         .button-danger {
@@ -449,7 +449,7 @@
             background: linear-gradient(145deg, #ffffff 0%, #eff8ff 100%);
             border: 1px solid var(--mobile-border);
             border-radius: var(--mobile-radius);
-            box-shadow: 0 10px 24px rgba(30, 64, 90, 0.08);
+            box-shadow: 0 10px 24px rgba(44, 104, 145, 0.12);
         }
 
         .control-panel {
@@ -525,7 +525,7 @@
         }
 
         .nav-tab.active {
-            color: #1d4ed8;
+            color: #2f77ad;
             background: #e2f1ff;
             border-color: #9bc9f2;
         }
@@ -568,7 +568,7 @@
         }
 
         .mobile-nav-btn.active {
-            color: #1d4ed8 !important;
+            color: #2f77ad !important;
             background: #e2f1ff !important;
             border-color: #9bc9f2 !important;
         }
