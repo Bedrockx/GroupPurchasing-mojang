@@ -921,10 +921,10 @@
             <!-- 导航栏 -->
             <div class="mobile-integrated-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1976D2; margin-bottom: 10px; background-color: #f0f8ff; padding: 0 10px;">
                 <div class="mobile-integrated-tabs" style="display: flex;">
-                    <button onclick="mobileShowTab('rooms')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 8px; font-weight: bold;" class="mobile-nav-btn active">房间信息</button>
-                    <button onclick="mobileShowTab('points')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">积分排行榜</button>
-                    <button onclick="mobileShowTab('ride')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">发车记录</button>
-                    <button onclick="mobileShowTab('gain')" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">收益排行</button>
+                    <button onclick="mobileShowTab('rooms', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #1976D2; border-bottom: 2px solid #1976D2; margin-right: 8px; font-weight: bold;" class="mobile-nav-btn active">房间信息</button>
+                    <button onclick="mobileShowTab('points', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">积分排行榜</button>
+                    <button onclick="mobileShowTab('ride', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">发车记录</button>
+                    <button onclick="mobileShowTab('gain', this)" style="padding: 10px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 500;" class="mobile-nav-btn">收益排行</button>
                 </div>
                 <div class="mobile-refresh-wrap" style="display: flex; gap: 10px;">
                     <button class="button button-secondary" onclick="mobileRefreshCurrentTab()">刷新</button>
@@ -951,7 +951,7 @@
                     <select id="mobile-my-ride-filter-status" style="padding: 5px; flex: 1; min-width: 100px;" onchange="filterMyRideRecords()">
                         <option value="all">所有状态</option>
                         <option value="completed">已完成</option>
-                        <option value="waiting">等待中</option>
+                        <option value="waiting_for_ready">等待中</option>
                         <option value="crashed">已炸车</option>
                         <option value="cancelled">已取消</option>
                     </select>
@@ -1039,6 +1039,13 @@
             }, 3000);
         }
 
+        function getDateInputValue(date = new Date()) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
         function mobileLogout() {
             if (socket) {
                 socket.disconnect();
@@ -1112,12 +1119,16 @@
                 isLoggingIn = false;
                 loginBtn.disabled = false;
                 loginBtn.textContent = '连接';
+                loginSocket.disconnect();
             });
 
             loginSocket.on('disconnect', function(reason) {
                 console.log('断开连接:', reason);
                 isLoggedIn = false;
                 isLoggingIn = false;
+                if (socket === loginSocket) {
+                    showCmdMessage('连接已断开，请重新登录');
+                }
             });
 
             loginSocket.on('message', function(data) {
@@ -1145,11 +1156,11 @@
                     loggedInAccountId = data.accountId || account;
 
                     // 保存登录信息
-                    const account = document.getElementById('login-account').value.trim();
+                    const loginAccount = document.getElementById('login-account').value.trim();
                     const rememberPassword = document.getElementById('remember-password').checked;
                     const autoLogin = document.getElementById('auto-login').checked;
                     
-                    localStorage.setItem('mobileAccount', account);
+                    localStorage.setItem('mobileAccount', loginAccount);
                     if (rememberPassword) {
                         localStorage.setItem('mobilePassword', password);
                     } else {
@@ -1165,8 +1176,7 @@
                     document.getElementById('main-container').classList.remove('hidden');
 
                     // 设置收益排行榜日期选择的默认值为今天
-                    const today = new Date();
-                    const todayStr = today.toISOString().split('T')[0];
+                    const todayStr = getDateInputValue();
                     const dateInput = document.getElementById('mobile-gain-date-input');
                     if (dateInput) {
                         dateInput.value = todayStr;
@@ -1189,6 +1199,7 @@
                     isLoggingIn = false;
                     loginBtn.disabled = false;
                     loginBtn.textContent = '连接';
+                    loginSocket.disconnect();
                 }
             });
         }
@@ -1196,19 +1207,29 @@
         function handleMessage(data) {
             console.log('收到消息:', data);
 
+            if (!data || !data.type) return;
+
             if (data.type === 'mobile-connections-list') {
-                connections = data.data.connections || [];
+                const payload = data.data || {};
+                connections = Array.isArray(payload.connections) ? payload.connections : [];
                 renderConnections();
             } else if (data.type === 'mobile-command-result') {
-                if (data.data.success) {
-                    showCmdMessage(data.data.message || '命令执行成功', 'success');
+                const result = data.data || {};
+                if (result.success) {
+                    showCmdMessage(result.message || '命令已发送', 'success');
                     loadConnections();
                     if (selectedConnectionId) {
                         loadOnlineUsers();
                     }
                 } else {
-                    showCmdMessage(data.data.message || '命令执行失败');
+                    showCmdMessage(result.message || '命令执行失败');
                 }
+            } else if (data.type === 'error') {
+                showCmdMessage(data.message || '服务器处理失败');
+                ['connection-loading', 'offline-loading', 'schedule-loading'].forEach(id => {
+                    const element = document.getElementById(id);
+                    if (element) element.classList.add('hidden');
+                });
             } else if (data.type === 'rooms-status') {
                 const rooms = data.data || {};
                 const allOnlineItems = data.allOnlineItems || [];
@@ -1222,7 +1243,7 @@
             } else if (data.type === 'available-rooms') {
                 const roomSelect = document.getElementById('online-room');
                 roomSelect.innerHTML = '';
-                data.data.forEach(room => {
+                (Array.isArray(data.data) ? data.data : []).forEach(room => {
                     const option = document.createElement('option');
                     option.value = room;
                     option.textContent = room;
@@ -1245,7 +1266,7 @@
                     loadMobileRooms();
                 }
             } else if (data.type === 'schedules-list') {
-                schedules = data.data.schedules || [];
+                schedules = data.data && Array.isArray(data.data.schedules) ? data.data.schedules : [];
                 renderSchedules();
             }
         }
@@ -1373,6 +1394,7 @@
         }
 
         function loadConnections() {
+            if (!socket || !socket.connected || !isLoggedIn) return;
             document.getElementById('connection-loading').classList.remove('hidden');
             document.getElementById('connection-list').classList.add('hidden');
             document.getElementById('no-connection').classList.add('hidden');
@@ -1409,6 +1431,11 @@
                         </div>
                     </div>
                 `).join('');
+                if (selectedConnectionId && connections.some(conn => conn.connectionId === selectedConnectionId)) {
+                    selectConnection(selectedConnectionId);
+                } else if (selectedConnectionId) {
+                    selectedConnectionId = null;
+                }
             }
         }
 
@@ -1505,6 +1532,10 @@
         }
 
         function sendScheduleCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1545,7 +1576,7 @@
             }
         }
 
-        function mobileShowTab(tabId) {
+        function mobileShowTab(tabId, button) {
             // 隐藏所有标签内容
             document.querySelectorAll('.mobile-tab-content').forEach(content => {
                 content.classList.add('hidden');
@@ -1562,9 +1593,13 @@
             document.getElementById('mobile-' + tabId).classList.remove('hidden');
 
             // 更新点击按钮的样式
-            event.target.style.color = '#1976D2';
-            event.target.style.borderBottom = '2px solid #1976D2';
-            event.target.style.fontWeight = 'bold';
+            const activeButton = button || Array.from(document.querySelectorAll('.mobile-nav-btn'))
+                .find(item => item.getAttribute('onclick')?.includes(`'${tabId}'`));
+            if (activeButton) {
+                activeButton.style.color = '#1976D2';
+                activeButton.style.borderBottom = '2px solid #1976D2';
+                activeButton.style.fontWeight = 'bold';
+            }
 
             // 加载对应标签的数据
             if (tabId === 'rooms') {
@@ -1827,7 +1862,7 @@
                     recordDiv.style.borderColor = '#1976D2';
                 } else if (record.status === 'crashed' || record.status === 'cancelled') {
                     recordDiv.style.borderColor = '#f44336';
-                } else if (record.status === 'waiting') {
+                } else if (record.status === 'waiting_for_ready') {
                     recordDiv.style.borderColor = '#4CAF50';
                 }
 
@@ -1855,7 +1890,7 @@
                     <div style="margin-top: 8px; font-size: 13px; color: #666;">
                         <div>房主: ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${maskUid(host.uid)})` : '无'}</div>
                         <div>队员: ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${maskUid(m.uid)})`).join(', ') : '无'}</div>
-                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting' ? '等待中' : record.status}</div>
+                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : record.status}</div>
                     </div>
                 `;
                 container.appendChild(recordDiv);
@@ -1863,6 +1898,10 @@
         }
 
         function sendOnlineCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1894,6 +1933,10 @@
         }
 
         function sendOfflineCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1919,6 +1962,10 @@
         }
 
         function sendProcessCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;
@@ -1936,6 +1983,10 @@
         }
 
         function sendYJLCommand() {
+            if (!socket || !socket.connected || !isLoggedIn) {
+                showCmdMessage('连接已断开，请重新登录');
+                return;
+            }
             if (!selectedConnectionId) {
                 showCmdMessage('请先选择一个连接');
                 return;

@@ -3065,6 +3065,9 @@ async function handleReceivedMessage(socket, message) {
         case 'mobile-command':
           await handleMobileCommand(message, socket);
           break;
+        case 'mobile-command-execution-result':
+          handleMobileCommandExecutionResult(message, socket);
+          break;
         case 'get-versions':
           handleGetVersions(socket);
           break;
@@ -4035,14 +4038,16 @@ async function handleMobileCommand(message, socket) {
             uid,
             roomName,
             username: username || '移动端',
-            notHost: notHost || false
+            notHost: notHost || false,
+            targetSocketId: socket.id
           }
         });
         socket.emit('message', {
           type: 'mobile-command-result',
           data: {
             success: true,
-            message: '上线命令已发送'
+            executed: false,
+            message: '上线命令已发送，等待目标连接处理'
           }
         });
       } else {
@@ -4071,7 +4076,8 @@ async function handleMobileCommand(message, socket) {
           type: 'mobile-command-result',
           data: {
             success: true,
-            message: '下线命令已发送'
+            executed: false,
+            message: '下线命令已发送，等待目标连接处理'
           }
         });
       } else {
@@ -4098,13 +4104,6 @@ async function handleMobileCommand(message, socket) {
           targetSocketId: socket.id // 传递移动端的socketId
         }
       });
-      socket.emit('message', {
-        type: 'mobile-command-result',
-        data: {
-          success: true,
-          message: `命令 ${command} 已发送`
-        }
-      });
       break;
     }
     default:
@@ -4116,6 +4115,31 @@ async function handleMobileCommand(message, socket) {
         }
       });
   }
+}
+
+// 将用户端实际处理结果转发给发起命令的移动端
+function handleMobileCommandExecutionResult(message, socket) {
+  const { targetSocketId, success, resultMessage, command } = message || {};
+  const senderData = getConnectionBySocketId(socket.id);
+  const mobileSocket = targetSocketId ? io.sockets.sockets.get(targetSocketId) : null;
+  const mobileData = targetSocketId ? getConnectionBySocketId(targetSocketId) : null;
+
+  // 仅允许同一账户的用户端回报给其移动端连接，避免伪造其他用户的结果
+  if (!senderData || senderData.isAdmin || !mobileSocket || !mobileData || mobileData.isAdmin ||
+      senderData.accountId !== mobileData.accountId || !mobileData.connection?.isMobile) {
+    log(`拒绝无效的移动端命令回报: socket=${socket.id}, target=${targetSocketId}`, LOG_TYPES.WARN);
+    return;
+  }
+
+  mobileSocket.emit('message', {
+    type: 'mobile-command-result',
+    data: {
+      success: Boolean(success),
+      executed: true,
+      command: command || '',
+      message: resultMessage || (success ? '目标连接已处理命令' : '目标连接处理命令失败')
+    }
+  });
 }
 
 // 处理获取在线用户连接信息

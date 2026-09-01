@@ -2554,7 +2554,7 @@
 
         // 处理移动端上线命令
         function handleMobileOnlineCommand(data) {
-            const { uid, roomName, username, notHost } = data || {};
+            const { uid, roomName, username, notHost, targetSocketId } = data || {};
             
             if (!uid || !roomName) {
                 addLog('移动端上线命令缺少必要参数', 'error');
@@ -2578,6 +2578,7 @@
                 operatorAccountId: accountId
             };
             sendMessageToServer(onlineMessage);
+            reportMobileCommandResult({ targetSocketId }, true, '上线请求已提交', 'online');
         }
         
         // 下线
@@ -2802,32 +2803,61 @@
         function closeBGI() {
             addLog('正在关闭BGI...', 'info');
             if (window.electronAPI && window.electronAPI.closeProcess) {
-                window.electronAPI.closeProcess('BetterGI.exe');
+                return Promise.resolve(window.electronAPI.closeProcess('BetterGI.exe'))
+                    .then(success => Boolean(success))
+                    .catch(error => {
+                        addLog(`关闭BGI失败: ${error.message || error}`, 'error');
+                        return false;
+                    });
             } else {
                 addLog('BGI关闭功能仅在Electron环境中可用', 'warning');
+                return false;
             }
         }
         
         // 关闭原神
-        function closeGenshin() {
-            // 检查复选框状态
-            const shouldCloseGenshin = document.getElementById('close-genshin-checkbox').checked;
+        function closeGenshin(force = false) {
+            // 移动端明确下发关闭命令时强制执行，普通一条龙仍遵循本地配置
+            const closeOption = document.getElementById('close-genshin-checkbox');
+            const shouldCloseGenshin = force || (closeOption && closeOption.checked);
             if (!shouldCloseGenshin) {
                 addLog('未勾选关闭原神，跳过关闭操作', 'info');
-                return;
+                return false;
             }
 
             addLog('正在关闭原神...', 'info');
             if (window.electronAPI && window.electronAPI.closeProcess) {
-                window.electronAPI.closeProcess('YuanShen.exe');
+                return Promise.resolve(window.electronAPI.closeProcess('YuanShen.exe'))
+                    .then(success => Boolean(success))
+                    .catch(error => {
+                        addLog(`关闭原神失败: ${error.message || error}`, 'error');
+                        return false;
+                    });
             } else {
                 addLog('原神关闭功能仅在Electron环境中可用', 'warning');
+                return false;
+            }
+        }
+
+        function reportMobileCommandResult(params, success, resultMessage, command) {
+            if (!params || !params.targetSocketId || !socket || !isLoggedIn) return;
+            const sendResult = resolvedSuccess => sendMessageToServer({
+                type: 'mobile-command-execution-result',
+                targetSocketId: params.targetSocketId,
+                command: command || '',
+                success: Boolean(resolvedSuccess),
+                resultMessage: resultMessage
+            });
+            if (success && typeof success.then === 'function') {
+                success.then(sendResult).catch(() => sendResult(false));
+            } else {
+                sendResult(success);
             }
         }
 
         // 处理移动端控制命令
         function handleMobileControlCommand(command, params) {
-            const { uid, roomName, username, notHost, dragonName, scheduleId } = params || {};
+            const { uid, roomName, username, notHost, dragonName, closeGame, scheduleId } = params || {};
             switch(command) {
                 case 'online':
                     if (uid && roomName) {
@@ -2850,17 +2880,22 @@
                     break;
                 case 'yjl':
                     if (dragonName) {
-                        addDragonTask(dragonName);
+                        const bgiFolder = document.getElementById('bgi-folder-path')?.textContent;
+                        const canLaunch = bgiFolder && bgiFolder !== '未选择' && bgiFolder !== '未选择文件夹' &&
+                            window.electronAPI && window.electronAPI.startProcess;
+                        const accepted = Boolean(canLaunch) && addDragonTask(dragonName, false, { closeGame: Boolean(closeGame) });
+                        reportMobileCommandResult(params, accepted, accepted ? '一条龙任务已加入执行队列' : '一条龙任务未能加入执行队列', command);
                         addLog('收到移动端一条龙命令', 'info');
                     } else {
+                        reportMobileCommandResult(params, false, '一条龙名称为空', command);
                         addLog('收到移动端一条龙命令，但未配置一条龙名称', 'warning');
                     }
                     break;
                 case 'close-bgi':
-                    closeBGI();
+                    reportMobileCommandResult(params, closeBGI(), 'BGI关闭命令已处理', command);
                     break;
                 case 'close-game':
-                    closeGenshin();
+                    reportMobileCommandResult(params, closeGenshin(true), '原神关闭命令已处理', command);
                     break;
                 case 'get-schedules':
                     // 发送调度列表给移动端（通过服务端中转）
@@ -2872,6 +2907,7 @@
                         targetSocketId: params.targetSocketId // 添加目标socketId
                     };
                     sendMessageToServer(schedulesList);
+                    reportMobileCommandResult(params, true, '调度列表已发送', command);
                     addLog('收到移动端获取调度列表命令', 'info');
                     break;
                 case 'execute-schedule':
@@ -2880,9 +2916,13 @@
                         if (schedule) {
                             addLog(`收到移动端执行调度命令: ${schedule.name}`, 'info');
                             executeSchedule(schedule);
+                            reportMobileCommandResult(params, true, `调度“${schedule.name}”已加入执行`, command);
                         } else {
+                            reportMobileCommandResult(params, false, '调度不存在或已被删除', command);
                             addLog(`收到移动端执行调度命令，但调度不存在: ${scheduleId}`, 'warning');
                         }
+                    } else {
+                        reportMobileCommandResult(params, false, '调度编号为空', command);
                     }
                     break;
                 case 'report-gain':
@@ -2913,41 +2953,47 @@
         const RIDE_PROTECTION_MS = 120000; // 联机一条龙保护时间（2分钟）
         
         // 添加一条龙任务
-        function addDragonTask(configName, isRideTask = false) {
+        function addDragonTask(configName, isRideTask = false, options = {}) {
+            const closeGame = options.closeGame !== undefined
+                ? Boolean(options.closeGame)
+                : Boolean(document.getElementById('close-genshin-checkbox')?.checked);
             // 如果存在计时器，根据计时器类型处理
             if (dragonTimer) {
                 if (timerType === 'protection') {
                     // 保护期内忽略所有任务
                     addLog(`保护期内，忽略一条龙任务: ${configName}`, 'warning');
-                    return;
+                    return false;
                 } else {
                     // 冷却期内，新任务覆盖旧任务（联机任务优先级更高）
                     if (pendingDragonTask && pendingDragonTask.isRideTask && !isRideTask) {
                         addLog(`联机任务优先级更高，普通任务 "${configName}" 无法覆盖`, 'warning');
-                        return;
+                        return false;
                     }
                     pendingDragonTask = {
                         configName: configName,
-                        isRideTask: isRideTask
+                        isRideTask: isRideTask,
+                        closeGame: closeGame
                     };
                     addLog(`一条龙任务已更新为: ${configName}（覆盖旧任务）`, 'info');
-                    return;
+                    return true;
                 }
             }
             
             // 没有计时器，立即执行并启动对应类型的计时器
             const task = {
                 configName: configName,
-                isRideTask: isRideTask
+                isRideTask: isRideTask,
+                closeGame: closeGame
             };
             
             addLog(`一条龙任务已加入队列: ${configName}`, 'info');
             executeDragonWithTimer(task);
+            return true;
         }
         
         // 执行一条龙并启动计时器
         function executeDragonWithTimer(task) {
-            const { configName, isRideTask } = task;
+            const { configName, isRideTask, closeGame } = task;
             timerType = isRideTask ? 'protection' : 'cooldown';
             const timerMs = isRideTask ? RIDE_PROTECTION_MS : NORMAL_COOLDOWN_MS;
             
@@ -2956,7 +3002,7 @@
             }
             
             // 执行一条龙启动
-            executeDragonLaunch(configName);
+            executeDragonLaunch(configName, closeGame);
             
             // 启动计时器
             addLog(`一条龙已启动，进入${timerMs / 1000}秒${isRideTask ? '保护' : '冷却'}`, 'info');
@@ -2977,19 +3023,19 @@
         }
 
         // 实际执行一条龙启动
-        function executeDragonLaunch(configName) {
+        function executeDragonLaunch(configName, closeGame) {
             const bgiFolder = document.getElementById('bgi-folder-path').textContent;
-            if (bgiFolder === '未选择') {
+            if (!bgiFolder || bgiFolder === '未选择' || bgiFolder === '未选择文件夹') {
                 showAlertModal('提示', '请先选择BetterGI文件夹');
                 addLog('请先选择BGI文件夹', 'error');
-                return;
+                return false;
             }
             
             // BGI一定要关，不需要用户选择
             closeBGI();
             
             // 调用closeGenshin函数，内部会检查复选框状态
-            closeGenshin();
+            closeGenshin(Boolean(closeGame));
             
             if (window.electronAPI && window.electronAPI.startProcess) {
                 window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder).then(pid => {
@@ -3000,6 +3046,7 @@
             } else {
                 addLog('无法启动，Electron API不可用', 'error');
             }
+            return Boolean(window.electronAPI && window.electronAPI.startProcess);
         }
 
         // 启动联机等待一条龙（用户手动触发）
