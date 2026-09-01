@@ -1583,10 +1583,11 @@
             });
 
             // 更新所有导航按钮的样式
-            document.querySelectorAll('.mobile-nav-btn').forEach(button => {
-                button.style.color = '#666';
-                button.style.borderBottom = '2px solid transparent';
-                button.style.fontWeight = '500';
+            document.querySelectorAll('.mobile-nav-btn').forEach(navButton => {
+                navButton.classList.remove('active');
+                navButton.style.removeProperty('color');
+                navButton.style.removeProperty('border-bottom');
+                navButton.style.removeProperty('font-weight');
             });
 
             // 显示选中的标签内容
@@ -1596,9 +1597,7 @@
             const activeButton = button || Array.from(document.querySelectorAll('.mobile-nav-btn'))
                 .find(item => item.getAttribute('onclick')?.includes(`'${tabId}'`));
             if (activeButton) {
-                activeButton.style.color = '#1976D2';
-                activeButton.style.borderBottom = '2px solid #1976D2';
-                activeButton.style.fontWeight = 'bold';
+                activeButton.classList.add('active');
             }
 
             // 加载对应标签的数据
