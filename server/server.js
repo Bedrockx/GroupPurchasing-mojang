@@ -10,6 +10,7 @@ const http = require('http');
 const socketIO = require('socket.io');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // ==================== 2. 常量定义 ====================
 // 服务端版本号
@@ -48,6 +49,8 @@ const LOG_TYPES = {
 // 连接限制
 const MAX_CONNECTIONS = 250;
 const DATA_CHANGE_DELAY = 1000;
+const LOGIN_KEY_TTL = 120 * 1000;
+const LOGIN_MAX_ATTEMPTS = 3;
 
 // 带宽限制配置
 const MAX_BANDWIDTH = 2 * 1024 * 1024; // 2Mbps = 2,097,152 bits/s
@@ -980,15 +983,50 @@ function log(message, eventType = LOG_TYPES.INFO, context = {}) {
 let logCallCount = 0;
 
 /**
- * 生成随机六位密钥
- * @returns {string} 六位数字的随机密钥
- * @example
- * // 生成登录密钥
- * const key = generateRandomKey();
- * console.log(key); // 输出类似 "123456"
+ * 生成登录挑战密钥
+ * @returns {string} 32 字节随机密钥的十六进制表示
  */
 function generateRandomKey() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * 使用常量时间比较两个十六进制哈希，避免因长度或比较时长泄露信息。
+ * @param {string} expectedHash 服务端计算的哈希
+ * @param {string} receivedHash 客户端提交的哈希
+ * @returns {boolean} 哈希是否一致
+ */
+function compareLoginHash(expectedHash, receivedHash) {
+  if (typeof expectedHash !== 'string' || typeof receivedHash !== 'string' ||
+      expectedHash.length !== receivedHash.length || !/^[a-f0-9]+$/i.test(receivedHash)) {
+    return false;
+  }
+
+  const expectedBuffer = Buffer.from(expectedHash, 'hex');
+  const receivedBuffer = Buffer.from(receivedHash, 'hex');
+  return expectedBuffer.length === receivedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+}
+
+/**
+ * 记录一次登录认证失败，并在达到上限后清理挑战密钥。
+ * @param {Object} socket Socket.IO 连接
+ * @param {Object|null} loginInfo 当前连接的登录挑战
+ * @returns {boolean} 是否已达到失败次数上限
+ */
+function recordLoginFailure(socket, loginInfo) {
+  if (!loginInfo) return true;
+
+  loginInfo.failedAttempts = (loginInfo.failedAttempts || 0) + 1;
+  if (loginInfo.failedAttempts >= LOGIN_MAX_ATTEMPTS) {
+    loginKeys.delete(socket.id);
+    // 达到失败上限后断开连接，避免同一连接反复申请新的登录挑战。
+    if (socket && socket.connected !== false) {
+      setImmediate(() => socket.disconnect());
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -1042,10 +1080,10 @@ function resetDataChangeTimer() {
  */
 async function cleanupOnlineData() {
   try {
-    // 清理过期的登录密钥
+    // 清理过期的登录挑战
     const now = Date.now();
     for (const [socketId, { timestamp }] of loginKeys.entries()) {
-      if (now - timestamp > 5 * 60 * 1000) { // 5分钟过期
+      if (now - timestamp > LOGIN_KEY_TTL) { // 120秒过期
         loginKeys.delete(socketId);
       }
     }
@@ -1290,7 +1328,14 @@ async function initData() {
  */
 function handleUserLogin(data, socket) {
   try {
-    log(`收到登录请求: ${JSON.stringify(data)}`, LOG_TYPES.INFO);
+    // 登录请求可能包含认证材料，只记录必要的元数据，不记录密码、哈希或密钥。
+    log(`收到登录请求: ${JSON.stringify({
+      accountId: data.accountId,
+      hasPassword: typeof data.password === 'string' && data.password.length > 0,
+      hasKey: typeof data.key === 'string' && data.key.length > 0,
+      isAdminLogin: data.isAdminLogin === true,
+      version: data.version || undefined
+    })}`, LOG_TYPES.INFO);
     const { accountId, password, key, isAdminLogin, version, codeHash } = data;
 
     // 验证输入参数
@@ -1328,18 +1373,20 @@ function handleUserLogin(data, socket) {
         isAdminLogin: isAdminLogin,
         connectionName: data.connectionName, // 存储连接名称
         version: version || '未知', // 存储版本号
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        failedAttempts: 0
       });
 
       socket.emit('message', {
         type: 'login-key',
         key: randomKey
       });
-      log(`向用户 ${accountId} 发送登录密钥，版本号: ${version || '未知'}`, LOG_TYPES.LOGIN, { accountId: accountId, version: version });
+      log(`已向用户 ${accountId} 发送登录挑战，版本号: ${version || '未知'}`, LOG_TYPES.LOGIN, { accountId: accountId, version: version });
     } else {
       // 第二次登录请求，验证哈希密码
       const loginInfo = loginKeys.get(socket.id);
       if (!loginInfo || loginInfo.accountId !== accountId || loginInfo.isAdminLogin !== isAdminLogin) {
+        if (loginInfo) loginKeys.delete(socket.id);
         socket.emit('message', {
           type: 'login-error',
           message: '登录请求无效，请重新登录'
@@ -1348,8 +1395,19 @@ function handleUserLogin(data, socket) {
         return;
       }
 
-      // 检查密钥是否过期（5分钟）
-      if (Date.now() - loginInfo.timestamp > 5 * 60 * 1000) {
+      // 密钥必须与当前 socket 申请到的挑战一致，避免跨连接或跨请求复用。
+      if (typeof key !== 'string' || key !== loginInfo.key) {
+        loginKeys.delete(socket.id);
+        socket.emit('message', {
+          type: 'login-error',
+          message: '登录请求无效，请重新登录'
+        });
+        log(`用户 ${accountId} 登录失败: 登录密钥不匹配`, LOG_TYPES.LOGIN, { accountId: accountId, reason: '登录密钥不匹配' });
+        return;
+      }
+
+      // 检查密钥是否过期（120秒）
+      if (Date.now() - loginInfo.timestamp > LOGIN_KEY_TTL) {
         socket.emit('message', {
           type: 'login-error',
           message: '登录密钥已过期，请重新登录'
@@ -1364,8 +1422,8 @@ function handleUserLogin(data, socket) {
         const adminAccount = adminAccounts[accountId];
         if (adminAccount) {
           // 计算存储密码+密钥的哈希
-          const storedHash = require('crypto').createHash('sha256').update(adminAccount.password + loginInfo.key).digest('hex');
-          if (storedHash === password) {
+          const storedHash = crypto.createHash('sha256').update(adminAccount.password + loginInfo.key).digest('hex');
+          if (compareLoginHash(storedHash, password)) {
             // 更新管理员连接管理
             if (!adminConnections.has(accountId)) {
               adminConnections.set(accountId, {
@@ -1422,6 +1480,7 @@ function handleUserLogin(data, socket) {
             loginKeys.delete(socket.id);
             log(`管理员 ${accountId} 登录成功，连接ID: ${connectionId}`, LOG_TYPES.ADMIN, { accountId: accountId, connectionId: connectionId });
           } else {
+            recordLoginFailure(socket, loginInfo);
             socket.emit('message', {
               type: 'login-error',
               message: '账号或密码错误'
@@ -1429,6 +1488,7 @@ function handleUserLogin(data, socket) {
             log(`管理员登录失败: ${accountId}`, LOG_TYPES.ADMIN, { accountId: accountId, reason: '账号或密码错误' });
           }
         } else {
+          recordLoginFailure(socket, loginInfo);
           socket.emit('message', {
             type: 'login-error',
             message: '账号或密码错误'
@@ -1440,8 +1500,8 @@ function handleUserLogin(data, socket) {
         const account = userAccounts[accountId];
         if (account) {
           // 常规密码验证（与之前相同）
-          const storedHash = require('crypto').createHash('sha256').update(account.password + loginInfo.key).digest('hex');
-          if (storedHash === password) {
+          const storedHash = crypto.createHash('sha256').update(account.password + loginInfo.key).digest('hex');
+          if (compareLoginHash(storedHash, password)) {
             // 密码匹配后，检查客户端代码完整性（仅记录，不阻止登录）
             if (data.isMobile) {
               // 移动端不进行代码完整性校验
@@ -1557,6 +1617,7 @@ function handleUserLogin(data, socket) {
             loginKeys.delete(socket.id);
             log(`用户 ${accountId} 登录成功，连接ID: ${connectionId}`, LOG_TYPES.LOGIN, { accountId: accountId, connectionId: connectionId });
           } else {
+            recordLoginFailure(socket, loginInfo);
             socket.emit('message', {
               type: 'login-error',
               message: '账号或密码错误'
@@ -1564,6 +1625,7 @@ function handleUserLogin(data, socket) {
             log(`用户登录失败: ${accountId}`, LOG_TYPES.ERROR, { accountId: accountId, reason: '账号或密码错误' });
           }
         } else {
+          recordLoginFailure(socket, loginInfo);
           socket.emit('message', {
             type: 'login-error',
             message: '账号或密码错误'
