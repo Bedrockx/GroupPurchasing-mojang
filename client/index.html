@@ -1055,7 +1055,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '2.1.1';
+        const VERSION = '2.1.2';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -6252,7 +6252,8 @@
                         // 只有脚本完成参数、目录和压缩包校验并写入标记后，才允许当前应用退出。
                         const { spawn } = require('child_process');
                         await new Promise((resolve, reject) => {
-                            const updaterProcess = spawn('powershell.exe', [
+                            const updaterProcess = spawn('cmd.exe', [
+                                '/d', '/s', '/c', 'powershell.exe',
                                 '-NoProfile', '-NonInteractive',
                                 '-ExecutionPolicy', 'Bypass',
                                 '-File', updaterPath,
