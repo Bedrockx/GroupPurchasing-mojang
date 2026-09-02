@@ -14,6 +14,15 @@ window.electronAPI = {
   getAppPath: () => {
     return ipcRenderer.sendSync('get-app-path');
   },
+  captureDesktop: (options = {}) => ipcRenderer.invoke('capture-desktop', options),
+  listLogFiles: (kind, bgiFolder) => ipcRenderer.invoke('list-log-files', { kind, bgiFolder }),
+  readLogTail: (kind, bgiFolder, filePath, bytes) => ipcRenderer.invoke('read-log-tail', { kind, bgiFolder, filePath, bytes }),
+  listRemoteExecutables: () => ipcRenderer.invoke('list-remote-executables'),
+  addRemoteWhitelistFolder: () => ipcRenderer.invoke('add-remote-whitelist-folder'),
+  removeRemoteWhitelistFolder: (folderPath) => ipcRenderer.invoke('remove-remote-whitelist-folder', folderPath),
+  runRemoteExecutable: (id) => ipcRenderer.invoke('run-remote-executable', { id }),
+  executeRemoteCommand: (command, cwd) => ipcRenderer.invoke('execute-remote-command', { command, cwd }),
+  resetRemoteCommandSession: () => ipcRenderer.invoke('reset-remote-command-session'),
   // 文件操作
   readFile: (filePath, callback) => {
     ipcRenderer.once('file-content', (event, content) => callback(null, content));

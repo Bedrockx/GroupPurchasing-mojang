@@ -1,14 +1,170 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { exec, execSync, spawn, kill } = require('child_process');
 
+// Electron 27 在部分 Windows 环境中会反复崩溃 GPU 进程，软件渲染进程也无法通过 GPU 沙箱启动。
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.disableHardwareAcceleration();
+
 let mainWindow;
+const remoteWhitelistFile = path.join(app.getPath('userData'), 'remote-whitelist.json');
+const remoteExecutableCache = new Map();
+let remoteCmdProcess = null;
+let remoteCmdPending = null;
+let remoteCmdStdout = '';
+const REMOTE_CMD_CAPTURE_LIMIT = 2 * 1024 * 1024;
+
+function readRemoteWhitelist() {
+  try {
+    const values = JSON.parse(fs.readFileSync(remoteWhitelistFile, 'utf8'));
+    return Array.isArray(values) ? values.filter(item => typeof item === 'string') : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeRemoteWhitelist(values) {
+  fs.mkdirSync(path.dirname(remoteWhitelistFile), { recursive: true });
+  fs.writeFileSync(remoteWhitelistFile, JSON.stringify(values, null, 2), 'utf8');
+}
+
+function getClientLogDirectory() {
+  let appPath = app.getAppPath();
+  if (app.isPackaged) appPath = path.resolve(appPath, '..');
+  return path.join(appPath, 'log');
+}
+
+function isWithinRoot(filePath, rootPath) {
+  const normalize = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  const file = normalize(filePath);
+  const root = normalize(rootPath);
+  return file === root || file.startsWith(`${root}${path.sep}`);
+}
+
+function collectExecutables(rootPath, result = [], depth = 0, baseRootPath = rootPath) {
+  if (depth > 2 || !fs.existsSync(rootPath)) return result;
+  let entries;
+  try {
+    entries = fs.readdirSync(rootPath, { withFileTypes: true });
+  } catch (_) {
+    return result;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(rootPath, entry.name);
+    if (entry.isDirectory()) {
+      collectExecutables(fullPath, result, depth + 1, baseRootPath);
+    } else if (/\.(exe|bat|cmd|ps1)$/i.test(entry.name)) {
+      try {
+        const stat = fs.statSync(fullPath);
+        const id = crypto.createHash('sha256').update(path.resolve(fullPath).toLowerCase()).digest('hex').slice(0, 24);
+        remoteExecutableCache.set(id, fullPath);
+        result.push({ id, name: entry.name, relativePath: path.relative(baseRootPath, fullPath), size: stat.size });
+      } catch (_) {}
+    }
+  }
+  return result;
+}
+
+function resetRemoteCmdSession(reason = 'CMD会话已刷新') {
+  const child = remoteCmdProcess;
+  remoteCmdProcess = null;
+  remoteCmdStdout = '';
+  if (remoteCmdPending) {
+    clearTimeout(remoteCmdPending.timer);
+    remoteCmdPending.reject(new Error(reason));
+    remoteCmdPending = null;
+  }
+  if (child && !child.killed) {
+    child.removeAllListeners();
+    child.stdout?.removeAllListeners();
+    child.stderr?.removeAllListeners();
+    if (process.platform === 'win32' && Number.isInteger(child.pid)) {
+      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      killer.unref();
+    } else {
+      child.kill();
+    }
+  }
+}
+
+function ensureRemoteCmdSession(cwd) {
+  if (remoteCmdProcess && !remoteCmdProcess.killed) return remoteCmdProcess;
+  const workingDirectory = cwd && fs.existsSync(cwd) ? cwd : process.cwd();
+  const child = spawn('cmd.exe', ['/Q', '/D'], {
+    cwd: workingDirectory,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  remoteCmdProcess = child;
+  remoteCmdStdout = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', data => {
+    remoteCmdStdout += data;
+    if (Buffer.byteLength(remoteCmdStdout, 'utf8') > REMOTE_CMD_CAPTURE_LIMIT) {
+      resetRemoteCmdSession('CMD输出超过2MB，会话已重置');
+      return;
+    }
+    const pending = remoteCmdPending;
+    if (!pending) return;
+    const markerIndex = remoteCmdStdout.indexOf(pending.marker);
+    if (markerIndex < 0) return;
+    const markerEnd = remoteCmdStdout.indexOf('\n', markerIndex);
+    if (markerEnd < 0) return;
+    const output = remoteCmdStdout.slice(0, markerIndex).replace(/[\r\n]+$/, '');
+    const exitCodeText = remoteCmdStdout.slice(markerIndex + pending.marker.length, markerEnd).trim();
+    remoteCmdStdout = remoteCmdStdout.slice(markerEnd + 1);
+    clearTimeout(pending.timer);
+    remoteCmdPending = null;
+    pending.resolve({ output, exitCode: Number.parseInt(exitCodeText, 10) || 0 });
+  });
+  child.stderr.on('data', data => {
+    remoteCmdStdout += data;
+    if (Buffer.byteLength(remoteCmdStdout, 'utf8') > REMOTE_CMD_CAPTURE_LIMIT) {
+      resetRemoteCmdSession('CMD输出超过2MB，会话已重置');
+    }
+  });
+  const handleClose = error => {
+    if (remoteCmdProcess !== child) return;
+    remoteCmdProcess = null;
+    remoteCmdStdout = '';
+    if (remoteCmdPending) {
+      clearTimeout(remoteCmdPending.timer);
+      remoteCmdPending.reject(error instanceof Error ? error : new Error('CMD会话已结束'));
+      remoteCmdPending = null;
+    }
+  };
+  child.once('error', handleClose);
+  child.once('exit', () => handleClose(new Error('CMD会话已结束')));
+  child.stdin.write('chcp 65001>nul\r\n');
+  return child;
+}
+
+function executeRemoteCommand(command, cwd) {
+  const value = String(command || '');
+  if (!value.trim() || /[\r\n]/.test(value)) return Promise.reject(new Error('CMD命令必须为单行内容'));
+  if (remoteCmdPending) return Promise.reject(new Error('上一条CMD命令仍在执行'));
+  const child = ensureRemoteCmdSession(cwd);
+  return new Promise((resolve, reject) => {
+    const marker = `__MOJANG_CMD_DONE_${crypto.randomBytes(12).toString('hex')}__:`;
+    const timer = setTimeout(() => {
+      resetRemoteCmdSession('CMD命令执行超时，会话已重置');
+    }, 110 * 1000);
+    remoteCmdPending = { marker, resolve, reject, timer };
+    child.stdin.write(`${value}\r\necho ${marker}%errorlevel%\r\n`, error => {
+      if (error && remoteCmdPending?.marker === marker) resetRemoteCmdSession(`CMD命令写入失败：${error.message}`);
+    });
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 800,
+    minWidth: 960,
+    minHeight: 600,
     webPreferences: {
       preload: path.join(app.getAppPath(), 'preload.js'),
       nodeIntegration: true,
@@ -72,6 +228,124 @@ ipcMain.on('get-app-path', (event) => {
   event.returnValue = appPath;
 });
 
+ipcMain.handle('capture-desktop', async (_event, options = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('主窗口不可用');
+  const display = screen.getDisplayMatching(mainWindow.getBounds());
+  const sourceWidth = Math.max(1, display.bounds.width);
+  const sourceHeight = Math.max(1, display.bounds.height);
+  const maxWidth = Math.max(1, Math.min(1920, Number(options.maxWidth) || 1080));
+  const maxHeight = Math.max(1, Math.min(1080, Number(options.maxHeight) || 1080));
+  const scale = Math.min(1, maxWidth / sourceWidth, maxHeight / sourceHeight);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: sourceWidth, height: sourceHeight }
+  });
+  const displayId = String(display.id);
+  const source = sources.find(item => item.display_id === displayId) || (sources.length === 1 ? sources[0] : null);
+  if (!source || source.thumbnail.isEmpty()) throw new Error('无法获取桌面画面');
+  const image = source.thumbnail.resize({ width, height, quality: 'good' });
+  return { base64: image.toJPEG(72).toString('base64'), width, height };
+});
+
+ipcMain.handle('list-log-files', async (_event, { kind = 'client', bgiFolder = '' } = {}) => {
+  if (kind === 'bgi' && !bgiFolder) return [];
+  const root = kind === 'bgi' ? path.join(String(bgiFolder || ''), 'log') : getClientLogDirectory();
+  if (!root || !fs.existsSync(root)) return [];
+  const files = [];
+  const walk = (dir, depth = 0) => {
+    if (depth > 2) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (/\.(log|txt|json)$/i.test(entry.name)) {
+        try {
+          const stat = fs.statSync(full);
+          files.push({ path: path.relative(root, full), size: stat.size, modifiedAt: stat.mtimeMs });
+        } catch (_) {}
+      }
+    }
+  };
+  walk(root);
+  return files.sort((a, b) => b.modifiedAt - a.modifiedAt);
+});
+
+ipcMain.handle('read-log-tail', async (_event, { kind = 'client', bgiFolder = '', filePath, bytes = 64 } = {}) => {
+  if (kind === 'bgi' && !bgiFolder) throw new Error('未配置BetterGI文件夹');
+  const root = kind === 'bgi' ? path.join(String(bgiFolder || ''), 'log') : getClientLogDirectory();
+  const resolved = path.resolve(root, String(filePath || ''));
+  if (!isWithinRoot(resolved, root) || !fs.existsSync(resolved)) throw new Error('日志文件不存在');
+  const realRoot = fs.realpathSync(root);
+  const realResolved = fs.realpathSync(resolved);
+  if (!isWithinRoot(realResolved, realRoot)) throw new Error('日志路径无效');
+  const stat = fs.statSync(resolved);
+  const length = Math.min(Math.max(1, Number(bytes) || 64) * 1024, stat.size, 4 * 1024 * 1024);
+  const fd = fs.openSync(resolved, 'r');
+  try {
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, stat.size - length);
+    return { filePath, bytes: length, base64: buffer.toString('base64') };
+  } finally {
+    fs.closeSync(fd);
+  }
+});
+
+ipcMain.handle('list-remote-executables', async () => {
+  remoteExecutableCache.clear();
+  const folders = readRemoteWhitelist();
+  const existingFolders = folders.filter(folder => fs.existsSync(folder));
+  return { folders, files: existingFolders.flatMap(folder => collectExecutables(folder).map(item => ({ ...item, folder })) ) };
+});
+
+ipcMain.handle('add-remote-whitelist-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return readRemoteWhitelist();
+  const selected = path.resolve(result.filePaths[0]);
+  const folders = readRemoteWhitelist();
+  if (!folders.some(folder => path.resolve(folder).toLowerCase() === selected.toLowerCase())) folders.push(selected);
+  writeRemoteWhitelist(folders);
+  return folders;
+});
+
+ipcMain.handle('remove-remote-whitelist-folder', async (_event, folderPath) => {
+  const target = path.resolve(String(folderPath || ''));
+  const folders = readRemoteWhitelist();
+  const remaining = folders.filter(folder => path.resolve(folder).toLowerCase() !== target.toLowerCase());
+  writeRemoteWhitelist(remaining);
+  remoteExecutableCache.clear();
+  return remaining;
+});
+
+ipcMain.handle('run-remote-executable', async (_event, { id } = {}) => {
+  const filePath = remoteExecutableCache.get(String(id || ''));
+  const folders = readRemoteWhitelist().filter(folder => fs.existsSync(folder));
+  if (!filePath || !folders.some(folder => isWithinRoot(filePath, folder)) || !fs.existsSync(filePath)) throw new Error('可执行文件不在白名单中');
+  const realFile = fs.realpathSync(filePath);
+  if (!folders.some(folder => isWithinRoot(realFile, fs.realpathSync(folder)))) throw new Error('可执行文件不在白名单中');
+  const ext = path.extname(filePath).toLowerCase();
+  const command = ext === '.bat' || ext === '.cmd' ? 'cmd.exe' : ext === '.ps1' ? 'powershell.exe' : filePath;
+  const args = ext === '.bat' || ext === '.cmd' ? ['/c', filePath] : ext === '.ps1' ? ['-ExecutionPolicy', 'Bypass', '-File', filePath] : [];
+  const child = spawn(command, args, { cwd: path.dirname(filePath), detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  return { pid: child.pid, name: path.basename(filePath) };
+});
+
+ipcMain.handle('execute-remote-command', async (_event, { command, cwd } = {}) => {
+  return executeRemoteCommand(command, cwd);
+});
+
+ipcMain.handle('reset-remote-command-session', async () => {
+  resetRemoteCmdSession();
+  return true;
+});
+
 // 文件操作
 ipcMain.on('read-file', (event, filePath) => {
   try {
@@ -96,13 +370,13 @@ ipcMain.on('delete-file', (event, filePath) => {
 // 进程操作
 ipcMain.on('start-process', (event, { command, args, cwd }) => {
   try {
-    const process = spawn(command, args || [], {
+    const child = spawn(command, args || [], {
       cwd: cwd || process.cwd(),
       detached: true,
       stdio: 'ignore'
     });
-    process.unref();
-    event.reply('process-started', process.pid);
+    child.unref();
+    event.reply('process-started', child.pid);
   } catch (error) {
     event.reply('process-error', error.message);
   }
@@ -251,14 +525,8 @@ ipcMain.on('close-process', (event, processName) => {
 // 日志功能
 ipcMain.on('write-log', (event, { level, message }) => {
   try {
-    // 获取应用程序路径
-    let appPath = app.getAppPath();
-    if (app.isPackaged) {
-      appPath = path.resolve(appPath, '..');
-    }
-    
     // 创建log文件夹
-    const logDir = path.join(appPath, 'log');
+    const logDir = getClientLogDirectory();
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }

@@ -73,7 +73,7 @@
             margin: 0;
             padding: 0 4px 4px;
             color: var(--blue-950);
-            font-size: clamp(1.45rem, 2vw, 2rem);
+            font-size: 1.75rem;
             font-weight: 750;
             letter-spacing: 0;
         }
@@ -345,7 +345,56 @@
         .log-info { color: var(--blue-700); }
         .log-warning { color: #b87819; }
 
-        .folder-display { min-height: 40px; padding: 10px 12px; color: var(--ink-600); background: var(--blue-050); border: 1px solid var(--line); border-radius: 9px; font-size: 0.78rem; overflow-wrap: anywhere; }
+        .folder-display {
+            min-height: 44px;
+            padding: 11px 13px;
+            display: flex;
+            align-items: center;
+            color: var(--ink-600);
+            background: var(--blue-050);
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            font-size: 0.8rem;
+            overflow-wrap: anywhere;
+            cursor: default;
+            transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        #bgi-folder-path { cursor: pointer; }
+        #bgi-folder-path:hover, #bgi-folder-path:focus-visible {
+            background: #e9f6ff;
+            border-color: var(--blue-600);
+            box-shadow: 0 0 0 3px rgba(47, 139, 209, 0.12);
+            outline: none;
+        }
+
+        .remote-config-section { padding-bottom: 18px; background: linear-gradient(155deg, #ffffff 0%, #edf8ff 100%); }
+        .remote-config-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+        .remote-config-heading h2 { margin-bottom: 5px; }
+        .remote-config-description { margin: 0 0 16px; color: var(--ink-600); font-size: 0.78rem; line-height: 1.5; }
+        .remote-config-status { flex: 0 0 auto; padding: 5px 9px; color: var(--blue-800); background: var(--blue-100); border: 1px solid var(--blue-200); border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+        .remote-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px 16px; }
+        .remote-config-field { min-width: 0; }
+        .remote-config-field-wide { grid-column: 1 / -1; }
+        .remote-config-field input[readonly] { color: var(--ink-600); background: #edf7fd; cursor: default; }
+        .remote-config-inline { display: flex; align-items: center; gap: 8px; }
+        .remote-config-inline input { min-width: 0; flex: 1 1 auto; }
+        .remote-config-inline .button { flex: 0 0 auto; min-height: 40px; }
+        .remote-config-toggle { min-height: 44px; margin: 0; padding: 10px 12px; display: flex; align-items: center; gap: 9px; color: var(--ink-900); background: var(--blue-050); border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+        .remote-config-toggle input { width: 19px; height: 19px; flex: 0 0 19px; }
+        .remote-config-toggle span { font-size: 0.82rem; font-weight: 650; }
+        .remote-whitelist-summary { min-height: 40px; padding: 9px 11px; color: var(--ink-600); background: var(--blue-050); border: 1px solid var(--line); border-radius: 9px; font-size: 0.78rem; overflow-wrap: anywhere; }
+        .remote-whitelist-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+        .remote-whitelist-modal { background: rgba(91, 154, 193, 0.28); backdrop-filter: blur(5px); }
+        .remote-whitelist-dialog { width: min(560px, calc(100% - 28px)); max-height: min(78vh, 620px); padding: 22px; overflow: hidden; background: #ffffff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+        .remote-whitelist-dialog h3 { margin: 0 0 5px; color: var(--blue-950); font-size: 1.08rem; }
+        .remote-whitelist-dialog > p { margin: 0 0 15px; color: var(--ink-600); font-size: 0.78rem; }
+        .remote-whitelist-list { max-height: min(48vh, 360px); overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-050); }
+        .remote-whitelist-item { min-height: 52px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #d6e7f3; }
+        .remote-whitelist-item:last-child { border-bottom: 0; }
+        .remote-whitelist-path { min-width: 0; color: var(--ink-900); font-size: 0.78rem; overflow-wrap: anywhere; }
+        .remote-whitelist-empty { padding: 24px 14px; color: var(--ink-600); text-align: center; font-size: 0.8rem; }
+        .remote-whitelist-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px; }
 
         .status-indicator { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; }
         .status-online { background: #2f8bd1; }
@@ -413,6 +462,9 @@
             #gain-date-section .button { width: 100%; margin: 0; }
             #gain-date-input { flex: 1 1 100% !important; }
             .login-container { margin: 20px auto; padding: 24px 20px; }
+            .remote-config-grid { grid-template-columns: 1fr; }
+            .remote-config-field-wide { grid-column: auto; }
+            .remote-whitelist-dialog { padding: 18px; }
         }
 
         @media (max-height: 600px) and (min-width: 821px) {
@@ -501,11 +553,10 @@
             <div class="section automation-section">
                 <h2>BGI功能测试</h2>
                 <div class="form-group">
-                    <label>BGI文件夹：</label>
-                    <div class="folder-display" id="bgi-folder-path">未选择文件夹</div>
+                    <label for="bgi-folder-path">BGI文件夹，点击以选择</label>
+                    <div class="folder-display" id="bgi-folder-path" role="button" tabindex="0" aria-label="点击以选择BGI文件夹" onclick="selectBGIFolder()">点击以选择bgi文件夹</div>
                 </div>
                 <div class="button-row">
-                    <button class="button" onclick="selectBGIFolder()">选择BGI文件夹</button>
                     <button class="button button-danger" onclick="closeBGI()">关闭BGI</button>
                     <button class="button button-danger" onclick="closeGenshin()">关闭原神</button>
                 </div>
@@ -537,20 +588,10 @@
                         <strong>状态：</strong><span id="account-status">正常</span>
                     </div>
                     <div style="margin-bottom: 8px;">
-                        <strong>当前连接ID：</strong><span id="connection-id">-</span>
-                    </div>
-                    <div style="margin-bottom: 8px;">
                         <strong>Socket ID：</strong><span id="socket-id">-</span>
                     </div>
                     <div style="margin-bottom: 8px;">
                         <strong>连接状态：</strong><span id="connection-status">未连接</span>
-                    </div>
-                    <div style="margin-bottom: 8px;">
-                        <strong>自定义连接名称：</strong>
-                        <div style="display: flex; gap: 5px; margin-top: 5px;">
-                            <input type="text" id="connection-name-input" placeholder="留空则自动分配为连接1、连接2..." style="flex: 1; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
-                            <button class="button button-secondary" onclick="updateConnectionName()">修改</button>
-                        </div>
                     </div>
                 </div>
                 
@@ -676,6 +717,58 @@
                         <p style="color: #999; text-align: center; margin-top: 50px;">请选择日期查询收益排行榜</p>
                     </div>
                 </div>
+            </div>
+
+            <!-- 远程控制配置 -->
+            <div class="section remote-config-section">
+                <div class="remote-config-heading">
+                    <div>
+                        <h2>远程控制配置</h2>
+                        <p class="remote-config-description">配置移动端可使用的控制能力和当前桌面端连接信息。</p>
+                    </div>
+                    <span class="remote-config-status" id="remote-config-status">未连接</span>
+                </div>
+                <div class="remote-config-grid">
+                    <div class="remote-config-field">
+                        <label for="remote-connection-id">连接 ID（服务端分配）</label>
+                        <input type="text" id="remote-connection-id" value="-" readonly>
+                    </div>
+                    <div class="remote-config-field">
+                        <label for="connection-name-input">自定义连接名称</label>
+                        <div class="remote-config-inline">
+                            <input type="text" id="connection-name-input" placeholder="留空则使用默认连接名称">
+                            <button class="button button-secondary" onclick="updateConnectionName()">保存</button>
+                        </div>
+                    </div>
+                    <div class="remote-config-field">
+                        <label class="remote-config-toggle" for="allow-remote-cmd">
+                            <input type="checkbox" id="allow-remote-cmd">
+                            <span>允许移动端执行远程 CMD 命令</span>
+                        </label>
+                    </div>
+                    <div class="remote-config-field">
+                        <label>命令白名单文件夹</label>
+                        <div class="remote-config-inline">
+                            <div class="remote-whitelist-summary" id="remote-whitelist-summary">未加载</div>
+                            <button class="button button-secondary" type="button" onclick="openRemoteWhitelistModal()">管理</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 远程白名单文件夹管理 -->
+    <div id="remote-whitelist-modal" class="remote-whitelist-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1000; justify-content: center; align-items: center; pointer-events: auto;">
+        <div class="remote-whitelist-dialog">
+            <h3>命令白名单文件夹</h3>
+            <p>仅允许从这些文件夹中选择和启动可执行文件。</p>
+            <div id="remote-whitelist-list" class="remote-whitelist-list">
+                <div class="remote-whitelist-empty">正在加载...</div>
+            </div>
+            <div class="remote-whitelist-dialog-actions">
+                <button class="button button-secondary" type="button" onclick="addRemoteWhitelistFolder()">添加文件夹</button>
+                <button class="button" type="button" onclick="closeRemoteWhitelistModal()">完成</button>
             </div>
         </div>
     </div>
@@ -992,6 +1085,14 @@
         let autoUpdateGroupCount = 0; // 记录自动更新团购的次数
         const MAX_AUTO_UPDATE_GROUP_COUNT = 5; // 最大自动更新团购次数
         const CLIENT_UPDATE_STATE_KEY = 'mojang-client-update-state';
+        const BGI_FOLDER_PLACEHOLDER = '点击以选择bgi文件夹';
+        const remoteChunkAcknowledgements = new Map();
+
+        function getBgiFolderPath() {
+            const element = document.getElementById('bgi-folder-path');
+            const value = element?.textContent?.trim() || '';
+            return value && value !== BGI_FOLDER_PLACEHOLDER && value !== '未选择' && value !== '未选择文件夹' ? value : '';
+        }
 
         // 持久化启动更新状态，避免更新器失败后旧版本启动时反复重试。
         function readClientUpdateState() {
@@ -1184,6 +1285,7 @@
             
             loginSocket.on('disconnect', function(reason) {
                 addLog(`socket断开连接: ${reason}`, 'warning');
+                rejectRemoteChunkAcks('服务端连接已断开');
                 isLoggedIn = false;
                 isLoggingIn = false;
                 
@@ -1272,8 +1374,11 @@
                     socketId = socket.id;
                     connectionId = data.connectionId;
                     document.getElementById('socket-id').textContent = socketId;
-                    document.getElementById('connection-id').textContent = connectionId;
+                    const connectionIdElement = document.getElementById('connection-id');
+                    if (connectionIdElement) connectionIdElement.textContent = connectionId;
+                    document.getElementById('remote-connection-id').value = connectionId;
                     document.getElementById('connection-status').textContent = '已连接';
+                    document.getElementById('remote-config-status').textContent = '已连接';
                     
                     addLog('登录成功！', 'success');
 
@@ -1433,10 +1538,12 @@
                             sendMessageToServer({
                                 type: 'get-rooms-status'
                             });
+                        } else if (data.type === 'mobile-command-upload-ack') {
+                            handleRemoteChunkAck(data);
                         } else if (data.type === 'mobile-control-command') {
                             console.log('收到移动端控制命令:', data);
                             addLog(`收到移动端控制命令: ${data.command}`, 'info');
-                            handleMobileControlCommand(data.command, data.params);
+                            handleMobileControlCommand(data.command, data.params, data.requestId);
                         } else if (data.type === 'mobile-online-command') {
                             console.log('收到移动端上线命令:', data);
                             addLog(`收到移动端上线命令`, 'info');
@@ -1556,6 +1663,7 @@
                         addLog(`socket断开连接: ${reason}`, 'warning');
                         isLoggedIn = false;
                         isLoggingIn = false;
+                        document.getElementById('remote-config-status').textContent = '连接断开';
                         
                         // 保存当前已上线用户信息
                 if (onlineUsers.length > 0) {
@@ -1646,6 +1754,59 @@
                 addLog(`发送消息失败: ${error.message}，加入重试队列`, 'warning');
                 addToRetryQueue(message);
             }
+        }
+
+        function handleRemoteChunkAck(data) {
+            const key = `${data.requestId}:${data.sequence}`;
+            const pending = remoteChunkAcknowledgements.get(key);
+            if (!pending) return;
+            clearTimeout(pending.timer);
+            remoteChunkAcknowledgements.delete(key);
+            if (data.success) pending.resolve();
+            else pending.reject(new Error(data.message || '服务端拒绝远程数据分片'));
+        }
+
+        function rejectRemoteChunkAcks(message) {
+            for (const pending of remoteChunkAcknowledgements.values()) {
+                clearTimeout(pending.timer);
+                pending.reject(new Error(message));
+            }
+            remoteChunkAcknowledgements.clear();
+        }
+
+        async function sendMobileCommandData(params, requestId, dataType, value, meta = {}) {
+            if (!params?.targetSocketId || !requestId || !socket || !isLoggedIn) throw new Error('服务端连接不可用');
+            let buffer = value;
+            if (typeof value === 'string') buffer = new TextEncoder().encode(value);
+            if (!(buffer instanceof Uint8Array) && typeof Buffer !== 'undefined' && Buffer.isBuffer(buffer)) buffer = new Uint8Array(buffer);
+            if (!(buffer instanceof Uint8Array) || !buffer.byteLength) throw new Error('远程数据为空');
+            const chunkSize = 96 * 1024;
+            const totalChunks = Math.max(1, Math.ceil(buffer.byteLength / chunkSize));
+            for (let index = 0; index < totalChunks; index++) {
+                const chunk = buffer.slice(index * chunkSize, Math.min(buffer.byteLength, (index + 1) * chunkSize));
+                const key = `${requestId}:${index}`;
+                const acknowledgement = new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        remoteChunkAcknowledgements.delete(key);
+                        reject(new Error('远程数据分片确认超时'));
+                    }, 30000);
+                    remoteChunkAcknowledgements.set(key, { resolve, reject, timer });
+                });
+                socket.emit('message', { ...meta, type: 'mobile-command-data', targetSocketId: params.targetSocketId, requestId, dataType, sequence: index, totalChunks, chunk, done: index === totalChunks - 1 });
+                await acknowledgement;
+            }
+        }
+
+        function sendMobileCommandPayload(params, requestId, dataType, payload) {
+            if (!params?.targetSocketId || !requestId || !socket || !isLoggedIn) return;
+            sendMessageToServer({ type: 'mobile-command-data', targetSocketId: params.targetSocketId, requestId, dataType, payload, done: true });
+        }
+
+        function truncateRemoteText(value, maxBytes = 192 * 1024) {
+            const text = String(value || '');
+            const encoded = new TextEncoder().encode(text);
+            if (encoded.byteLength <= maxBytes) return text;
+            return `${new TextDecoder().decode(encoded.slice(0, maxBytes - 32))}\n...[输出已截断]`;
         }
         
         // 添加消息到重试队列
@@ -1843,6 +2004,15 @@
             document.getElementById('auto-update-client').addEventListener('change', saveConfig);
             document.getElementById('auto-update-group').addEventListener('change', saveConfig);
             document.getElementById('minimize-on-start').addEventListener('change', saveConfig);
+            document.getElementById('allow-remote-cmd').addEventListener('change', saveConfig);
+            const bgiFolderDisplay = document.getElementById('bgi-folder-path');
+            bgiFolderDisplay.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectBGIFolder();
+                }
+            });
+            loadRemoteWhitelistFolders();
             
             // 添加窗口大小变化监听器，实现自适应缩放
             window.addEventListener('resize', adjustScale);
@@ -2452,8 +2622,11 @@
                                         }
                                     }, 100);
                                 }
-                                if (config.bgiFolder) {
-                                    document.getElementById('bgi-folder-path').textContent = config.bgiFolder;
+                                const configuredBgiFolder = String(config.bgiFolder || '').trim();
+                                if (configuredBgiFolder && configuredBgiFolder !== BGI_FOLDER_PLACEHOLDER && configuredBgiFolder !== '未选择' && configuredBgiFolder !== '未选择文件夹') {
+                                    document.getElementById('bgi-folder-path').textContent = configuredBgiFolder;
+                                } else {
+                                    document.getElementById('bgi-folder-path').textContent = BGI_FOLDER_PLACEHOLDER;
                                 }
                                 if (config.dragonName) {
                                     document.getElementById('dragon-name').value = config.dragonName;
@@ -2466,12 +2639,15 @@
                                 }
                                 // 新配置默认关闭，避免老配置在未明确选择时自动更新用户端
                                 document.getElementById('auto-update-client').checked = config.autoUpdateClient === true;
+                                document.getElementById('allow-remote-cmd').checked = config.allowRemoteCmd === true;
                                 if (config.minimizeOnStart !== undefined) {
                                     document.getElementById('minimize-on-start').checked = config.minimizeOnStart;
                                 }
                                 if (config.connectionId) {
                                     connectionId = config.connectionId;
-                                    document.getElementById('connection-id').textContent = connectionId;
+                                    const connectionIdElement = document.getElementById('connection-id');
+                                    if (connectionIdElement) connectionIdElement.textContent = connectionId;
+                                    document.getElementById('remote-connection-id').value = connectionId;
                                 }
                                 if (config.connectionName) {
                                     document.getElementById('connection-name-input').value = config.connectionName;
@@ -2542,12 +2718,13 @@
                         account: document.getElementById('login-account').value,
                         password: document.getElementById('login-password').value
                     },
-                    bgiFolder: document.getElementById('bgi-folder-path').textContent,
+                    bgiFolder: getBgiFolderPath(),
                     dragonName: document.getElementById('dragon-name').value,
                     closeGenshin: document.getElementById('close-genshin-checkbox').checked,
                     autoUpdateClient: document.getElementById('auto-update-client').checked,
                     autoUpdateGroup: document.getElementById('auto-update-group').checked,
                     minimizeOnStart: document.getElementById('minimize-on-start').checked,
+                    allowRemoteCmd: document.getElementById('allow-remote-cmd').checked,
                     connectionId: connectionId,
                     connectionName: document.getElementById('connection-name-input').value.trim(),
                     schedules: schedules
@@ -2883,6 +3060,88 @@
                 }
             }
         }
+
+        async function addRemoteWhitelistFolder() {
+            if (!window.electronAPI?.addRemoteWhitelistFolder) return;
+            try {
+                const folders = await window.electronAPI.addRemoteWhitelistFolder();
+                renderRemoteWhitelistFolders(folders);
+                addLog(`远程白名单文件夹已更新，共 ${folders.length} 个`, 'info');
+            } catch (error) {
+                addLog(`添加远程白名单文件夹失败: ${error.message}`, 'error');
+            }
+        }
+
+        function renderRemoteWhitelistFolders(folders) {
+            const list = document.getElementById('remote-whitelist-list');
+            const summary = document.getElementById('remote-whitelist-summary');
+            const safeFolders = Array.isArray(folders) ? folders : [];
+            if (summary) summary.textContent = safeFolders.length ? `已配置 ${safeFolders.length} 个文件夹` : '未配置白名单文件夹';
+            if (!list) return;
+            list.innerHTML = '';
+            if (!safeFolders.length) {
+                list.innerHTML = '<div class="remote-whitelist-empty">暂无白名单文件夹</div>';
+                return;
+            }
+            safeFolders.forEach(folder => {
+                const item = document.createElement('div');
+                item.className = 'remote-whitelist-item';
+                const pathLabel = document.createElement('span');
+                pathLabel.className = 'remote-whitelist-path';
+                pathLabel.textContent = folder;
+                pathLabel.title = folder;
+                const removeButton = document.createElement('button');
+                removeButton.className = 'button button-danger';
+                removeButton.type = 'button';
+                removeButton.textContent = '移除';
+                removeButton.addEventListener('click', () => removeRemoteWhitelistFolder(folder));
+                item.append(pathLabel, removeButton);
+                list.appendChild(item);
+            });
+        }
+
+        async function loadRemoteWhitelistFolders() {
+            if (!window.electronAPI?.listRemoteExecutables) return;
+            const list = document.getElementById('remote-whitelist-list');
+            if (list) list.innerHTML = '<div class="remote-whitelist-empty">正在加载...</div>';
+            try {
+                const result = await window.electronAPI.listRemoteExecutables();
+                renderRemoteWhitelistFolders(result?.folders || []);
+            } catch (error) {
+                if (list) {
+                    list.innerHTML = '';
+                    const errorElement = document.createElement('div');
+                    errorElement.className = 'remote-whitelist-empty';
+                    errorElement.textContent = `加载失败：${String(error.message || error)}`;
+                    list.appendChild(errorElement);
+                }
+                addLog(`读取远程白名单失败: ${error.message || error}`, 'error');
+            }
+        }
+
+        function openRemoteWhitelistModal() {
+            const modal = document.getElementById('remote-whitelist-modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            loadRemoteWhitelistFolders();
+        }
+
+        function closeRemoteWhitelistModal() {
+            const modal = document.getElementById('remote-whitelist-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        async function removeRemoteWhitelistFolder(folderPath) {
+            if (!window.electronAPI?.removeRemoteWhitelistFolder) return;
+            if (!window.confirm(`确定移除白名单文件夹吗？\n${folderPath}`)) return;
+            try {
+                const folders = await window.electronAPI.removeRemoteWhitelistFolder(folderPath);
+                renderRemoteWhitelistFolders(folders);
+                addLog(`已移除远程白名单文件夹，共 ${folders.length} 个`, 'info');
+            } catch (error) {
+                addLog(`移除远程白名单文件夹失败: ${error.message || error}`, 'error');
+            }
+        }
         
         // 关闭BGI
         function closeBGI() {
@@ -2901,10 +3160,12 @@
         }
         
         // 关闭原神
-        function closeGenshin(force = false) {
-            // 移动端明确下发关闭命令时强制执行，普通一条龙仍遵循本地配置
+        function closeGenshin(force) {
+            // 未传参数时使用桌面端设置；传入 true/false 时使用调用方的明确选择。
             const closeOption = document.getElementById('close-genshin-checkbox');
-            const shouldCloseGenshin = force || (closeOption && closeOption.checked);
+            const shouldCloseGenshin = force === undefined
+                ? Boolean(closeOption && closeOption.checked)
+                : Boolean(force);
             if (!shouldCloseGenshin) {
                 addLog('未勾选关闭原神，跳过关闭操作', 'info');
                 return false;
@@ -2941,7 +3202,7 @@
         }
 
         // 处理移动端控制命令
-        function handleMobileControlCommand(command, params) {
+        async function handleMobileControlCommand(command, params, requestId) {
             const { uid, roomName, username, notHost, dragonName, closeGame, scheduleId } = params || {};
             switch(command) {
                 case 'online':
@@ -2965,8 +3226,8 @@
                     break;
                 case 'yjl':
                     if (dragonName) {
-                        const bgiFolder = document.getElementById('bgi-folder-path')?.textContent;
-                        const canLaunch = bgiFolder && bgiFolder !== '未选择' && bgiFolder !== '未选择文件夹' &&
+                        const bgiFolder = getBgiFolderPath();
+                        const canLaunch = Boolean(bgiFolder) &&
                             window.electronAPI && window.electronAPI.startProcess;
                         const accepted = Boolean(canLaunch) && addDragonTask(dragonName, false, { closeGame: Boolean(closeGame) });
                         reportMobileCommandResult(params, accepted, accepted ? '一条龙任务已加入执行队列' : '一条龙任务未能加入执行队列', command);
@@ -3008,6 +3269,81 @@
                         }
                     } else {
                         reportMobileCommandResult(params, false, '调度编号为空', command);
+                    }
+                    break;
+                case 'get-screenshot':
+                    try {
+                        const result = await window.electronAPI.captureDesktop({ maxWidth: params.maxWidth || 1080, maxHeight: params.maxHeight || 1080 });
+                        sendMobileCommandPayload(params, requestId, 'screenshot-meta', { width: result.width, height: result.height });
+                        await sendMobileCommandData(params, requestId, 'image', Uint8Array.from(atob(result.base64), c => c.charCodeAt(0)));
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'error', { message: error.message });
+                    }
+                    break;
+                case 'get-client-log-files':
+                case 'get-bgi-log-files':
+                    try {
+                        const kind = command === 'get-bgi-log-files' ? 'bgi' : 'client';
+                        const result = await window.electronAPI.listLogFiles(kind, getBgiFolderPath());
+                        sendMobileCommandPayload(params, requestId, 'log-files', { kind, files: result });
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'error', { message: error.message });
+                    }
+                    break;
+                case 'get-client-log-tail':
+                case 'get-bgi-log-tail':
+                    try {
+                        const kind = command === 'get-bgi-log-tail' ? 'bgi' : 'client';
+                        const result = await window.electronAPI.readLogTail(kind, getBgiFolderPath(), params.filePath, params.kb || 64);
+                        if (result.bytes === 0) {
+                            sendMobileCommandPayload(params, requestId, 'log-tail-empty', { kind, filePath: result.filePath, bytes: 0 });
+                        } else {
+                            sendMobileCommandPayload(params, requestId, 'log-tail-meta', { kind, filePath: result.filePath, bytes: result.bytes });
+                            await sendMobileCommandData(params, requestId, 'log-tail', Uint8Array.from(atob(result.base64), c => c.charCodeAt(0)));
+                        }
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'error', { message: error.message });
+                    }
+                    break;
+                case 'execute-cmd':
+                    if (config.allowRemoteCmd !== true) {
+                        sendMobileCommandPayload(params, requestId, 'cmd-result', { success: false, output: '桌面端已禁用远程 CMD 命令' });
+                        addLog('远程 CMD 命令被配置拦截', 'warning');
+                        break;
+                    }
+                    try {
+                        const result = await window.electronAPI.executeRemoteCommand(String(params.command || ''), getBgiFolderPath() || undefined);
+                        sendMobileCommandPayload(params, requestId, 'cmd-result', {
+                            success: result.exitCode === 0,
+                            exitCode: result.exitCode,
+                            output: truncateRemoteText(result.output)
+                        });
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'cmd-result', { success: false, output: error.message });
+                    }
+                    break;
+                case 'reset-cmd':
+                    try {
+                        await window.electronAPI.resetRemoteCommandSession();
+                        sendMobileCommandPayload(params, requestId, 'cmd-reset-result', { success: true });
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'cmd-reset-result', { success: false, message: error.message });
+                    }
+                    break;
+                case 'list-executables':
+                    try {
+                        const result = await window.electronAPI.listRemoteExecutables();
+                        sendMobileCommandPayload(params, requestId, 'executables', result);
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'error', { message: error.message });
+                    }
+                    break;
+                case 'run-executable':
+                    try {
+                        const result = await window.electronAPI.runRemoteExecutable(params.programId);
+                        sendMobileCommandPayload(params, requestId, 'run-result', { success: true, ...result });
+                    } catch (error) {
+                        sendMobileCommandPayload(params, requestId, 'run-result', { success: false, message: error.message });
                     }
                     break;
                 case 'report-gain':
@@ -3109,8 +3445,8 @@
 
         // 实际执行一条龙启动
         function executeDragonLaunch(configName, closeGame) {
-            const bgiFolder = document.getElementById('bgi-folder-path').textContent;
-            if (!bgiFolder || bgiFolder === '未选择' || bgiFolder === '未选择文件夹') {
+            const bgiFolder = getBgiFolderPath();
+            if (!bgiFolder) {
                 showAlertModal('提示', '请先选择BetterGI文件夹');
                 addLog('请先选择BGI文件夹', 'error');
                 return false;
@@ -3119,7 +3455,7 @@
             // BGI一定要关，不需要用户选择
             closeBGI();
             
-            // 调用closeGenshin函数，内部会检查复选框状态
+            // 按任务记录的选项决定是否关闭原神，避免使用桌面端复选框覆盖移动端选择
             closeGenshin(Boolean(closeGame));
             
             if (window.electronAPI && window.electronAPI.startProcess) {
@@ -3578,6 +3914,8 @@
             accountId = '';
             presets = [];
             onlineUsers = [];
+            document.getElementById('remote-config-status').textContent = '未连接';
+            document.getElementById('remote-connection-id').value = '-';
             
             // 清空配置中的账号密码
             if (config) {
@@ -3645,7 +3983,7 @@
         // 填充预设调度
         function fillPresetSchedules() {
             // 填充BGI文件夹输入框
-            document.getElementById('modal-bgi-folder').value = document.getElementById('bgi-folder-path').textContent;
+            document.getElementById('modal-bgi-folder').value = getBgiFolderPath();
             
             // 打开填充预设模态框
             document.getElementById('preset-modal').style.display = 'flex';
@@ -3673,7 +4011,7 @@
             const dragon = document.getElementById('modal-dragon').value;
             
             // 验证输入
-            if (!bgiFolder || bgiFolder === '未选择文件夹') {
+            if (!bgiFolder || bgiFolder === BGI_FOLDER_PLACEHOLDER || bgiFolder === '未选择文件夹') {
                 alert('请选择BGI文件夹');
                 return;
             }
@@ -4846,7 +5184,7 @@
                 
                 if (!manifestPath) {
                     const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
                         const groupPurchasingPath = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
                         manifestPath = path.join(groupPurchasingPath, 'manifest.json');
                     }
@@ -5006,7 +5344,7 @@
                 // 2. 如果不存在这样的调度，使用BGI文件夹
                 if (!manifestPath) {
                     const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
                         foundPath = true;
                         const groupPurchasingPath = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
                         manifestPath = path.join(groupPurchasingPath, 'manifest.json');
@@ -5156,7 +5494,7 @@
                 // 如果没有，检查BGI文件夹
                 if (!foundPath) {
                     const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
                         foundPath = true;
                     }
                 }
@@ -5468,7 +5806,7 @@
                 
                 // 2. 如果不存在这样的调度，获取左侧的选择BGI文件夹内容
                 const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
                     foundPath = true;
                     const groupPurchasingPath = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
                     const manifestPath = path.join(groupPurchasingPath, 'manifest.json');
@@ -5533,7 +5871,7 @@
                 // 2. 如果不存在这样的调度，使用BGI文件夹
                 if (!targetDir) {
                     const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
+                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
                         foundPath = true;
                         targetDir = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
                     }

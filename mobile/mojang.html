@@ -179,11 +179,11 @@
             display: none;
         }
         .rooms-container {
-            max-height: 200px;
+            max-height: 560px;
             overflow-y: auto;
         }
         .points-ranking-container {
-            max-height: 200px;
+            max-height: 560px;
             overflow-y: auto;
         }
         .connection-selector {
@@ -759,6 +759,780 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* 移动端重构：以状态、动作、数据三层组织页面，保留现有功能节点。 */
+        :root {
+            --mobile-bg: #d8edfb;
+            --mobile-surface: #fafdff;
+            --mobile-surface-strong: #ffffff;
+            --mobile-surface-blue: #eaf5fd;
+            --mobile-border: #9fc8e6;
+            --mobile-border-strong: #77acd4;
+            --mobile-primary: #287fbb;
+            --mobile-primary-dark: #1e5f91;
+            --mobile-text: #173b57;
+            --mobile-muted: #5f7d94;
+            --mobile-danger: #dc3f4c;
+            --mobile-radius: 14px;
+        }
+
+        html { background: var(--mobile-bg); }
+
+        body {
+            min-width: 320px;
+            color: var(--mobile-text);
+            background: linear-gradient(145deg, #d2eafa 0%, #c0ddf2 52%, #eaf6fe 100%);
+            font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+        }
+
+        .login-container {
+            width: min(92vw, 410px);
+            margin: max(28px, 10vh) auto 24px;
+            padding: 30px 24px 24px;
+            background: var(--mobile-surface-strong);
+            border: 1px solid var(--mobile-border-strong);
+            border-top: 5px solid #398cc5;
+            border-radius: 20px;
+            box-shadow: 0 18px 40px rgba(28, 85, 125, .18);
+        }
+
+        .login-container h1 {
+            margin-bottom: 8px;
+            color: var(--mobile-primary-dark);
+            font-size: 1.7rem;
+        }
+
+        .login-container::after {
+            content: "移动控制台";
+            display: block;
+            margin-bottom: 22px;
+            color: var(--mobile-muted);
+            font-size: .82rem;
+            letter-spacing: 0;
+        }
+
+        .mobile-container {
+            width: min(100%, 720px);
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 12px 12px calc(28px + env(safe-area-inset-bottom));
+        }
+
+        .mobile-container::before { content: none; }
+
+        .mobile-appbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 0 2px 12px;
+            padding: 12px 14px;
+            background: rgba(250, 253, 255, .84);
+            border: 1px solid #9fc8e6;
+            border-radius: 12px;
+            box-shadow: 0 5px 14px rgba(36, 92, 130, .1);
+        }
+
+        .mobile-appbar-connection { min-width: 0; }
+        .mobile-appbar-connection-label { display: block; margin-bottom: 3px; color: var(--mobile-muted); font-size: .72rem; }
+        .current-connection-button {
+            display: block;
+            max-width: min(72vw, 470px);
+            padding: 0;
+            overflow: hidden;
+            color: var(--mobile-primary-dark);
+            background: transparent;
+            border: 0;
+            font: inherit;
+            font-size: 1rem;
+            font-weight: 800;
+            text-align: left;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .current-connection-button:not(.has-selection) { color: #337fb2; }
+        .current-connection-button:not(.has-selection)::after { content: "  ›"; font-size: 1.1rem; }
+
+        .connection-modal {
+            position: fixed;
+            z-index: 20;
+            inset: 0;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: max(16px, 7vh) 12px 20px;
+            background: rgba(19, 57, 82, .38);
+            backdrop-filter: blur(3px);
+        }
+        .connection-modal.hidden { display: none; }
+        body.connection-modal-open { overflow: hidden; }
+        .connection-dialog {
+            width: min(100%, 520px);
+            max-height: min(86vh, 680px);
+            overflow: hidden;
+            background: var(--mobile-surface-strong);
+            border: 1px solid var(--mobile-border-strong);
+            border-radius: 16px;
+            box-shadow: 0 18px 48px rgba(22, 67, 98, .28);
+        }
+        .connection-dialog-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 15px 16px 12px;
+            background: linear-gradient(145deg, #fafdff, #e5f3fc);
+            border-bottom: 1px solid #b7d8ed;
+        }
+        .connection-dialog-header h2 { margin: 0; padding: 0; border: 0; font-size: 1.05rem; }
+        .connection-dialog-close { min-height: 36px !important; padding: 7px 11px !important; }
+        .connection-dialog-body { padding: 13px; overflow-y: auto; }
+        .connection-dialog-body .connection-list { max-height: min(48vh, 360px); margin-top: 0; }
+        .connection-dialog-body .button-row { margin-top: 12px; }
+        .connection-dialog-hint { margin: 0 0 10px; color: var(--mobile-muted); font-size: .78rem; }
+
+        .feature-nav {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 7px;
+            margin: 0 0 12px;
+            padding: 5px;
+            background: rgba(239, 248, 255, .9);
+            border: 1px solid #9fc8e6;
+            border-radius: 13px;
+            box-shadow: 0 6px 16px rgba(36, 92, 130, .1);
+        }
+
+        .feature-nav button {
+            min-height: 47px;
+            padding: 7px 5px;
+            color: var(--mobile-muted);
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 9px;
+            font: inherit;
+            font-size: .79rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .feature-nav button span { display: block; margin-bottom: 2px; color: #6da7ce; font-size: 1rem; }
+        .feature-nav button.active { color: var(--mobile-primary-dark); background: #d8edfb; border-color: #94c3e1; box-shadow: inset 0 -2px 0 var(--mobile-primary); }
+
+        #main-container.feature-info .control-panel,
+        #main-container.feature-remote .integrated-section,
+        #main-container.feature-online .integrated-section,
+        #main-container.feature-desktop .integrated-section { display: none !important; }
+
+        #main-container.feature-online .remote-panel,
+        #main-container.feature-desktop .remote-panel,
+        #main-container.feature-info .remote-panel { display: none !important; }
+
+        #main-container.feature-remote .command-tabs,
+        #main-container.feature-remote .command-panel { display: none !important; }
+        #main-container.feature-remote .remote-panel { display: block !important; }
+
+        #main-container.feature-online .command-tabs .nav-tab[data-tab="process"],
+        #main-container.feature-online .command-tabs .nav-tab[data-tab="yjl"],
+        #main-container.feature-online .command-tabs .nav-tab[data-tab="schedule"],
+        #main-container.feature-desktop .command-tabs .nav-tab[data-tab="online"],
+        #main-container.feature-desktop .command-tabs .nav-tab[data-tab="offline"] { display: none; }
+
+        #main-container.feature-online #process-panel,
+        #main-container.feature-online #yjl-panel,
+        #main-container.feature-online #schedule-panel,
+        #main-container.feature-desktop #online-panel,
+        #main-container.feature-desktop #offline-panel { display: none !important; }
+
+        #main-container.feature-desktop #process-panel,
+        #main-container.feature-desktop #yjl-panel,
+        #main-container.feature-desktop #schedule-panel { animation: panel-in .18s ease-out; }
+
+        #main-container.feature-info .integrated-section { display: block !important; }
+
+        @media (max-width: 380px) {
+            .feature-nav { gap: 4px; padding: 4px; }
+            .feature-nav button { min-height: 44px; font-size: .72rem; }
+            .feature-nav button span { font-size: .9rem; }
+        }
+
+        .section,
+        .control-panel,
+        .integrated-section {
+            margin-bottom: 12px;
+            padding: 15px;
+            background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(232,245,253,.98));
+            border: 1px solid var(--mobile-border);
+            border-radius: var(--mobile-radius);
+            box-shadow: 0 8px 20px rgba(36, 92, 130, .12);
+        }
+
+        .control-panel { padding: 12px; }
+
+        .connection-selector {
+            margin: -1px -1px 14px;
+            padding: 13px;
+            background: var(--mobile-surface-blue);
+            border: 1px solid #b7d8ed;
+            border-radius: 11px;
+        }
+
+        .connection-selector h2 {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            border: 0;
+            padding: 0;
+            font-size: 1rem;
+        }
+
+        .connection-selector h2::after {
+            content: "在线控制";
+            padding: 4px 8px;
+            color: #22618d;
+            background: #d3eafa;
+            border: 1px solid #a7cde7;
+            border-radius: 999px;
+            font-size: .7rem;
+            font-weight: 700;
+        }
+
+        .connection-list,
+        .online-user-list {
+            max-height: 220px;
+            margin-top: 8px;
+            background: var(--mobile-surface-strong);
+            border: 1px solid var(--mobile-border);
+            border-radius: 10px;
+        }
+
+        .connection-item,
+        .online-user-item {
+            min-height: 58px;
+            padding: 11px 12px;
+            color: var(--mobile-text);
+            border-bottom: 1px solid #d5e7f4;
+        }
+
+        .connection-item.selected,
+        .online-user-item.selected,
+        .schedule-item.selected {
+            background: #d6ebfa;
+            box-shadow: inset 3px 0 0 var(--mobile-primary);
+        }
+
+        .nav-tabs.command-tabs {
+            display: flex;
+            gap: 7px;
+            margin: 0 -1px 14px;
+            padding: 2px 1px 9px;
+            overflow-x: auto;
+            border-bottom: 1px solid var(--mobile-border);
+            scrollbar-width: none;
+        }
+
+        .command-tabs::-webkit-scrollbar { display: none; }
+
+        .command-tabs .nav-tab {
+            flex: 0 0 auto;
+            min-height: 39px;
+            padding: 9px 13px;
+            color: var(--mobile-muted);
+            background: #f4faff;
+            border: 1px solid #c9e1f1;
+            border-radius: 999px;
+            font-size: .83rem;
+            white-space: nowrap;
+        }
+
+        .command-tabs .nav-tab.active {
+            color: #fff;
+            background: linear-gradient(135deg, #4d9fd0, #267ab6);
+            border-color: #267ab6;
+            box-shadow: 0 4px 9px rgba(40, 127, 187, .2);
+        }
+
+        .command-panel { min-height: 0; }
+        .command-panel > div:not(.hidden) { animation: panel-in .18s ease-out; }
+        @keyframes panel-in { from { opacity: .5; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+
+        h2 {
+            color: var(--mobile-primary-dark);
+            font-size: 1.08rem;
+            border-bottom-color: #b9d8ec;
+        }
+
+        label { color: var(--mobile-text); font-size: .84rem; }
+
+        input[type="text"], input[type="password"], input[type="number"], input[type="date"], select {
+            min-height: 45px;
+            color: var(--mobile-text);
+            background: #fff;
+            border: 1px solid #a9cce5 !important;
+            border-radius: 9px !important;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--mobile-primary) !important;
+            box-shadow: 0 0 0 3px rgba(40, 127, 187, .14);
+        }
+
+        .button {
+            min-height: 44px;
+            padding: 10px 14px;
+            color: #fff;
+            background: linear-gradient(135deg, #5da9d6, #287fbb);
+            border: 1px solid #287fbb;
+            border-radius: 9px;
+            box-shadow: 0 4px 9px rgba(40, 127, 187, .17);
+            font-weight: 700;
+        }
+
+        .button-secondary,
+        .button-success { color: #18527d; background: #d9edfb; border-color: #98c5e3; }
+        .button-danger { color: #fff; background: linear-gradient(135deg, #ef6a73, #d93645); border-color: #ca3340; }
+        .button-row { gap: 8px; margin-top: 13px; }
+        .button-row .button { flex: 1 1 140px; }
+
+        .remote-panel {
+            margin-top: 16px !important;
+            padding: 14px !important;
+            background: linear-gradient(150deg, #edf8ff, #dceefa) !important;
+            border: 1px solid #91bfdf !important;
+            border-radius: 12px !important;
+        }
+
+        .remote-panel h2 { margin-bottom: 12px; }
+        .remote-panel .button-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .remote-panel .button-row .button { min-width: 0; }
+        .remote-panel .form-group { margin-bottom: 10px; }
+        .remote-panel pre { margin: 10px 0 0; color: #214b68; background: #f8fcff !important; border-color: #a7cde7 !important; border-radius: 9px; }
+
+        .integrated-section { padding: 12px; }
+        .mobile-integrated-header {
+            position: sticky;
+            top: env(safe-area-inset-top);
+            z-index: 3;
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            margin: -2px -2px 12px !important;
+            padding: 2px 0 10px !important;
+            background: rgba(250, 253, 255, .96) !important;
+            border-bottom: 1px solid var(--mobile-border) !important;
+            backdrop-filter: blur(8px);
+        }
+
+        .mobile-integrated-tabs { gap: 5px; overflow-x: auto; scrollbar-width: none; }
+        .mobile-nav-btn { min-height: 40px; padding: 8px 11px !important; color: var(--mobile-muted) !important; border: 1px solid transparent !important; border-radius: 8px; white-space: nowrap; }
+        .mobile-nav-btn.active { color: var(--mobile-primary-dark) !important; background: #d9edfb !important; border-color: #9fc8e6 !important; }
+        .mobile-refresh-wrap .button { min-width: 62px; padding: 8px 10px; }
+
+        .mobile-tab-content { padding: 0; background: transparent; border: 0; }
+        .mobile-tab-content > .points-ranking-container,
+        #mobile-ride-records-container,
+        #mobile-gain-records-container {
+            height: clamp(280px, 58vh, 560px) !important;
+            min-height: 280px !important;
+            max-height: 560px !important;
+            padding: 10px !important;
+            background: var(--mobile-surface-strong) !important;
+            border: 1px solid var(--mobile-border) !important;
+            border-radius: 10px !important;
+        }
+
+        #mobile-points-ranking-container > div {
+            grid-template-columns: 32px minmax(0, 1fr) auto;
+            min-height: 58px;
+            gap: 10px;
+            padding: 8px 10px !important;
+            background: #ffffff;
+            border-bottom-color: #d6e7f3 !important;
+        }
+
+        #mobile-points-ranking-container > div:last-child { border-bottom: 0; }
+        .points-ranking-rank {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            color: #2b75a7;
+            background: #e3f2fc;
+            border: 1px solid #b5d8ed;
+            border-radius: 9px;
+            font-size: .82rem;
+            font-weight: 800;
+        }
+        .points-ranking-account {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: 7px;
+        }
+        .points-ranking-account-name {
+            min-width: 0;
+            overflow: hidden;
+            color: var(--mobile-text);
+            font-size: .9rem;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .points-ranking-self {
+            flex: 0 0 auto;
+            padding: 3px 6px;
+            color: #2a6f9e;
+            background: #e7f4fd;
+            border: 1px solid #b8d9ed;
+            border-radius: 999px;
+            font-size: .67rem;
+            font-weight: 700;
+        }
+        .points-ranking-points {
+            display: inline-flex;
+            align-items: baseline;
+            justify-content: flex-end;
+            gap: 4px;
+            min-width: 68px;
+            color: var(--mobile-primary-dark) !important;
+            white-space: nowrap;
+        }
+        .points-ranking-points strong { font-size: 1rem; font-weight: 800; }
+        .points-ranking-points small { color: #6388a3; font-size: .7rem; font-weight: 700; }
+        .points-ranking-empty {
+            margin: 0;
+            padding: 72px 16px;
+            color: var(--mobile-muted);
+            font-size: .86rem;
+            text-align: center;
+        }
+        .mobile-ride-filters { gap: 8px !important; }
+        .mobile-gain-tabs .button { min-height: 40px; }
+
+        #mobile-my-ride-records-container {
+            min-height: 280px !important;
+            max-height: 560px !important;
+        }
+
+        #connection-list,
+        #online-user-list,
+        #schedule-list,
+        #remote-log-files {
+            min-height: 120px;
+            max-height: min(38vh, 300px) !important;
+        }
+
+        #remote-output {
+            min-height: 96px;
+            max-height: min(34vh, 280px) !important;
+        }
+
+        #cmd-message { position: sticky; bottom: 10px; z-index: 5; padding: 10px 12px; background: rgba(255,255,255,.94); border: 1px solid var(--mobile-border); border-radius: 9px; box-shadow: 0 8px 18px rgba(30,70,100,.14); }
+
+        @media (min-width: 560px) {
+            .mobile-container { padding: 18px 20px 32px; }
+            .mobile-container::before { font-size: 1.45rem; }
+            .remote-panel .button-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .button-row { display: flex; }
+        }
+
+        @media (max-width: 380px) {
+            .mobile-container { padding-left: 8px; padding-right: 8px; }
+            .section, .control-panel, .integrated-section { padding: 11px; border-radius: 12px; }
+            .remote-panel .button-row { grid-template-columns: 1fr 1fr; }
+            .mobile-nav-btn { padding-left: 9px !important; padding-right: 9px !important; font-size: .78rem; }
+            .mobile-refresh-wrap .button { min-width: 56px; }
+        }
+
+        @media (max-width: 560px) {
+            .mobile-integrated-header {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr);
+                gap: 8px;
+            }
+            .mobile-integrated-tabs {
+                width: 100%;
+                display: grid !important;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 3px;
+                overflow: visible;
+            }
+            .mobile-nav-btn {
+                min-width: 0;
+                padding: 8px 3px !important;
+                font-size: .74rem;
+            }
+            .mobile-refresh-wrap { width: 100%; justify-content: flex-end; }
+        }
+
+        /* 远程控制工作台：截图为主视图，工具通过二级菜单切换。 */
+        .remote-panel {
+            padding: 15px !important;
+            background: linear-gradient(145deg, #fafdff 0%, #e4f2fc 100%) !important;
+            border: 1px solid #8fbddd !important;
+            border-radius: 15px !important;
+        }
+
+        .remote-panel-heading,
+        .remote-preview-toolbar,
+        .remote-tool-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .remote-panel-heading h2 { margin: 2px 0 0; padding: 0; border: 0; }
+        .remote-kicker { display: block; color: #6a91aa; font-size: .72rem; font-weight: 700; }
+        .remote-hint { color: #4d82a8; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+
+        .remote-preview {
+            display: grid;
+            place-items: center;
+            width: 100%;
+            min-height: 190px;
+            margin: 12px 0 10px;
+            overflow: hidden;
+            background: #dceefa;
+            border: 1px solid #8fbddd;
+            border-radius: 11px;
+        }
+
+        .remote-preview img { display: block; width: 100%; height: auto; max-height: 58vh; object-fit: contain; }
+        .remote-preview-caption { margin-top: 4px; color: #64748b; font-size: 12px; }
+        .remote-preview-empty { padding: 35px 16px; color: #62829a; font-size: .84rem; text-align: center; }
+        .remote-preview-toolbar { align-items: end; }
+        .remote-resolution { flex: 1; min-width: 0; }
+        .remote-resolution label { margin-bottom: 5px; }
+        .remote-preview-toolbar > .button { flex: 0 0 auto; min-width: 112px; }
+
+        .remote-subnav {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px;
+            margin: 16px 0 12px;
+            padding: 4px;
+            background: #d7ebf8;
+            border: 1px solid #a5cbe5;
+            border-radius: 10px;
+        }
+
+        .remote-subnav button {
+            min-height: 42px;
+            padding: 7px 5px;
+            color: #4f738d;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            font: inherit;
+            font-size: .82rem;
+            font-weight: 700;
+        }
+
+        .remote-subnav button span { margin-right: 4px; color: #6e9fc0; }
+        .remote-subnav button.active { color: #205d89; background: #fafdff; border-color: #91bfdf; box-shadow: 0 2px 6px rgba(44, 104, 145, .12); }
+        .remote-tool-panel { animation: panel-in .18s ease-out; }
+        .remote-tool-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+        .remote-tool-actions .button { min-width: 0; }
+        .remote-action-button { width: 100%; }
+        .remote-tool-title { margin-bottom: 10px; }
+        .remote-tool-title strong { color: #255c84; font-size: .92rem; }
+        .remote-tool-title .button { min-height: 38px; padding: 7px 10px; }
+        .remote-tool-panel .connection-list { min-height: 120px; max-height: min(38vh, 300px) !important; }
+        .remote-tool-panel pre { min-height: 100px; max-height: min(34vh, 280px) !important; margin: 10px 0 0; padding: 10px; color: #214b68; background: #f8fcff !important; border: 1px solid #a7cde7; border-radius: 9px; white-space: pre-wrap; overflow: auto; }
+        .remote-log-viewer { margin-top: 10px; overflow: hidden; background: #f8fcff; border: 1px solid #a7cde7; border-radius: 9px; }
+        .remote-log-viewer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; background: #e7f4fc; border-bottom: 1px solid #b8d8ec; }
+        .remote-log-viewer-toolbar strong { min-width: 0; overflow: hidden; color: #255c84; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+        .remote-log-viewer-toolbar .button { flex: 0 0 auto; min-height: 36px; padding: 7px 10px; }
+        .remote-log-viewer pre { min-height: 180px; max-height: min(44vh, 380px) !important; margin: 0; padding: 11px; color: #214b68; background: #fafdff !important; border: 0; border-radius: 0; font-family: "Cascadia Mono", "Consolas", monospace; font-size: .76rem; line-height: 1.55; white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; }
+        .remote-cmd-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+        .remote-cmd-toolbar strong { color: #255c84; font-size: .92rem; }
+        .remote-cmd-toolbar .button { min-height: 38px; padding: 7px 10px; }
+        .remote-tool-panel .remote-cmd-terminal {
+            min-height: 190px;
+            max-height: min(42vh, 360px) !important;
+            margin: 0 0 10px;
+            padding: 12px;
+            color: #eaf6ff;
+            background: #173c55 !important;
+            border: 1px solid #2f6e98;
+            border-radius: 9px;
+            font-family: "Cascadia Mono", "Consolas", monospace;
+            font-size: .78rem;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            overflow: auto;
+            overflow-wrap: anywhere;
+        }
+        .remote-cmd-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+        .remote-cmd-entry input { min-width: 0; }
+        .remote-cmd-entry .button { min-width: 82px; }
+        .remote-program-status { min-height: 42px; margin-top: 10px; padding: 10px; color: var(--mobile-muted); background: #f8fcff; border: 1px solid #a7cde7; border-radius: 9px; font-size: .8rem; }
+        .remote-tool-title-copy { min-width: 0; }
+        .remote-tool-title-copy span { display: block; margin-top: 3px; color: #6388a3; font-size: .72rem; }
+        .remote-icon-button {
+            flex: 0 0 40px;
+            width: 40px;
+            height: 40px;
+            padding: 0 !important;
+            display: inline-grid;
+            place-items: center;
+            color: #286b99;
+            background: #f8fcff;
+            border: 1px solid #9fc7e2;
+            border-radius: 9px;
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+        .remote-icon-button:active { background: #dceefa; }
+        .remote-file-search {
+            min-height: 44px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 38px;
+            align-items: center;
+            margin-bottom: 9px;
+            overflow: hidden;
+            background: #fafdff;
+            border: 1px solid #9fc7e2;
+            border-radius: 10px;
+            box-shadow: inset 0 1px 2px rgba(30, 88, 126, .06);
+        }
+        .remote-file-search:focus-within { border-color: #4d9bd0; box-shadow: 0 0 0 3px rgba(69, 151, 207, .14); }
+        .remote-file-search input {
+            width: 100%;
+            min-width: 0;
+            height: 42px;
+            padding: 0 12px;
+            color: var(--mobile-text);
+            background: transparent;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            font-size: .86rem;
+            outline: 0;
+        }
+        .remote-file-search input:focus { border: 0; box-shadow: none; }
+        .remote-file-search-clear {
+            width: 38px;
+            height: 42px;
+            padding: 0;
+            color: #5d819a;
+            background: transparent;
+            border: 0;
+            font-size: 1.15rem;
+            line-height: 1;
+        }
+        .remote-file-breadcrumb {
+            min-height: 39px;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            margin-bottom: 8px;
+            padding: 4px;
+            overflow-x: auto;
+            background: #e5f2fb;
+            border: 1px solid #b1d3e9;
+            border-radius: 9px;
+            scrollbar-width: none;
+        }
+        .remote-file-breadcrumb::-webkit-scrollbar { display: none; }
+        .remote-file-breadcrumb button {
+            flex: 0 0 auto;
+            min-height: 29px;
+            padding: 4px 8px;
+            color: #376f96;
+            background: transparent;
+            border: 0;
+            border-radius: 6px;
+            font: inherit;
+            font-size: .75rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .remote-file-breadcrumb button:active { background: #cde5f5; }
+        .remote-file-breadcrumb button[aria-current="page"] { color: #1f5f8c; background: #fafdff; }
+        .remote-file-breadcrumb-separator { flex: 0 0 auto; color: #78a0bc; font-size: .8rem; }
+        .remote-file-browser {
+            min-height: 232px;
+            max-height: min(48vh, 420px);
+            overflow-y: auto;
+            background: #fafdff;
+            border: 1px solid #9fc7e2;
+            border-radius: 10px;
+        }
+        .remote-file-row {
+            width: 100%;
+            min-height: 62px;
+            padding: 9px 10px;
+            display: grid;
+            grid-template-columns: 42px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 9px;
+            color: var(--mobile-text);
+            background: #ffffff;
+            border: 0;
+            border-bottom: 1px solid #d6e7f3;
+            border-radius: 0;
+            font: inherit;
+            text-align: left;
+        }
+        .remote-file-row:last-child { border-bottom: 0; }
+        button.remote-file-row:active { background: #e5f3fc; }
+        .remote-file-kind {
+            width: 42px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            color: #2b6d9a;
+            background: #dceefa;
+            border: 1px solid #a6cde6;
+            border-radius: 7px;
+            font-size: .62rem;
+            font-weight: 800;
+        }
+        .remote-file-kind-folder { color: #235f89; background: #cfe8f8; }
+        .remote-file-details { min-width: 0; }
+        .remote-file-name {
+            display: block;
+            overflow: hidden;
+            color: #1e526f;
+            font-size: .84rem;
+            font-weight: 750;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .remote-file-path {
+            display: block;
+            margin-top: 3px;
+            overflow: hidden;
+            color: #688aa1;
+            font-size: .68rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .remote-file-chevron { padding: 0 3px; color: #5f91b3; font-size: 1.25rem; }
+        .remote-file-run {
+            min-width: 62px;
+            min-height: 38px;
+            padding: 7px 10px;
+            font-size: .78rem;
+        }
+        .remote-file-empty { min-height: 230px; padding: 28px 18px; display: grid; place-content: center; gap: 5px; color: #66899f; text-align: center; }
+        .remote-file-empty strong { color: #315f7d; font-size: .86rem; }
+        .remote-file-empty span { font-size: .72rem; }
+
+        @media (max-width: 380px) {
+            .remote-panel { padding: 12px !important; }
+            .remote-preview { min-height: 160px; }
+            .remote-preview-toolbar > .button { min-width: 96px; padding-left: 8px; padding-right: 8px; }
+            .remote-subnav button { font-size: .76rem; }
+            .remote-file-row { grid-template-columns: 38px minmax(0, 1fr) auto; padding-left: 8px; padding-right: 8px; gap: 7px; }
+            .remote-file-kind { width: 38px; }
+            .remote-file-run { min-width: 56px; padding-left: 8px; padding-right: 8px; }
+        }
     </style>
 </head>
 <body>
@@ -788,25 +1562,41 @@
     </div>
 
     <!-- 主界面 -->
-    <div class="mobile-container hidden" id="main-container">
-        <!-- 控制面板 -->
-        <div class="section control-panel">
-            <!-- 连接选择器 -->
-            <div class="connection-selector">
-                <h2>选择控制连接</h2>
+    <div class="mobile-container hidden feature-online" id="main-container">
+        <header class="mobile-appbar">
+            <div class="mobile-appbar-connection">
+                <span class="mobile-appbar-connection-label">当前控制连接</span>
+                <button id="current-connection-button" class="current-connection-button" type="button" onclick="openConnectionSelector()">选择控制连接</button>
+            </div>
+        </header>
+        <div id="connection-modal" class="connection-modal hidden" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onclick="closeConnectionSelector(event)">
+            <section class="connection-dialog" onclick="event.stopPropagation()">
+                <header class="connection-dialog-header">
+                    <h2 id="connection-dialog-title">选择控制连接</h2>
+                    <button class="button button-secondary connection-dialog-close" type="button" onclick="closeConnectionSelector()">关闭</button>
+                </header>
+                <div class="connection-dialog-body">
+                    <p class="connection-dialog-hint">选择一个在线的桌面端连接进行控制</p>
                 <div id="connection-loading" class="loading">
                     <div class="spinner"></div>
                     <div>正在获取连接列表...</div>
                 </div>
                 <div id="connection-list" class="connection-list hidden"></div>
-                <div id="no-connection" class="no-connection hidden">
-                    暂无可用连接
-                </div>
-                <div class="button-row" style="margin-top: 10px;">
+                <div id="no-connection" class="no-connection hidden">暂无可用连接</div>
+                <div class="button-row">
                     <button class="button button-danger" onclick="mobileLogout()">退出登录</button>
                 </div>
-            </div>
-
+                </div>
+            </section>
+        </div>
+        <nav class="feature-nav" aria-label="功能分区">
+            <button class="active" data-feature="online" onclick="switchMobileFeature('online', this)"><span>⇅</span>上下线</button>
+            <button data-feature="info" onclick="switchMobileFeature('info', this)"><span>▦</span>团购信息</button>
+            <button data-feature="desktop" onclick="switchMobileFeature('desktop', this)"><span>▣</span>桌面操作</button>
+            <button data-feature="remote" onclick="switchMobileFeature('remote', this)"><span>⌁</span>远程控制</button>
+        </nav>
+        <!-- 控制面板 -->
+        <div class="section control-panel">
             <!-- 命令导航 -->
             <div class="nav-tabs command-tabs">
                 <div class="nav-tab active" data-tab="online" onclick="switchTab('online')">上线</div>
@@ -914,6 +1704,52 @@
                 </div>
             </div>
             </div>
+
+            <div class="remote-panel" style="margin-top:16px; border-top:1px solid #bfdbfe; padding-top:14px;">
+                <div class="remote-panel-heading">
+                    <div><span class="remote-kicker">远程工作台</span><h2>桌面预览</h2></div>
+                    <span class="remote-hint">按需刷新</span>
+                </div>
+                <div class="remote-preview" id="remote-screenshot-result">
+                    <div class="remote-preview-empty">点击刷新获取桌面截图</div>
+                </div>
+                <div class="remote-preview-toolbar">
+                    <div class="remote-resolution"><label for="remote-screenshot-width">预览宽度</label><select id="remote-screenshot-width"><option value="360">360</option><option value="480" selected>480</option><option value="720">720</option><option value="1080">1080</option></select></div>
+                    <button class="button button-primary" onclick="requestRemoteScreenshot()">刷新截图</button>
+                </div>
+                <div class="remote-subnav" role="tablist" aria-label="远程功能">
+                    <button class="active" data-remote-tool="logs" onclick="switchRemoteTool('logs', this)"><span>▤</span>下载日志</button>
+                    <button data-remote-tool="cmd" onclick="switchRemoteTool('cmd', this)"><span>⌘</span>CMD</button>
+                    <button data-remote-tool="executables" onclick="switchRemoteTool('executables', this)"><span>▣</span>程序</button>
+                </div>
+                <div class="remote-tool-panel" id="remote-tool-logs">
+                    <div class="remote-tool-actions"><button class="button button-secondary" onclick="requestRemoteLogFiles('client')">客户端日志</button><button class="button button-secondary" onclick="requestRemoteLogFiles('bgi')">BGI日志</button></div>
+                    <div class="form-group"><label for="remote-log-kb">下载日志尾部（KB）</label><input id="remote-log-kb" type="number" min="1" max="4096" value="64"></div>
+                    <div id="remote-log-files" class="connection-list"></div>
+                    <div class="remote-log-viewer">
+                        <div class="remote-log-viewer-toolbar"><strong id="remote-log-preview-name">尚未选择日志</strong><button id="remote-log-save-button" class="button button-secondary" type="button" onclick="saveRemoteLogPreview()" disabled>保存文件</button></div>
+                        <pre id="remote-log-preview-content">选择日志后将在这里显示内容</pre>
+                    </div>
+                </div>
+                <div class="remote-tool-panel hidden" id="remote-tool-cmd">
+                    <div class="remote-cmd-toolbar"><strong>CMD窗口</strong><button class="button button-secondary" type="button" onclick="refreshRemoteCmdWindow()">刷新窗口</button></div>
+                    <pre id="remote-output" class="remote-cmd-terminal"></pre>
+                    <div class="remote-cmd-entry"><input id="remote-cmd-input" type="text" placeholder="输入一行CMD命令" onkeydown="handleRemoteCmdKeydown(event)"><button class="button button-danger" type="button" onclick="executeRemoteCmd()">执行</button></div>
+                </div>
+                <div class="remote-tool-panel hidden" id="remote-tool-executables">
+                    <div class="remote-tool-title">
+                        <div class="remote-tool-title-copy"><strong>选择可执行文件</strong><span id="remote-executable-summary">尚未加载</span></div>
+                        <button class="remote-icon-button" type="button" aria-label="刷新程序列表" title="刷新程序列表" onclick="requestRemoteExecutables()">&#8635;</button>
+                    </div>
+                    <div class="remote-file-search">
+                        <input id="remote-executable-search" type="search" placeholder="搜索程序或路径" autocomplete="off" oninput="filterRemoteExecutables()">
+                        <button id="remote-executable-search-clear" class="remote-file-search-clear" type="button" aria-label="清除搜索" title="清除搜索" onclick="clearRemoteExecutableSearch()" hidden>&times;</button>
+                    </div>
+                    <nav id="remote-executable-breadcrumb" class="remote-file-breadcrumb" aria-label="程序目录"><button type="button" aria-current="page" onclick="navigateRemoteExecutableFolder('', [])">白名单</button></nav>
+                    <div id="remote-executable-list" class="remote-file-browser"><div class="remote-file-empty"><strong>尚未加载程序列表</strong></div></div>
+                    <div id="remote-program-status" class="remote-program-status">等待选择程序</div>
+                </div>
+            </div>
         </div>
 
         <!-- 集成功能面板 -->
@@ -940,8 +1776,8 @@
 
             <!-- 积分排行榜 -->
             <div id="mobile-points" class="mobile-tab-content hidden">
-                <div class="points-ranking-container" id="mobile-points-ranking-container" style="height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
-                    <p style="color: #999; text-align: center; margin-top: 30px;">暂无积分数据</p>
+                <div class="points-ranking-container" id="mobile-points-ranking-container">
+                    <p class="points-ranking-empty">暂无积分数据</p>
                 </div>
             </div>
 
@@ -959,7 +1795,7 @@
                         <option value="all">所有房间</option>
                     </select>
                 </div>
-                <div id="mobile-ride-records-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
+                <div id="mobile-ride-records-container" style="overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
                     <p style="color: #999; text-align: center; margin-top: 30px;">暂无发车记录</p>
                 </div>
             </div>
@@ -977,7 +1813,7 @@
                         <button class="button button-secondary" onclick="loadMobileGainRecords()">查询</button>
                     </div>
                 </div>
-                <div id="mobile-gain-records-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
+                <div id="mobile-gain-records-container" style="overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; background-color: white; padding: 10px;">
                     <p style="color: #999; text-align: center; margin-top: 30px;">请选择日期查询收益排行榜</p>
                 </div>
             </div>
@@ -1003,6 +1839,540 @@
         let userRooms = [];
         let schedules = [];
         let selectedScheduleId = null;
+        const remoteTransfers = new Map();
+        const remoteRequests = new Map();
+        const remoteCmdQueue = [];
+        let activeRemoteCmdRequestId = null;
+        let remoteLogPreviewUrl = '';
+        let remoteLogPreviewName = '';
+        let remoteScreenshotUrl = '';
+        let remoteExecutablePayload = null;
+        let remoteExecutableRoot = '';
+        let remoteExecutablePath = [];
+        setInterval(() => {
+            const cutoff = Date.now() - 2 * 60 * 1000;
+            for (const [id, request] of remoteRequests.entries()) {
+                if (request.createdAt < cutoff) {
+                    if (id === activeRemoteCmdRequestId) {
+                        finishRemoteCmdRequest(id, { success: false, output: '命令执行超时' });
+                    } else {
+                        if (request.command === 'list-executables') {
+                            document.getElementById('remote-executable-summary').textContent = '请求超时';
+                            document.getElementById('remote-program-status').textContent = '程序列表获取超时';
+                        }
+                        remoteRequests.delete(id);
+                    }
+                }
+            }
+            for (const [id] of remoteTransfers.entries()) {
+                const request = remoteRequests.get(id);
+                if (!request) remoteTransfers.delete(id);
+            }
+        }, 30000);
+
+        function remoteRequest(command, params = {}) {
+            if (!socket || !socket.connected || !isLoggedIn || !selectedConnectionId) {
+                showCmdMessage('请先登录并选择控制连接');
+                return null;
+            }
+            const randomBytes = new Uint8Array(12);
+            crypto.getRandomValues(randomBytes);
+            const requestId = `remote-${Date.now()}-${Array.from(randomBytes, value => value.toString(16).padStart(2, '0')).join('')}`;
+            remoteRequests.set(requestId, { command, createdAt: Date.now() });
+            socket.emit('message', { type: 'mobile-command', data: { targetConnectionId: selectedConnectionId, command, requestId, params } });
+            return requestId;
+        }
+
+        function switchRemoteTool(tool, button) {
+            document.querySelectorAll('.remote-tool-panel').forEach(panel => {
+                panel.classList.toggle('hidden', panel.id !== `remote-tool-${tool}`);
+            });
+            document.querySelectorAll('.remote-subnav button').forEach(item => item.classList.toggle('active', item === button));
+            if (tool === 'executables' && remoteExecutablePayload === null) requestRemoteExecutables();
+        }
+
+        function requestRemoteScreenshot() {
+            remoteRequest('get-screenshot', { maxWidth: Number(document.getElementById('remote-screenshot-width').value) || 480, maxHeight: 1080 });
+        }
+
+        function requestRemoteLogFiles(kind) { remoteRequest(kind === 'bgi' ? 'get-bgi-log-files' : 'get-client-log-files'); }
+        function requestRemoteExecutables() {
+            const requestId = remoteRequest('list-executables');
+            if (requestId) {
+                document.getElementById('remote-executable-summary').textContent = '正在刷新...';
+                document.getElementById('remote-program-status').textContent = '正在获取白名单程序';
+            }
+        }
+
+        function appendRemoteCmdOutput(text) {
+            const output = document.getElementById('remote-output');
+            if (!output) return;
+            const value = String(text ?? '');
+            if (output.textContent && !output.textContent.endsWith('\n')) output.textContent += '\n';
+            output.textContent += value;
+            if (value && !value.endsWith('\n')) output.textContent += '\n';
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function runNextRemoteCmd() {
+            if (activeRemoteCmdRequestId || remoteCmdQueue.length === 0) return;
+            const command = remoteCmdQueue.shift();
+            const requestId = remoteRequest('execute-cmd', { command });
+            if (!requestId) {
+                appendRemoteCmdOutput(`[未发送] ${command}`);
+                remoteCmdQueue.length = 0;
+                return;
+            }
+            activeRemoteCmdRequestId = requestId;
+            remoteRequests.set(requestId, { command: 'execute-cmd', commandText: command, createdAt: Date.now() });
+            appendRemoteCmdOutput(`> ${command}`);
+        }
+
+        function executeRemoteCmd() {
+            const input = document.getElementById('remote-cmd-input');
+            const command = input.value.trim();
+            if (!command) return showCmdMessage('请输入CMD命令');
+            input.value = '';
+            remoteCmdQueue.push(command);
+            runNextRemoteCmd();
+            input.focus();
+        }
+
+        function handleRemoteCmdKeydown(event) {
+            if (event.key !== 'Enter' || event.isComposing) return;
+            event.preventDefault();
+            executeRemoteCmd();
+        }
+
+        function finishRemoteCmdRequest(requestId, payload) {
+            const output = String(payload?.output || '').trimEnd();
+            appendRemoteCmdOutput(output || (payload?.success === false ? '命令执行失败' : '命令执行完成，无输出'));
+            remoteRequests.delete(requestId);
+            if (activeRemoteCmdRequestId === requestId) activeRemoteCmdRequestId = null;
+            runNextRemoteCmd();
+        }
+
+        function refreshRemoteCmdWindow() {
+            const output = document.getElementById('remote-output');
+            if (output) output.textContent = '';
+            remoteCmdQueue.length = 0;
+            if (activeRemoteCmdRequestId) remoteRequests.delete(activeRemoteCmdRequestId);
+            activeRemoteCmdRequestId = null;
+            const requestId = remoteRequest('reset-cmd');
+            if (requestId) remoteRequests.set(requestId, { command: 'reset-cmd', createdAt: Date.now() });
+        }
+
+        function resetRemoteControlState(clearResults = false) {
+            remoteCmdQueue.length = 0;
+            activeRemoteCmdRequestId = null;
+            remoteRequests.clear();
+            remoteTransfers.clear();
+            if (!clearResults) return;
+            if (remoteScreenshotUrl) URL.revokeObjectURL(remoteScreenshotUrl);
+            remoteScreenshotUrl = '';
+            if (remoteLogPreviewUrl) URL.revokeObjectURL(remoteLogPreviewUrl);
+            remoteLogPreviewUrl = '';
+            remoteLogPreviewName = '';
+            remoteExecutablePayload = null;
+            remoteExecutableRoot = '';
+            remoteExecutablePath = [];
+            const screenshot = document.getElementById('remote-screenshot-result');
+            const logName = document.getElementById('remote-log-preview-name');
+            const logContent = document.getElementById('remote-log-preview-content');
+            const saveButton = document.getElementById('remote-log-save-button');
+            const executableSearch = document.getElementById('remote-executable-search');
+            if (screenshot) screenshot.innerHTML = '<div class="no-connection">点击刷新获取桌面截图</div>';
+            if (logName) logName.textContent = '尚未选择日志';
+            if (logContent) logContent.textContent = '选择日志并点击查看后，内容会显示在这里。';
+            if (saveButton) saveButton.disabled = true;
+            if (executableSearch) executableSearch.value = '';
+            renderRemoteExecutableBrowser();
+            document.getElementById('remote-program-status').textContent = '等待选择程序';
+        }
+
+        async function showRemoteLogPreview(blob, fileName) {
+            const nameElement = document.getElementById('remote-log-preview-name');
+            const contentElement = document.getElementById('remote-log-preview-content');
+            const saveButton = document.getElementById('remote-log-save-button');
+            if (remoteLogPreviewUrl) URL.revokeObjectURL(remoteLogPreviewUrl);
+            const previewUrl = URL.createObjectURL(blob);
+            remoteLogPreviewUrl = previewUrl;
+            remoteLogPreviewName = fileName || 'remote-log.txt';
+            nameElement.textContent = remoteLogPreviewName;
+            contentElement.textContent = '正在读取日志...';
+            saveButton.disabled = false;
+            try {
+                const content = await blob.text();
+                if (remoteLogPreviewUrl !== previewUrl) return;
+                contentElement.textContent = content;
+                contentElement.scrollTop = 0;
+            } catch (error) {
+                if (remoteLogPreviewUrl !== previewUrl) return;
+                contentElement.textContent = `日志预览失败：${error.message || error}`;
+            }
+        }
+
+        function saveRemoteLogPreview() {
+            if (!remoteLogPreviewUrl) return showCmdMessage('请先选择要保存的日志');
+            const link = document.createElement('a');
+            link.href = remoteLogPreviewUrl;
+            link.download = remoteLogPreviewName || 'remote-log.txt';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        function handleRemoteData(data) {
+            const requestId = data.requestId;
+            if (!requestId) return;
+            const request = remoteRequests.get(requestId);
+            if (!request) return;
+            if (data.payload !== undefined) {
+                const payload = data.payload || {};
+                if (data.dataType === 'screenshot-meta') request.screenshotMeta = payload;
+                else if (data.dataType === 'log-tail-meta') request.logMeta = payload;
+                else if (data.dataType === 'log-tail-empty') {
+                    const fileName = (request.filePath || payload.filePath || 'remote-log.txt').split(/[\\/]/).pop();
+                    showRemoteLogPreview(new Blob([], { type: 'text/plain;charset=utf-8' }), fileName);
+                    remoteRequests.delete(requestId);
+                }
+                else if (data.dataType === 'log-files') {
+                    renderRemoteLogFiles(payload);
+                    remoteRequests.delete(requestId);
+                }
+                else if (data.dataType === 'executables') {
+                    renderRemoteExecutables(payload);
+                    remoteRequests.delete(requestId);
+                }
+                else if (data.dataType === 'cmd-result') finishRemoteCmdRequest(requestId, payload);
+                else if (data.dataType === 'cmd-reset-result') {
+                    showCmdMessage(payload.success ? 'CMD窗口已刷新' : (payload.message || 'CMD窗口刷新失败'), payload.success ? 'success' : 'error');
+                    remoteRequests.delete(requestId);
+                }
+                else if (data.dataType === 'run-result') {
+                    document.getElementById('remote-program-status').textContent = payload.success ? `已启动 ${payload.name || ''} (PID ${payload.pid || '-'})` : (payload.message || '启动失败');
+                    remoteRequests.delete(requestId);
+                }
+                else if (data.dataType === 'error') {
+                    if (request.command === 'execute-cmd') {
+                        finishRemoteCmdRequest(requestId, { success: false, output: payload.message || '远程操作失败' });
+                    } else {
+                        if (request.command === 'list-executables') {
+                            document.getElementById('remote-executable-summary').textContent = '刷新失败';
+                            document.getElementById('remote-program-status').textContent = payload.message || '程序列表刷新失败';
+                        }
+                        showCmdMessage(payload.message || '远程操作失败');
+                        remoteRequests.delete(requestId);
+                    }
+                }
+                return;
+            }
+            if (!data.chunk) return;
+            const bytes = data.chunk instanceof ArrayBuffer ? new Uint8Array(data.chunk) : (data.chunk instanceof Uint8Array ? data.chunk : new Uint8Array(data.chunk.data || data.chunk));
+            let transfer = remoteTransfers.get(requestId);
+            if (!transfer) {
+                const total = Number(data.totalChunks) || 1;
+                if (total < 1 || total > 2000) return showCmdMessage('远程数据分片数量无效');
+                transfer = { chunks: [], received: 0, seen: new Set(), total, bytes: 0, type: data.dataType };
+                remoteTransfers.set(requestId, transfer);
+            }
+            if (transfer.total !== Number(data.totalChunks) || transfer.type !== data.dataType ||
+                transfer.seen.has(data.sequence) || transfer.bytes + bytes.byteLength > 32 * 1024 * 1024) return;
+            transfer.seen.add(data.sequence);
+            transfer.chunks[data.sequence || 0] = bytes;
+            transfer.received++;
+            transfer.bytes += bytes.byteLength;
+            if (transfer.received < transfer.total) return;
+            const blob = new Blob(transfer.chunks, { type: transfer.type === 'image' ? 'image/jpeg' : 'text/plain;charset=utf-8' });
+            if (transfer.type === 'image') {
+                if (remoteScreenshotUrl) URL.revokeObjectURL(remoteScreenshotUrl);
+                remoteScreenshotUrl = URL.createObjectURL(blob);
+                const container = document.getElementById('remote-screenshot-result');
+                const screenshotMeta = request.screenshotMeta;
+                const image = document.createElement('img');
+                image.src = remoteScreenshotUrl;
+                image.alt = '桌面截图';
+                const caption = document.createElement('div');
+                caption.className = 'remote-preview-caption';
+                const width = Number(screenshotMeta?.width);
+                const height = Number(screenshotMeta?.height);
+                caption.textContent = Number.isFinite(width) && Number.isFinite(height) ? `${width} × ${height}` : '';
+                container.replaceChildren(image, caption);
+            } else if (transfer.type === 'log-tail') {
+                const fileName = (remoteRequests.get(requestId)?.filePath || 'remote-log.txt').split(/[\\/]/).pop();
+                showRemoteLogPreview(blob, fileName);
+            }
+            remoteTransfers.delete(requestId);
+            remoteRequests.delete(requestId);
+        }
+
+        function escapeRemoteText(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+        }
+
+        function renderRemoteLogFiles(payload) {
+            const container = document.getElementById('remote-log-files');
+            const files = payload.files || [];
+            container.innerHTML = '';
+            if (!files.length) {
+                container.innerHTML = '<div class="no-connection">暂无日志</div>';
+                return;
+            }
+            files.forEach(file => {
+                const item = document.createElement('div');
+                item.className = 'connection-item';
+                const fileName = document.createElement('span');
+                fileName.textContent = file.path;
+                const actions = document.createElement('span');
+                actions.textContent = `${(file.size / 1024).toFixed(1)} KB `;
+                const viewButton = document.createElement('button');
+                viewButton.className = 'button';
+                viewButton.type = 'button';
+                viewButton.textContent = '查看';
+                viewButton.addEventListener('click', () => requestRemoteLogTail(payload.kind, encodeURIComponent(file.path)));
+                actions.appendChild(viewButton);
+                item.append(fileName, actions);
+                container.appendChild(item);
+            });
+        }
+
+        function requestRemoteLogTail(kind, encodedPath) {
+            const filePath = decodeURIComponent(encodedPath);
+            const kb = Math.min(4096, Math.max(1, Number(document.getElementById('remote-log-kb').value) || 64));
+            const requestId = remoteRequest(kind === 'bgi' ? 'get-bgi-log-tail' : 'get-client-log-tail', { filePath, kb });
+            if (requestId) remoteRequests.set(requestId, { command: 'log-tail', filePath, createdAt: Date.now() });
+        }
+
+        function splitRemoteExecutablePath(value) {
+            return String(value || '').split(/[\\/]+/).filter(Boolean);
+        }
+
+        function remotePathEquals(left, right) {
+            return String(left || '').toLocaleLowerCase() === String(right || '').toLocaleLowerCase();
+        }
+
+        function getRemoteFolderName(folder) {
+            const parts = splitRemoteExecutablePath(folder);
+            return parts[parts.length - 1] || String(folder || '未命名目录');
+        }
+
+        function formatRemoteFileSize(bytes) {
+            const size = Math.max(0, Number(bytes) || 0);
+            if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+            return `${Math.max(0.1, size / 1024).toFixed(1)} KB`;
+        }
+
+        function normalizeRemoteExecutablePayload(payload) {
+            const files = (Array.isArray(payload?.files) ? payload.files : []).map(file => ({
+                ...file,
+                folder: String(file?.folder || ''),
+                name: String(file?.name || '未命名程序'),
+                relativePath: String(file?.relativePath || file?.name || '')
+            })).filter(file => file.folder && file.id);
+            const folders = [];
+            const addFolder = folder => {
+                const value = String(folder || '');
+                if (value && !folders.some(item => remotePathEquals(item, value))) folders.push(value);
+            };
+            (Array.isArray(payload?.folders) ? payload.folders : []).forEach(addFolder);
+            files.forEach(file => addFolder(file.folder));
+            folders.sort((a, b) => getRemoteFolderName(a).localeCompare(getRemoteFolderName(b), 'zh-CN', { numeric: true }));
+            return { folders, files };
+        }
+
+        function createRemoteFileKind(text, isFolder = false) {
+            const kind = document.createElement('span');
+            kind.className = `remote-file-kind${isFolder ? ' remote-file-kind-folder' : ''}`;
+            kind.textContent = text;
+            return kind;
+        }
+
+        function createRemoteFileDetails(name, detail) {
+            const wrapper = document.createElement('span');
+            wrapper.className = 'remote-file-details';
+            const title = document.createElement('span');
+            title.className = 'remote-file-name';
+            title.textContent = name;
+            const path = document.createElement('span');
+            path.className = 'remote-file-path';
+            path.textContent = detail;
+            wrapper.append(title, path);
+            return wrapper;
+        }
+
+        function appendRemoteFileEmpty(container, title, detail = '') {
+            const empty = document.createElement('div');
+            empty.className = 'remote-file-empty';
+            const heading = document.createElement('strong');
+            heading.textContent = title;
+            empty.appendChild(heading);
+            if (detail) {
+                const description = document.createElement('span');
+                description.textContent = detail;
+                empty.appendChild(description);
+            }
+            container.appendChild(empty);
+        }
+
+        function createRemoteFolderRow(name, detail, onOpen) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'remote-file-row';
+            row.append(createRemoteFileKind('DIR', true), createRemoteFileDetails(name, detail));
+            const chevron = document.createElement('span');
+            chevron.className = 'remote-file-chevron';
+            chevron.setAttribute('aria-hidden', 'true');
+            chevron.textContent = '›';
+            row.appendChild(chevron);
+            row.addEventListener('click', onOpen);
+            return row;
+        }
+
+        function createRemoteExecutableRow(file, detail) {
+            const row = document.createElement('div');
+            row.className = 'remote-file-row';
+            const extension = String(file.name).split('.').pop().toUpperCase().slice(0, 4) || 'APP';
+            row.append(createRemoteFileKind(extension), createRemoteFileDetails(file.name, detail));
+            const runButton = document.createElement('button');
+            runButton.className = 'button button-primary remote-file-run';
+            runButton.type = 'button';
+            runButton.textContent = '启动';
+            runButton.addEventListener('click', () => runRemoteExecutable(String(file.id || ''), file.name));
+            row.appendChild(runButton);
+            return row;
+        }
+
+        function renderRemoteExecutableBreadcrumb(searching = false) {
+            const breadcrumb = document.getElementById('remote-executable-breadcrumb');
+            breadcrumb.innerHTML = '';
+            const appendSeparator = () => {
+                const separator = document.createElement('span');
+                separator.className = 'remote-file-breadcrumb-separator';
+                separator.textContent = '›';
+                breadcrumb.appendChild(separator);
+            };
+            const appendButton = (label, onClick, current = false) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = label;
+                if (current) button.setAttribute('aria-current', 'page');
+                button.addEventListener('click', onClick);
+                breadcrumb.appendChild(button);
+            };
+            appendButton('白名单', () => navigateRemoteExecutableFolder('', []), !remoteExecutableRoot && !searching);
+            if (searching) {
+                appendSeparator();
+                appendButton('搜索结果', () => {}, true);
+                return;
+            }
+            if (!remoteExecutableRoot) return;
+            appendSeparator();
+            appendButton(getRemoteFolderName(remoteExecutableRoot), () => navigateRemoteExecutableFolder(remoteExecutableRoot, []), remoteExecutablePath.length === 0);
+            remoteExecutablePath.forEach((segment, index) => {
+                appendSeparator();
+                appendButton(segment, () => navigateRemoteExecutableFolder(remoteExecutableRoot, remoteExecutablePath.slice(0, index + 1)), index === remoteExecutablePath.length - 1);
+            });
+            requestAnimationFrame(() => { breadcrumb.scrollLeft = breadcrumb.scrollWidth; });
+        }
+
+        function navigateRemoteExecutableFolder(root, segments) {
+            remoteExecutableRoot = String(root || '');
+            remoteExecutablePath = Array.isArray(segments) ? segments.slice() : [];
+            const search = document.getElementById('remote-executable-search');
+            if (search) search.value = '';
+            renderRemoteExecutableBrowser();
+        }
+
+        function filterRemoteExecutables() {
+            renderRemoteExecutableBrowser();
+        }
+
+        function clearRemoteExecutableSearch() {
+            const search = document.getElementById('remote-executable-search');
+            if (!search) return;
+            search.value = '';
+            search.focus();
+            renderRemoteExecutableBrowser();
+        }
+
+        function renderRemoteExecutableBrowser() {
+            const container = document.getElementById('remote-executable-list');
+            const summary = document.getElementById('remote-executable-summary');
+            const search = document.getElementById('remote-executable-search');
+            const clearButton = document.getElementById('remote-executable-search-clear');
+            const query = String(search?.value || '').trim().toLocaleLowerCase();
+            container.innerHTML = '';
+            if (clearButton) clearButton.hidden = !query;
+            if (!remoteExecutablePayload) {
+                summary.textContent = '尚未加载';
+                renderRemoteExecutableBreadcrumb(false);
+                appendRemoteFileEmpty(container, '尚未加载程序列表');
+                return;
+            }
+            const { folders, files } = remoteExecutablePayload;
+            if (query) {
+                const matches = files.filter(file => `${file.name} ${file.relativePath} ${file.folder}`.toLocaleLowerCase().includes(query));
+                summary.textContent = `${matches.length} 个搜索结果`;
+                renderRemoteExecutableBreadcrumb(true);
+                if (!matches.length) return appendRemoteFileEmpty(container, '没有匹配的程序', query);
+                matches.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true })).forEach(file => {
+                    const location = `${getRemoteFolderName(file.folder)} / ${file.relativePath} · ${formatRemoteFileSize(file.size)}`;
+                    container.appendChild(createRemoteExecutableRow(file, location));
+                });
+                return;
+            }
+            renderRemoteExecutableBreadcrumb(false);
+            if (!remoteExecutableRoot) {
+                summary.textContent = `${folders.length} 个白名单目录 · ${files.length} 个程序`;
+                if (!folders.length) return appendRemoteFileEmpty(container, '暂无白名单目录', '请在桌面端添加允许远程执行的文件夹');
+                folders.forEach(folder => {
+                    const count = files.filter(file => remotePathEquals(file.folder, folder)).length;
+                    container.appendChild(createRemoteFolderRow(getRemoteFolderName(folder), `${folder} · ${count} 个程序`, () => navigateRemoteExecutableFolder(folder, [])));
+                });
+                return;
+            }
+            const rootFiles = files.filter(file => remotePathEquals(file.folder, remoteExecutableRoot));
+            const childFolders = new Map();
+            const visibleFiles = [];
+            rootFiles.forEach(file => {
+                const parts = splitRemoteExecutablePath(file.relativePath);
+                const directories = parts.slice(0, -1);
+                const matchesCurrentPath = remoteExecutablePath.every((segment, index) => directories[index]?.toLocaleLowerCase() === segment.toLocaleLowerCase());
+                if (!matchesCurrentPath || directories.length < remoteExecutablePath.length) return;
+                if (directories.length === remoteExecutablePath.length) {
+                    visibleFiles.push(file);
+                    return;
+                }
+                const childName = directories[remoteExecutablePath.length];
+                const key = childName.toLocaleLowerCase();
+                const entry = childFolders.get(key) || { name: childName, count: 0 };
+                entry.count++;
+                childFolders.set(key, entry);
+            });
+            const sortedFolders = Array.from(childFolders.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
+            visibleFiles.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
+            summary.textContent = `${sortedFolders.length} 个文件夹 · ${visibleFiles.length} 个程序`;
+            sortedFolders.forEach(folder => {
+                container.appendChild(createRemoteFolderRow(folder.name, `${folder.count} 个程序`, () => navigateRemoteExecutableFolder(remoteExecutableRoot, [...remoteExecutablePath, folder.name])));
+            });
+            visibleFiles.forEach(file => container.appendChild(createRemoteExecutableRow(file, formatRemoteFileSize(file.size))));
+            if (!sortedFolders.length && !visibleFiles.length) appendRemoteFileEmpty(container, '此文件夹没有可执行程序');
+        }
+
+        function renderRemoteExecutables(payload) {
+            remoteExecutablePayload = normalizeRemoteExecutablePayload(payload);
+            if (remoteExecutableRoot && !remoteExecutablePayload.folders.some(folder => remotePathEquals(folder, remoteExecutableRoot))) {
+                remoteExecutableRoot = '';
+                remoteExecutablePath = [];
+            }
+            renderRemoteExecutableBrowser();
+            document.getElementById('remote-program-status').textContent = '等待选择程序';
+        }
+
+        function runRemoteExecutable(programId, programName = '') {
+            const requestId = remoteRequest('run-executable', { programId });
+            if (requestId) document.getElementById('remote-program-status').textContent = `正在启动 ${programName || '所选程序'}...`;
+        }
 
         // 页面加载时检查自动登录
         window.addEventListener('load', function() {
@@ -1057,6 +2427,9 @@
             selectedConnectionId = null;
             connections = [];
             onlineUsers = [];
+            resetRemoteControlState(true);
+            closeConnectionSelector();
+            updateCurrentConnectionDisplay();
             
             document.getElementById('main-container').classList.add('hidden');
             document.getElementById('login-box').classList.remove('hidden');
@@ -1127,6 +2500,11 @@
                 isLoggedIn = false;
                 isLoggingIn = false;
                 if (socket === loginSocket) {
+                    selectedConnectionId = null;
+                    connections = [];
+                    resetRemoteControlState(true);
+                    updateCurrentConnectionDisplay();
+                    closeConnectionSelector();
                     showCmdMessage('连接已断开，请重新登录');
                 }
             });
@@ -1222,7 +2600,16 @@
                         loadOnlineUsers();
                     }
                 } else {
-                    showCmdMessage(result.message || '命令执行失败');
+                    const remoteRequestState = result.requestId ? remoteRequests.get(result.requestId) : null;
+                    if (remoteRequestState?.command === 'execute-cmd') {
+                        finishRemoteCmdRequest(result.requestId, { success: false, output: result.message || '命令执行失败' });
+                    } else {
+                        showCmdMessage(result.message || '命令执行失败');
+                        if (result.requestId) {
+                            remoteRequests.delete(result.requestId);
+                            remoteTransfers.delete(result.requestId);
+                        }
+                    }
                 }
             } else if (data.type === 'error') {
                 showCmdMessage(data.message || '服务器处理失败');
@@ -1268,6 +2655,8 @@
             } else if (data.type === 'schedules-list') {
                 schedules = data.data && Array.isArray(data.data.schedules) ? data.data.schedules : [];
                 renderSchedules();
+            } else if (data.type === 'mobile-command-data') {
+                handleRemoteData(data);
             }
         }
 
@@ -1376,21 +2765,58 @@
             if (!container) return;
 
             if (!pointsData || pointsData.length === 0) {
-                container.innerHTML = '<p style="color: #999; text-align: center; margin-top: 30px;">暂无积分数据</p>';
+                container.innerHTML = '<p class="points-ranking-empty">暂无积分数据</p>';
                 return;
             }
 
             container.innerHTML = '';
             pointsData.forEach((item, index) => {
                 const row = document.createElement('div');
-                row.style.cssText = 'display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #e3f2fd;';
                 const isSelf = item.accountId === loggedInAccountId;
+                const points = Number.isFinite(Number(item.points)) ? Number(item.points) : 0;
+                row.className = 'points-ranking-item' + (isSelf ? ' self' : '');
                 row.innerHTML = `
-                    <span style="color: #1976D2; font-weight: bold;">${index + 1}. ${item.accountId}${isSelf ? ' (自己)' : ''}</span>
-                    <span style="color: #666;">${item.points || 0} 积分</span>
+                    <span class="points-ranking-rank">${index + 1}</span>
+                    <span class="points-ranking-account">
+                        <span class="points-ranking-account-name">${escapeRemoteText(item.accountId)}</span>
+                        ${isSelf ? '<span class="points-ranking-self">自己</span>' : ''}
+                    </span>
+                    <span class="points-ranking-points"><strong>${points}</strong><small>积分</small></span>
                 `;
                 container.appendChild(row);
             });
+        }
+
+        function updateCurrentConnectionDisplay() {
+            const button = document.getElementById('current-connection-button');
+            if (!button) return;
+            const current = connections.find(conn => conn.connectionId === selectedConnectionId);
+            if (current) {
+                button.textContent = current.connectionName || current.connectionId;
+                button.classList.add('has-selection');
+                button.title = button.textContent;
+                button.setAttribute('aria-label', `当前控制连接：${button.textContent}，点击更换`);
+            } else {
+                button.textContent = '选择控制连接';
+                button.classList.remove('has-selection');
+                button.removeAttribute('title');
+                button.setAttribute('aria-label', '选择控制连接');
+            }
+        }
+
+        function openConnectionSelector() {
+            const modal = document.getElementById('connection-modal');
+            if (!modal) return;
+            modal.classList.remove('hidden');
+            document.body.classList.add('connection-modal-open');
+            if (socket && socket.connected && isLoggedIn) loadConnections();
+        }
+
+        function closeConnectionSelector(event) {
+            if (event && event.target !== event.currentTarget) return;
+            const modal = document.getElementById('connection-modal');
+            if (modal) modal.classList.add('hidden');
+            document.body.classList.remove('connection-modal-open');
         }
 
         function loadConnections() {
@@ -1412,34 +2838,45 @@
             loadingEl.classList.add('hidden');
 
             if (connections.length === 0) {
+                selectedConnectionId = null;
                 listEl.classList.add('hidden');
                 noConEl.classList.remove('hidden');
             } else {
                 listEl.classList.remove('hidden');
                 noConEl.classList.add('hidden');
 
-                listEl.innerHTML = connections.map(conn => `
-                    <div class="connection-item" data-id="${conn.connectionId}" onclick="selectConnection('${conn.connectionId}')">
-                        <div>
-                            <div>${conn.connectionName}</div>
-                            <div style="font-size: 0.8rem; color: #666;">
-                                ${conn.uid || '未设置UID'} - ${conn.roomName || '未设置房间'}
-                            </div>
-                        </div>
-                        <div style="font-size: 0.8rem; color: ${conn.status === 'online' ? '#4CAF50' : '#f44336'};">
-                            ${conn.status === 'online' ? '已上线' : '空闲'}
-                        </div>
-                    </div>
-                `).join('');
+                listEl.innerHTML = '';
+                connections.forEach(conn => {
+                    const item = document.createElement('div');
+                    const connectionIdValue = String(conn.connectionId || '');
+                    item.className = 'connection-item';
+                    item.dataset.id = connectionIdValue;
+                    item.addEventListener('click', () => selectConnection(connectionIdValue));
+                    const info = document.createElement('div');
+                    const name = document.createElement('div');
+                    name.textContent = String(conn.connectionName || connectionIdValue || '未命名连接');
+                    const details = document.createElement('div');
+                    details.style.cssText = 'font-size:0.8rem;color:#666';
+                    details.textContent = `${conn.uid || '未设置UID'} - ${conn.roomName || '未设置房间'}`;
+                    info.append(name, details);
+                    const status = document.createElement('div');
+                    status.style.cssText = `font-size:0.8rem;color:${conn.status === 'online' ? '#278557' : '#5f7d94'}`;
+                    status.textContent = conn.status === 'online' ? '已上线' : '空闲';
+                    item.append(info, status);
+                    listEl.appendChild(item);
+                });
                 if (selectedConnectionId && connections.some(conn => conn.connectionId === selectedConnectionId)) {
-                    selectConnection(selectedConnectionId);
+                    selectConnection(selectedConnectionId, false);
                 } else if (selectedConnectionId) {
                     selectedConnectionId = null;
+                    resetRemoteControlState(true);
                 }
             }
+            updateCurrentConnectionDisplay();
         }
 
-        function selectConnection(connectionId) {
+        function selectConnection(connectionId, closeModal = true) {
+            if (selectedConnectionId && selectedConnectionId !== connectionId) resetRemoteControlState(true);
             selectedConnectionId = connectionId;
             document.querySelectorAll('.connection-item').forEach(item => {
                 if (item.dataset.id === connectionId) {
@@ -1448,6 +2885,8 @@
                     item.classList.remove('selected');
                 }
             });
+            updateCurrentConnectionDisplay();
+            if (closeModal) closeConnectionSelector();
         }
 
         function loadSchedules() {
@@ -1480,43 +2919,52 @@
                 listEl.classList.remove('hidden');
                 noSchEl.classList.add('hidden');
 
-                listEl.innerHTML = schedules.map(schedule => {
+                listEl.innerHTML = '';
+                schedules.forEach(schedule => {
+                    if (!schedule || typeof schedule !== 'object') return;
+                    const trigger = schedule.trigger || {};
+                    const triggerConfig = trigger.config || {};
+                    const action = schedule.action || {};
+                    const actionConfig = action.config || {};
                     let triggerDesc = '';
-                    if (schedule.trigger.type === 'file-watch') {
-                        triggerDesc = `文件监听: ${schedule.trigger.config.filePath}`;
-                    } else if (schedule.trigger.type === 'cron') {
-                        triggerDesc = `定时启动: ${schedule.trigger.config.expression}`;
-                    } else if (schedule.trigger.type === 'trigger-ride') {
-                        triggerDesc = `触发发车: ${schedule.trigger.config.username} (${schedule.trigger.config.uid})`;
-                    } else if (schedule.trigger.type === 'file-command') {
-                        triggerDesc = `文件指令: ${schedule.trigger.config.filePath}`;
+                    if (trigger.type === 'file-watch') {
+                        triggerDesc = `文件监听: ${triggerConfig.filePath || ''}`;
+                    } else if (trigger.type === 'cron') {
+                        triggerDesc = `定时启动: ${triggerConfig.expression || ''}`;
+                    } else if (trigger.type === 'trigger-ride') {
+                        triggerDesc = `触发发车: ${triggerConfig.username || ''} (${triggerConfig.uid || ''})`;
+                    } else if (trigger.type === 'file-command') {
+                        triggerDesc = `文件指令: ${triggerConfig.filePath || ''}`;
                     }
-                    
                     let actionDesc = '';
-                    if (schedule.action.type === 'start-dragon') {
-                        actionDesc = `启动一条龙: ${schedule.action.config.configName}`;
-                    } else if (schedule.action.type === 'auto-online') {
-                        actionDesc = `自动上线: ${schedule.action.config.username} (${schedule.action.config.uid})`;
-                    } else if (schedule.action.type === 'start-online-dragon') {
-                        actionDesc = `启动联机一条龙: ${schedule.action.config.configName}`;
-                    } else if (schedule.action.type === 'execute-file') {
-                        actionDesc = `执行文件: ${schedule.action.config.filePath}`;
+                    if (action.type === 'start-dragon') {
+                        actionDesc = `启动一条龙: ${actionConfig.configName || ''}`;
+                    } else if (action.type === 'auto-online') {
+                        actionDesc = `自动上线: ${actionConfig.username || ''} (${actionConfig.uid || ''})`;
+                    } else if (action.type === 'start-online-dragon') {
+                        actionDesc = `启动联机一条龙: ${actionConfig.configName || ''}`;
+                    } else if (action.type === 'execute-file') {
+                        actionDesc = `执行文件: ${actionConfig.filePath || ''}`;
                     }
-                    
-                    return `
-                        <div class="schedule-item" data-id="${schedule.id}" onclick="selectSchedule('${schedule.id}')">
-                            <div>
-                                <div style="font-weight: bold; margin-bottom: 5px;">${schedule.name}</div>
-                                <div style="font-size: 0.8rem; color: #666; margin-bottom: 3px;">
-                                    ${triggerDesc}
-                                </div>
-                                <div style="font-size: 0.8rem; color: #666;">
-                                    ${actionDesc}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
+                    const scheduleIdValue = String(schedule.id || '');
+                    const item = document.createElement('div');
+                    item.className = 'schedule-item';
+                    item.dataset.id = scheduleIdValue;
+                    item.addEventListener('click', () => selectSchedule(scheduleIdValue));
+                    const content = document.createElement('div');
+                    const name = document.createElement('div');
+                    name.style.cssText = 'font-weight:bold;margin-bottom:5px';
+                    name.textContent = String(schedule.name || '未命名调度');
+                    const triggerElement = document.createElement('div');
+                    triggerElement.style.cssText = 'font-size:0.8rem;color:#666;margin-bottom:3px';
+                    triggerElement.textContent = triggerDesc;
+                    const actionElement = document.createElement('div');
+                    actionElement.style.cssText = 'font-size:0.8rem;color:#666';
+                    actionElement.textContent = actionDesc;
+                    content.append(name, triggerElement, actionElement);
+                    item.appendChild(content);
+                    listEl.appendChild(item);
+                });
             }
         }
 
@@ -1556,6 +3004,23 @@
                     }
                 }
             });
+        }
+
+        function switchMobileFeature(feature, button) {
+            const main = document.getElementById('main-container');
+            if (!main) return;
+            main.classList.remove('feature-online', 'feature-info', 'feature-desktop', 'feature-remote');
+            main.classList.add(`feature-${feature}`);
+            document.querySelectorAll('.feature-nav button').forEach(item => item.classList.toggle('active', item === button));
+
+            if (feature === 'online') {
+                switchTab('online');
+            } else if (feature === 'desktop') {
+                switchTab('process');
+            } else if (feature === 'info') {
+                const roomButton = document.querySelector('.mobile-nav-btn[onclick*="rooms"]');
+                mobileShowTab('rooms', roomButton);
+            }
         }
 
         function switchTab(tabName) {

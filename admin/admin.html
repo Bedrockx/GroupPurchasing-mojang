@@ -1873,6 +1873,9 @@
     <script>
         let socket;
         const SERVER_URL = 'http://121.41.2.163:41013';
+        let activeUploadContinuation = null;
+        let activeUploadInProgress = false;
+        let activeUploadComplete = null;
         let currentAccount = null;
         let currentPassword = null;
         let currentUser = null; // 当前操作的用户
@@ -2062,6 +2065,16 @@
             
             socket.on('connect_error', function(error) {
                 console.error('Connection error:', error);
+            });
+
+            socket.on('disconnect', function() {
+                if (!activeUploadInProgress) return;
+                activeUploadContinuation = null;
+                activeUploadInProgress = false;
+                activeUploadComplete = null;
+
+                const progressText = document.getElementById('upload-progress-text');
+                if (progressText) progressText.textContent = '上传已中断，请重新上传';
             });
             
             // 统一监听消息事件
@@ -2589,6 +2602,11 @@
                     // 重新加载用户信息
                     loadUserInfo();
                 } else if (data.type === 'error') {
+                    if (activeUploadInProgress) {
+                        activeUploadContinuation = null;
+                        activeUploadInProgress = false;
+                        activeUploadComplete = null;
+                    }
                     showAlertModal('错误', '错误：' + data.message);
                 } else if (data.type === 'points-ranking') {
                     console.log('收到积分排行榜数据:', data.data);
@@ -2653,13 +2671,23 @@
                     handleUpdateVersionsResult(data.data);
                 } else if (data.type === 'upload-client-package-result' || data.type === 'upload-group-purchasing-package-result' || data.type === 'upload-asar-result') {
                     // 处理上传结果
+                    activeUploadContinuation = null;
+                    activeUploadInProgress = false;
+                    const uploadComplete = activeUploadComplete;
+                    activeUploadComplete = null;
                     handleUploadResult(data.data);
+                    if (typeof uploadComplete === 'function') uploadComplete();
                 } else if (data.type === 'upload-progress') {
                     // 处理上传进度
                     const progressBar = document.getElementById('upload-progress-bar');
                     const progressText = document.getElementById('upload-progress-text');
                     progressBar.value = data.data.progress;
                     progressText.textContent = `上传中... ${data.data.progress}%`;
+                    if (activeUploadContinuation) {
+                        const continueUpload = activeUploadContinuation;
+                        activeUploadContinuation = null;
+                        setTimeout(continueUpload, 0);
+                    }
                 }
             });
         }
@@ -3015,8 +3043,14 @@
             });
         }
 
-        // 上传文件（带限速 350KB/s）
+        // 上传文件：每个分片等待服务端流量调度确认后再继续。
         function uploadFile(file, type, onComplete) {
+            if (activeUploadInProgress) {
+                showAlertModal('提示', '已有文件正在上传，请等待当前上传完成');
+                return;
+            }
+            activeUploadInProgress = true;
+            activeUploadComplete = onComplete;
             const CHUNK_SIZE = 350 * 1024; // 350KB per chunk
             const totalSize = file.size;
             let offset = 0;
@@ -3032,6 +3066,7 @@
             progressDiv.style.display = 'block';
             progressBar.value = 0;
             progressText.textContent = `上传中... 0%`;
+            activeUploadContinuation = null;
 
             function sendChunk() {
                 const chunk = file.slice(offset, offset + CHUNK_SIZE);
@@ -3075,8 +3110,15 @@
 
                     if (!isLastChunk) {
                         offset += CHUNK_SIZE;
-                        setTimeout(sendChunk, 1000); // Rate limit: 1 second between chunks
+                        activeUploadContinuation = sendChunk;
                     }
+                };
+
+                reader.onerror = function() {
+                    activeUploadContinuation = null;
+                    activeUploadInProgress = false;
+                    activeUploadComplete = null;
+                    showAlertModal('错误', '读取上传文件失败');
                 };
 
                 reader.readAsDataURL(chunk);

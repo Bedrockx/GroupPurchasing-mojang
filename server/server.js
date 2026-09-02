@@ -52,9 +52,21 @@ const DATA_CHANGE_DELAY = 1000;
 const LOGIN_KEY_TTL = 120 * 1000;
 const LOGIN_MAX_ATTEMPTS = 3;
 
-// 带宽限制配置
-const MAX_BANDWIDTH = 2 * 1024 * 1024; // 2Mbps = 2,097,152 bits/s
-const MAX_BYTES_PER_SECOND = 350 * 1024; // 350KB/s
+// 流量调度配置：上行和下行各 3Mbps，应用层按 330KiB/s 控制并预留协议开销。
+const TRAFFIC_RATE_BYTES_PER_SECOND = 330 * 1024;
+const TRAFFIC_BURST_BYTES = 330 * 1024;
+const TRAFFIC_CHUNK_BYTES = 128 * 1024;
+const TRAFFIC_MAX_QUEUE_BYTES = 16 * 1024 * 1024;
+const TRAFFIC_TRANSFER_TIMEOUT = 2 * 60 * 1000;
+const TRAFFIC_PRIORITY = {
+  PACKAGE: 10,
+  TEXT: 20,
+  IMAGE: 20
+};
+const REMOTE_CHUNK_BYTES = 96 * 1024;
+const REMOTE_MAX_TRANSFER_BYTES = 32 * 1024 * 1024;
+const REMOTE_MAX_CHUNKS = 2000;
+const REMOTE_MAX_PENDING_COMMANDS = 16;
 
 // 令牌桶类 - 用于全局带宽限制
 class TokenBucket {
@@ -85,110 +97,283 @@ class TokenBucket {
   }
 }
 
-// 创建全局令牌桶（所有请求共享）
-const globalTokenBucket = new TokenBucket(MAX_BYTES_PER_SECOND * 2, MAX_BYTES_PER_SECOND); // 容量为2秒的流量
-
-// 带宽限制中间件 - 全局限速版（所有人速度总和）
-function bandwidthLimitMiddleware(req, res, next) {
-  log(`收到请求: ${req.path}`, LOG_TYPES.INFO, { path: req.path, type: 'bandwidth' });
-  
-  // 只对静态文件请求进行限速
-  const isMojangZipRequest = req.path === '/client/mojang.zip' || 
-                           req.path === '/server/client/mojang.zip' ||
-                           req.path === '/mojang.zip' ||
-                           req.path.includes('mojang.zip'); // 更宽松的匹配
-  
-  if (isMojangZipRequest) {
-    log(`带宽限制应用于: ${req.path}`, LOG_TYPES.INFO, { path: req.path, type: 'bandwidth' });
-    log(`限速配置: 350KB/s (全局总和)`, LOG_TYPES.INFO, { speed: '350KB/s', type: 'bandwidth', mode: 'global' });
-    
-    // 使用异步队列等待令牌，避免忙等阻塞 Node.js 事件循环
-    const originalWrite = res.write;
-    const originalEnd = res.end;
-    const queue = [];
-    let draining = false;
-    let ended = false;
-    let endArgs = null;
-    let bytesSent = 0;
-    let startTime = Date.now();
-    let lastLogTime = Date.now();
-    let responseEnded = false;
-
-    res.on('finish', () => {
-      responseEnded = true;
-      log(`响应已结束: ${req.path}`, LOG_TYPES.INFO, { path: req.path, type: 'bandwidth' });
-    });
-
-    const drain = () => {
-      if (draining || responseEnded) return;
-      draining = true;
-      const step = () => {
-        if (responseEnded) {
-          queue.length = 0;
-          draining = false;
-          return;
-        }
-        const item = queue[0];
-        if (!item) {
-          draining = false;
-          if (ended && endArgs) {
-            const args = endArgs;
-            endArgs = null;
-            originalEnd.apply(res, args);
-          }
-          return;
-        }
-
-        const remaining = item.buffer.length - item.offset;
-        const size = Math.min(remaining, globalTokenBucket.capacity);
-        if (!globalTokenBucket.consume(size)) {
-          const deficit = size - globalTokenBucket.tokens;
-          setTimeout(step, Math.max(10, Math.ceil(deficit / globalTokenBucket.fillRate * 1000)));
-          return;
-        }
-
-        const part = item.buffer.subarray(item.offset, item.offset + size);
-        item.offset += size;
-        bytesSent += size;
-        originalWrite.call(res, part);
-        if (item.offset >= item.buffer.length) {
-          queue.shift();
-          if (item.callback) item.callback();
-        }
-
-        const now = Date.now();
-        if (now - lastLogTime > 2000) {
-          const elapsed = (now - startTime) / 1000;
-          const currentSpeed = bytesSent / elapsed / 1024;
-          log(`当前速度: ${currentSpeed.toFixed(2)} KB/s, 已发送: ${(bytesSent/1024/1024).toFixed(2)} MB`, LOG_TYPES.INFO, {
-            speed: `${currentSpeed.toFixed(2)} KB/s`, sent: `${(bytesSent/1024/1024).toFixed(2)} MB`, type: 'bandwidth', mode: 'global'
-          });
-          lastLogTime = now;
-        }
-        setImmediate(step);
-      };
-      step();
-    };
-
-    res.write = function(chunk, encoding, callback) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
-      queue.push({ buffer, offset: 0, callback: typeof callback === 'function' ? callback : null });
-      drain();
-      return queue.length < 16;
-    };
-
-    res.end = function(chunk, encoding, callback) {
-      if (chunk) res.write(chunk, encoding);
-      ended = true;
-      endArgs = typeof callback === 'function' ? [callback] : [];
-      drain();
-      return res;
-    };
-    
-    next();
-  } else {
-    next();
+/**
+ * 统一流量调度器。每个任务按优先级排队，同优先级任务使用轮询，避免单个传输独占带宽。
+ */
+class TrafficScheduler {
+  constructor(name, rateBytesPerSecond = TRAFFIC_RATE_BYTES_PER_SECOND, burstBytes = TRAFFIC_BURST_BYTES) {
+    this.name = name;
+    this.bucket = new TokenBucket(burstBytes, rateBytesPerSecond);
+    this.jobs = new Map();
+    this.nextJobSequence = 1;
+    this.cursorByPriority = new Map();
+    this.priorityCycle = [
+      TRAFFIC_PRIORITY.PACKAGE,
+      TRAFFIC_PRIORITY.PACKAGE,
+      TRAFFIC_PRIORITY.PACKAGE,
+      TRAFFIC_PRIORITY.PACKAGE,
+      TRAFFIC_PRIORITY.TEXT
+    ];
+    this.priorityCursor = 0;
+    this.queuedBytes = 0;
+    this.running = false;
   }
+
+  enqueue({ jobId, priority, bytes, send, onError, onSent }) {
+    if (!jobId || !Number.isInteger(bytes) || bytes <= 0 || bytes > this.bucket.capacity || typeof send !== 'function') {
+      return false;
+    }
+    if (this.queuedBytes + bytes > TRAFFIC_MAX_QUEUE_BYTES) return false;
+
+    let job = this.jobs.get(jobId);
+    if (!job) {
+      job = {
+        id: jobId,
+        priority: Number.isFinite(priority) ? priority : TRAFFIC_PRIORITY.TEXT,
+        queue: [],
+        queuedBytes: 0,
+        closed: false,
+        sequence: this.nextJobSequence++
+      };
+      this.jobs.set(jobId, job);
+    }
+
+    job.queue.push({ bytes, send, onError, onSent });
+    job.queuedBytes += bytes;
+    this.queuedBytes += bytes;
+    this.pump();
+    return true;
+  }
+
+  close(jobId) {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    job.closed = true;
+    this.removeIfFinished(job);
+  }
+
+  cancel(jobId) {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    this.queuedBytes -= job.queuedBytes;
+    this.jobs.delete(jobId);
+  }
+
+  removeIfFinished(job) {
+    if (job.closed && job.queue.length === 0) this.jobs.delete(job.id);
+  }
+
+  selectJob() {
+    const readyJobs = Array.from(this.jobs.values()).filter(job => job.queue.length > 0);
+    if (readyJobs.length === 0) return null;
+    const readyPriorities = new Set(readyJobs.map(job => job.priority));
+    let priority = null;
+    for (let i = 0; i < this.priorityCycle.length; i++) {
+      const candidate = this.priorityCycle[this.priorityCursor % this.priorityCycle.length];
+      this.priorityCursor = (this.priorityCursor + 1) % this.priorityCycle.length;
+      if (readyPriorities.has(candidate)) {
+        priority = candidate;
+        break;
+      }
+    }
+    if (priority === null) priority = Math.min(...readyPriorities);
+    const candidates = readyJobs.filter(job => job.priority === priority).sort((a, b) => a.sequence - b.sequence);
+    const cursor = this.cursorByPriority.get(priority) || 0;
+    const job = candidates[cursor % candidates.length];
+    this.cursorByPriority.set(priority, (cursor + 1) % candidates.length);
+    return job;
+  }
+
+  pump() {
+    if (this.running) return;
+    this.running = true;
+
+    const step = () => {
+      this.bucket.refill();
+      const job = this.selectJob();
+      if (!job) {
+        this.running = false;
+        return;
+      }
+
+      const item = job.queue[0];
+      if (this.bucket.tokens < item.bytes) {
+        const deficit = item.bytes - this.bucket.tokens;
+        setTimeout(step, Math.max(5, Math.ceil(deficit / this.bucket.fillRate * 1000)));
+        return;
+      }
+
+      job.queue.shift();
+      job.queuedBytes -= item.bytes;
+      this.queuedBytes -= item.bytes;
+      this.bucket.consume(item.bytes);
+
+      try {
+        item.send();
+        if (typeof item.onSent === 'function') item.onSent();
+      } catch (error) {
+        if (typeof item.onError === 'function') item.onError(error);
+      }
+
+      this.removeIfFinished(job);
+      setImmediate(step);
+    };
+
+    step();
+  }
+}
+
+const egressScheduler = new TrafficScheduler('egress');
+const ingressScheduler = new TrafficScheduler('ingress');
+
+// 远程控制传输只在服务端转发，不在内存中拼接完整文件。
+const remoteTransfers = new Map();
+const remoteCommandTimers = new Map();
+
+function makeRemoteTransferKey(senderSocketId, targetSocketId, requestId) {
+  return `${senderSocketId}:${targetSocketId}:${requestId}`;
+}
+
+function makeRemoteCommandKey(mobileSocketId, requestId) {
+  return `${mobileSocketId}:${requestId}`;
+}
+
+function getRemoteCommand(mobileSocketId, requestId, desktopSocketId) {
+  const command = remoteCommandTimers.get(makeRemoteCommandKey(mobileSocketId, requestId));
+  if (!command || (desktopSocketId && command.desktopSocketId !== desktopSocketId)) return null;
+  return command;
+}
+
+function clearRemoteCommand(mobileSocketId, requestId, desktopSocketId) {
+  const key = makeRemoteCommandKey(mobileSocketId, requestId);
+  const command = remoteCommandTimers.get(key);
+  if (!command || (desktopSocketId && command.desktopSocketId !== desktopSocketId)) return false;
+  clearTimeout(command.timer);
+  remoteCommandTimers.delete(key);
+  return true;
+}
+
+function cancelRemoteTransfer(key, message, notify = true) {
+  const transfer = remoteTransfers.get(key);
+  if (!transfer) return;
+  remoteTransfers.delete(key);
+  ingressScheduler.cancel(transfer.ingressJobId);
+  egressScheduler.cancel(transfer.egressJobId);
+  clearRemoteCommand(transfer.mobileSocketId, transfer.requestId, transfer.desktopSocketId);
+  if (notify) {
+    const mobileSocket = io.sockets.sockets.get(transfer.mobileSocketId);
+    if (mobileSocket?.connected) emitMobileCommandError(mobileSocket, transfer.requestId, message || '远程数据传输失败');
+  }
+}
+
+function cleanupRemoteTransfers() {
+  const now = Date.now();
+  for (const [key, transfer] of remoteTransfers.entries()) {
+    if (now - transfer.updatedAt > TRAFFIC_TRANSFER_TIMEOUT) cancelRemoteTransfer(key, '远程数据传输超时');
+  }
+}
+setInterval(cleanupRemoteTransfers, 30000).unref();
+
+function getPackageRouteType(req) {
+  const requestPath = req.path;
+  if (requestPath === '/client/mojang.zip' ||
+      requestPath === '/server/client/mojang.zip' ||
+      requestPath === '/mojang.zip' ||
+      requestPath === '/JsScript/ArtifactsGroupPurchasing.zip') {
+    return 'package';
+  }
+  return null;
+}
+
+// HTTP 大文件进入统一出口调度器，普通 API 和控制消息不经过此队列。
+function bandwidthLimitMiddleware(req, res, next) {
+  const routeType = getPackageRouteType(req);
+  if (!routeType) {
+    next();
+    return;
+  }
+
+  const jobId = `http:${Date.now()}:${crypto.randomBytes(8).toString('hex')}`;
+  const originalWrite = res.write.bind(res);
+  const originalEnd = res.end.bind(res);
+  let ended = false;
+  let pendingChunks = 0;
+  let endArgs = null;
+  let responseClosed = false;
+
+  const finishResponse = () => {
+    if (!ended || pendingChunks > 0 || responseClosed) return;
+    egressScheduler.close(jobId);
+    originalEnd(...(endArgs || []));
+    endArgs = null;
+  };
+
+  const enqueueBuffer = (buffer, callback) => {
+    if (!buffer.length) {
+      if (typeof callback === 'function') queueMicrotask(callback);
+      return true;
+    }
+    for (let offset = 0; offset < buffer.length; offset += TRAFFIC_CHUNK_BYTES) {
+      const chunk = buffer.subarray(offset, Math.min(offset + TRAFFIC_CHUNK_BYTES, buffer.length));
+      const isLastPart = offset + chunk.length >= buffer.length;
+      pendingChunks++;
+      const accepted = egressScheduler.enqueue({
+        jobId,
+        priority: TRAFFIC_PRIORITY.PACKAGE,
+        bytes: chunk.length,
+        send: () => originalWrite(chunk),
+        onSent: () => {
+          pendingChunks--;
+          if (isLastPart && typeof callback === 'function') callback();
+          res.emit('drain');
+          finishResponse();
+        },
+        onError: error => {
+          responseClosed = true;
+          res.destroy(error);
+        }
+      });
+      if (!accepted) {
+        responseClosed = true;
+        res.destroy(new Error('出口流量队列已满'));
+        return false;
+      }
+    }
+    return true;
+  };
+
+  res.write = (chunk, encoding, callback) => {
+    if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = undefined;
+    }
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+    const accepted = enqueueBuffer(buffer, callback);
+    return accepted && egressScheduler.queuedBytes < TRAFFIC_CHUNK_BYTES * 8;
+  };
+
+  res.end = (chunk, encoding, callback) => {
+    if (typeof chunk === 'function') {
+      callback = chunk;
+      chunk = undefined;
+      encoding = undefined;
+    } else if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = undefined;
+    }
+    if (chunk) enqueueBuffer(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+    ended = true;
+    endArgs = typeof callback === 'function' ? [callback] : [];
+    finishResponse();
+    return res;
+  };
+
+  res.once('close', () => {
+    responseClosed = true;
+    egressScheduler.cancel(jobId);
+  });
+
+  next();
 }
 
 // 数据文件路径
@@ -209,7 +394,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const VERSION_PATTERN = /^\d+(?:\.\d+){1,3}$/;
 
 function createUploadStorage() {
-  return { chunks: [], totalSize: 0, fileName: '', ownerSocketId: null, startedAt: 0 };
+  return { chunks: [], totalSize: 0, fileName: '', ownerSocketId: null, startedAt: 0, updatedAt: 0, trafficJobId: null };
 }
 
 // 默认版本号
@@ -234,11 +419,14 @@ const downloadLocks = {
 };
 
 function resetUploadStorageState(storage) {
+  if (storage.trafficJobId) ingressScheduler.cancel(storage.trafficJobId);
   storage.chunks = [];
   storage.totalSize = 0;
   storage.fileName = '';
   storage.ownerSocketId = null;
   storage.startedAt = 0;
+  storage.updatedAt = 0;
+  storage.trafficJobId = null;
 }
 
 function resetUploadStorage(key) {
@@ -246,8 +434,45 @@ function resetUploadStorage(key) {
     resetUploadStorageState(uploadStorage[key]);
     downloadLocks[key === 'clientPackage' ? 'client' : 'groupPurchasing'] = false;
   } else {
+    if (uploadStorage[key]?.trafficJobId) ingressScheduler.cancel(uploadStorage[key].trafficJobId);
     delete uploadStorage[key];
   }
+}
+
+function scheduleUploadIngress(storage, storageKey, socketId, bytes, isLastChunk) {
+  if (!Number.isInteger(bytes) || bytes <= 0) return Promise.reject(new Error('上传分片大小无效'));
+  if (!storage.trafficJobId) storage.trafficJobId = `upload:${socketId}:${storageKey}:${storage.startedAt || Date.now()}`;
+  const jobId = storage.trafficJobId;
+  const partCount = Math.ceil(bytes / TRAFFIC_CHUNK_BYTES);
+  return new Promise((resolve, reject) => {
+    let remaining = partCount;
+    let failed = false;
+    const fail = error => {
+      if (failed) return;
+      failed = true;
+      ingressScheduler.cancel(jobId);
+      reject(error instanceof Error ? error : new Error('上传入口调度失败'));
+    };
+    for (let offset = 0; offset < bytes; offset += TRAFFIC_CHUNK_BYTES) {
+      const partSize = Math.min(TRAFFIC_CHUNK_BYTES, bytes - offset);
+      const accepted = ingressScheduler.enqueue({
+        jobId,
+        priority: TRAFFIC_PRIORITY.PACKAGE,
+        bytes: partSize,
+        send: () => {},
+        onSent: () => {
+          remaining--;
+          if (!failed && remaining === 0) resolve();
+        },
+        onError: fail
+      });
+      if (!accepted) {
+        fail(new Error('服务端上传流量队列已满'));
+        return;
+      }
+    }
+    if (isLastChunk) ingressScheduler.close(jobId);
+  });
 }
 
 // 下载跟踪（用于终止正在进行的下载）
@@ -269,14 +494,15 @@ function terminateDownloads(type) {
     const downloadInfo = activeDownloads.get(downloadId);
     if (downloadInfo && downloadInfo.response) {
       try {
-        // 向客户端发送终止信号
-        downloadInfo.response.writeHead(409, {
-          'Content-Type': 'application/json'
-        });
-        downloadInfo.response.end(JSON.stringify({
-          error: 'download-terminated',
-          message: '上传开始，下载已终止'
-        }));
+        const response = downloadInfo.response;
+        if (response.headersSent) {
+          response.destroy(new Error('上传开始，下载已终止'));
+        } else {
+          response.status(409).json({
+            error: 'download-terminated',
+            message: '上传开始，下载已终止'
+          });
+        }
         log(`终止下载: ${downloadId} (${type})`, LOG_TYPES.INFO);
       } catch (error) {
         log(`终止下载失败: ${downloadId}, 错误: ${error.message}`, LOG_TYPES.ERROR);
@@ -291,7 +517,6 @@ function terminateDownloads(type) {
 }
 
 // 上传时间跟踪
-let lastUploadTime = 0;
 
 // 管理员账号（从 data/adminAccounts.json 读取）
 let adminAccounts = {};
@@ -632,7 +857,7 @@ function isValidRoomName(value) {
 function validateUploadChunk(data, storage, expectedFileName, socket) {
   const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize } = data || {};
   let hasActiveUpload = Boolean(storage.ownerSocketId && storage.startedAt);
-  if (hasActiveUpload && Date.now() - storage.startedAt > UPLOAD_TIMEOUT) {
+  if (hasActiveUpload && Date.now() - (storage.updatedAt || storage.startedAt) > UPLOAD_TIMEOUT) {
     resetUploadStorageState(storage);
     hasActiveUpload = false;
   }
@@ -656,11 +881,13 @@ function validateUploadChunk(data, storage, expectedFileName, socket) {
     storage.fileName = fileName;
     storage.ownerSocketId = socket.id;
     storage.startedAt = Date.now();
+    storage.updatedAt = storage.startedAt;
   }
   const expectedOffset = storage.chunks.reduce((sum, chunk) => sum + chunk.data.length, 0);
   if (offset !== expectedOffset) return false;
   if (storage.chunks.length >= MAX_UPLOAD_CHUNKS) return false;
   storage.chunks.push({ offset, data: buffer });
+  storage.updatedAt = Date.now();
   return true;
 }
 
@@ -1561,14 +1788,17 @@ function handleUserLogin(data, socket) {
             // 计算连接ID（支持自定义名称和自动重命名）
             const userConnection = userConnections.get(accountId);
             const userConnectionName = loginInfo.connectionName || undefined;
+            const existingNames = userConnection.connections.map(conn => conn.connectionId);
             let connectionId;
             
             if (userConnectionName === undefined || userConnectionName === '') {
               // 未填写自定义名称，使用默认格式：连接1、连接2、连接3
-              connectionId = `连接${userConnection.connections.length + 1}`;
+              let counter = 1;
+              do {
+                connectionId = `连接${counter++}`;
+              } while (existingNames.includes(connectionId));
             } else {
               // 用户填写了自定义名称，检查是否有重名
-              const existingNames = userConnection.connections.map(conn => conn.connectionId);
               let baseName = userConnectionName;
               let counter = 1;
               connectionId = baseName;
@@ -3206,14 +3436,27 @@ async function handleReceivedMessage(socket, message) {
         case 'schedules-list':
           // 转发调度列表给移动端
           if (message.targetSocketId) {
+            const senderData = getConnectionBySocketId(socket.id);
+            const mobileData = getConnectionBySocketId(message.targetSocketId);
             const mobileSocket = io.sockets.sockets.get(message.targetSocketId);
-            if (mobileSocket) {
-              mobileSocket.emit('message', message);
+            const schedules = message.data?.schedules;
+            if (senderData && !senderData.isAdmin && !senderData.connection?.isMobile &&
+                mobileData && !mobileData.isAdmin && mobileData.connection?.isMobile &&
+                senderData.accountId === mobileData.accountId && mobileSocket && Array.isArray(schedules)) {
+              mobileSocket.emit('message', {
+                type: 'schedules-list',
+                data: { schedules: schedules.slice(0, 500) }
+              });
+            } else {
+              log(`拒绝无效的调度列表回传: socket=${socket.id}, target=${message.targetSocketId}`, LOG_TYPES.WARN);
             }
           }
           break;
         case 'mobile-command':
           await handleMobileCommand(message, socket);
+          break;
+        case 'mobile-command-data':
+          handleMobileCommandData(message, socket);
           break;
         case 'mobile-command-execution-result':
           handleMobileCommandExecutionResult(message, socket);
@@ -4150,8 +4393,164 @@ function handleGetUserConnectionsForMobile(socket) {
 }
 
 // 处理移动端命令
+function emitMobileCommandError(socket, requestId, message) {
+  socket.emit('message', {
+    type: 'mobile-command-result',
+    data: { success: false, requestId: requestId || '', message }
+  });
+}
+
+function emitRemoteChunkAck(socket, requestId, sequence, success, message = '') {
+  if (!socket?.connected) return;
+  socket.emit('message', {
+    type: 'mobile-command-upload-ack',
+    requestId,
+    sequence,
+    success: Boolean(success),
+    message
+  });
+}
+
+function resolveMobileTarget(socket, targetConnectionId) {
+  const senderData = getConnectionBySocketId(socket.id);
+  if (!senderData || senderData.isAdmin || !senderData.connection?.isMobile) return null;
+  const accountConnection = userConnections.get(senderData.accountId);
+  const targetConn = accountConnection?.connections.find(conn => conn.connectionId === targetConnectionId);
+  if (!targetConn || targetConn.isMobile) return null;
+  const targetSocket = io.sockets.sockets.get(targetConn.socketId);
+  if (!targetSocket) return null;
+  return { senderData, targetConn, targetSocket };
+}
+
+// 桌面端回传的截图、日志分片和元数据统一走此通道。
+function handleMobileCommandData(message, socket) {
+  const { targetSocketId, requestId, dataType, sequence, totalChunks, chunk, payload } = message || {};
+  const senderData = getConnectionBySocketId(socket.id);
+  const mobileData = targetSocketId ? getConnectionBySocketId(targetSocketId) : null;
+  const mobileSocket = targetSocketId ? io.sockets.sockets.get(targetSocketId) : null;
+  if (!senderData || senderData.isAdmin || !mobileSocket || !mobileData || mobileData.isAdmin ||
+      !mobileData.connection?.isMobile || senderData.accountId !== mobileData.accountId) {
+    log(`拒绝无效的远程数据回传: socket=${socket.id}, target=${targetSocketId}`, LOG_TYPES.WARN);
+    return;
+  }
+  if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 96) return;
+  if (!getRemoteCommand(targetSocketId, requestId, socket.id)) {
+    log(`拒绝未绑定的远程数据回传: socket=${socket.id}, target=${targetSocketId}, request=${requestId}`, LOG_TYPES.WARN);
+    if (payload === undefined) emitRemoteChunkAck(socket, requestId, sequence, false, '远程请求已失效');
+    return;
+  }
+
+  if (payload !== undefined) {
+    let payloadSize = 0;
+    try {
+      payloadSize = Buffer.byteLength(JSON.stringify(payload));
+    } catch (_) {
+      clearRemoteCommand(targetSocketId, requestId, socket.id);
+      emitMobileCommandError(mobileSocket, requestId, '远程元数据无效');
+      return;
+    }
+    if (payloadSize > 256 * 1024) {
+      clearRemoteCommand(targetSocketId, requestId, socket.id);
+      emitMobileCommandError(mobileSocket, requestId, '远程元数据过大');
+      return;
+    }
+    const waitsForBinary = dataType === 'screenshot-meta' || dataType === 'log-tail-meta';
+    mobileSocket.emit('message', { type: 'mobile-command-data', requestId, dataType: dataType || 'json', payload, done: !waitsForBinary });
+    if (!waitsForBinary) clearRemoteCommand(targetSocketId, requestId, socket.id);
+    return;
+  }
+
+  const buffer = Buffer.isBuffer(chunk) ? chunk : (chunk instanceof Uint8Array ? Buffer.from(chunk) : null);
+  if (!buffer || !buffer.length || buffer.length > REMOTE_CHUNK_BYTES ||
+      !Number.isInteger(sequence) || sequence < 0 || !Number.isInteger(totalChunks) ||
+      totalChunks < 1 || totalChunks > REMOTE_MAX_CHUNKS || sequence >= totalChunks) {
+    clearRemoteCommand(targetSocketId, requestId, socket.id);
+    emitRemoteChunkAck(socket, requestId, sequence, false, '远程数据分片无效');
+    emitMobileCommandError(mobileSocket, requestId, '远程数据分片无效');
+    return;
+  }
+  const key = makeRemoteTransferKey(socket.id, targetSocketId, requestId);
+  let transfer = remoteTransfers.get(key);
+  if (!transfer) {
+    transfer = {
+      desktopSocketId: socket.id,
+      mobileSocketId: targetSocketId,
+      requestId,
+      totalChunks,
+      received: new Set(),
+      forwarded: 0,
+      sent: 0,
+      bytes: 0,
+      updatedAt: Date.now(),
+      ingressJobId: `incoming:${key}`,
+      egressJobId: `remote:${key}`,
+      allReceived: false,
+      failed: false
+    };
+    remoteTransfers.set(key, transfer);
+  }
+  if (transfer.totalChunks !== totalChunks || transfer.received.has(sequence) ||
+      transfer.bytes + buffer.length > REMOTE_MAX_TRANSFER_BYTES) {
+    emitRemoteChunkAck(socket, requestId, sequence, false, '远程数据超出限制');
+    cancelRemoteTransfer(key, '远程数据超出限制');
+    return;
+  }
+  transfer.received.add(sequence);
+  transfer.bytes += buffer.length;
+  transfer.updatedAt = Date.now();
+  const completesInput = transfer.received.size === totalChunks;
+  if (completesInput) transfer.allReceived = true;
+  const forward = () => {
+    if (transfer.failed) return false;
+    const accepted = egressScheduler.enqueue({
+      jobId: transfer.egressJobId,
+      priority: dataType === 'image' ? TRAFFIC_PRIORITY.IMAGE : TRAFFIC_PRIORITY.TEXT,
+      bytes: buffer.length,
+      send: () => mobileSocket.emit('message', {
+        type: 'mobile-command-data', requestId, dataType: dataType || 'binary', sequence, totalChunks, chunk: buffer, done: completesInput
+      }),
+      onSent: () => {
+        transfer.sent++;
+        transfer.updatedAt = Date.now();
+        if (transfer.sent === transfer.totalChunks) {
+          remoteTransfers.delete(key);
+          clearRemoteCommand(targetSocketId, requestId, socket.id);
+        }
+      },
+      onError: () => cancelRemoteTransfer(key, '远程数据转发失败')
+    });
+    if (!accepted) {
+      transfer.failed = true;
+      cancelRemoteTransfer(key, '服务端传输队列已满');
+      return false;
+    }
+    transfer.forwarded++;
+    if (transfer.allReceived && transfer.forwarded === transfer.totalChunks) {
+      egressScheduler.close(transfer.egressJobId);
+    }
+    return true;
+  };
+  const accepted = ingressScheduler.enqueue({
+    jobId: transfer.ingressJobId,
+    priority: dataType === 'image' ? TRAFFIC_PRIORITY.IMAGE : TRAFFIC_PRIORITY.TEXT,
+    bytes: buffer.length,
+    send: () => {
+      const forwarded = forward();
+      emitRemoteChunkAck(socket, requestId, sequence, forwarded, forwarded ? '' : '服务端传输队列已满');
+    },
+    onError: () => cancelRemoteTransfer(key, '入口流量调度失败')
+  });
+  if (!accepted) {
+    transfer.failed = true;
+    emitRemoteChunkAck(socket, requestId, sequence, false, '服务端入口队列已满');
+    cancelRemoteTransfer(key, '服务端入口队列已满');
+    return;
+  }
+  if (completesInput) ingressScheduler.close(transfer.ingressJobId);
+}
+
 async function handleMobileCommand(message, socket) {
-  const { targetConnectionId, command, params } = message.data || {};
+  const { targetConnectionId, command, params, requestId } = message.data || {};
   
   // 获取当前socket的连接信息
   const socketData = getConnectionBySocketId(socket.id);
@@ -4166,20 +4565,9 @@ async function handleMobileCommand(message, socket) {
     return;
   }
   
-  // 查找目标连接
-  let targetSocket = null;
-  let targetConnData = null;
-  
-  const accountConnection = userConnections.get(socketData.accountId);
-  const targetConn = accountConnection?.connections.find(conn => conn.connectionId === targetConnectionId);
-  if (targetConn) {
-    targetSocket = io.sockets.sockets.get(targetConn.socketId);
-    targetConnData = {
-      accountId: socketData.accountId,
-      connection: targetConn,
-      userInfo: accountConnection.userInfo
-    };
-  }
+  const target = resolveMobileTarget(socket, targetConnectionId);
+  const targetSocket = target?.targetSocket;
+  const targetConnData = target ? { accountId: socketData.accountId, connection: target.targetConn, userInfo: userConnections.get(socketData.accountId)?.userInfo } : null;
   
   if (!targetSocket || !targetConnData) {
     socket.emit('message', {
@@ -4189,6 +4577,10 @@ async function handleMobileCommand(message, socket) {
         message: '未找到目标连接'
       }
     });
+    return;
+  }
+  if (command === 'execute-cmd' && (typeof params?.command !== 'string' || params.command.length === 0 || params.command.length > 8192)) {
+    emitMobileCommandError(socket, requestId, 'CMD命令长度无效');
     return;
   }
   
@@ -4272,6 +4664,52 @@ async function handleMobileCommand(message, socket) {
       });
       break;
     }
+    case 'get-screenshot':
+    case 'get-client-log-files':
+    case 'get-client-log-tail':
+    case 'get-bgi-log-files':
+    case 'get-bgi-log-tail':
+    case 'execute-cmd':
+    case 'reset-cmd':
+    case 'list-executables':
+    case 'run-executable':
+      {
+        const effectiveRequestId = requestId || `remote-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+        if (typeof effectiveRequestId !== 'string' || effectiveRequestId.length < 1 || effectiveRequestId.length > 96) {
+          emitMobileCommandError(socket, '', '远程请求编号无效');
+          break;
+        }
+        const commandKey = makeRemoteCommandKey(socket.id, effectiveRequestId);
+        const existingCommand = remoteCommandTimers.get(commandKey);
+        if (existingCommand) {
+          emitMobileCommandError(socket, effectiveRequestId, '远程请求编号重复');
+          break;
+        }
+        const pendingCommandCount = Array.from(remoteCommandTimers.values())
+          .filter(item => item.mobileSocketId === socket.id).length;
+        if (pendingCommandCount >= REMOTE_MAX_PENDING_COMMANDS) {
+          emitMobileCommandError(socket, effectiveRequestId, '待处理的远程请求过多');
+          break;
+        }
+        const timeout = setTimeout(() => {
+          remoteCommandTimers.delete(commandKey);
+          cancelRemoteTransfer(makeRemoteTransferKey(targetSocket.id, socket.id, effectiveRequestId), '', false);
+          if (socket.connected) emitMobileCommandError(socket, effectiveRequestId, '远程操作超时');
+        }, TRAFFIC_TRANSFER_TIMEOUT);
+        remoteCommandTimers.set(commandKey, {
+          timer: timeout,
+          desktopSocketId: targetSocket.id,
+          mobileSocketId: socket.id,
+          requestId: effectiveRequestId
+        });
+        targetSocket.emit('message', {
+          type: 'mobile-control-command',
+          command,
+          requestId: effectiveRequestId,
+          params: { ...(params || {}), targetSocketId: socket.id }
+        });
+        break;
+      }
     default:
       socket.emit('message', {
         type: 'mobile-command-result',
@@ -4285,7 +4723,7 @@ async function handleMobileCommand(message, socket) {
 
 // 将用户端实际处理结果转发给发起命令的移动端
 function handleMobileCommandExecutionResult(message, socket) {
-  const { targetSocketId, success, resultMessage, command } = message || {};
+  const { targetSocketId, success, resultMessage, command, requestId } = message || {};
   const senderData = getConnectionBySocketId(socket.id);
   const mobileSocket = targetSocketId ? io.sockets.sockets.get(targetSocketId) : null;
   const mobileData = targetSocketId ? getConnectionBySocketId(targetSocketId) : null;
@@ -4297,12 +4735,18 @@ function handleMobileCommandExecutionResult(message, socket) {
     return;
   }
 
+  if (requestId && !clearRemoteCommand(targetSocketId, requestId, socket.id)) {
+    log(`拒绝未绑定的移动端命令回报: socket=${socket.id}, target=${targetSocketId}, request=${requestId}`, LOG_TYPES.WARN);
+    return;
+  }
+
   mobileSocket.emit('message', {
     type: 'mobile-command-result',
     data: {
       success: Boolean(success),
       executed: true,
       command: command || '',
+      requestId: requestId || '',
       message: resultMessage || (success ? '目标连接已处理命令' : '目标连接处理命令失败')
     }
   });
@@ -6057,7 +6501,6 @@ async function handleUploadClientPackage(data, socket) {
       emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
       return;
     }
-
     if (isFirstChunk) {
       // 终止正在进行的用户端下载
       const terminatedCount = terminateDownloads('client');
@@ -6068,6 +6511,9 @@ async function handleUploadClientPackage(data, socket) {
       downloadLocks.client = true;
       log(`用户端下载已被锁定`, LOG_TYPES.INFO);
     }
+
+    const currentChunk = storage.chunks[storage.chunks.length - 1].data;
+    await scheduleUploadIngress(storage, 'clientPackage', socket.id, Buffer.byteLength(fileData, 'utf8'), isLastChunk);
 
     if (isLastChunk) {
       const fullBuffer = assembleUploadBuffer(storage);
@@ -6094,18 +6540,10 @@ async function handleUploadClientPackage(data, socket) {
 
       log(`用户端安装包已更新: ${filePath}, 大小: ${fullBuffer.length} bytes`, LOG_TYPES.INFO);
     } else {
-      const now = Date.now();
-      const timeSinceLastUpload = now - lastUploadTime;
-      const minInterval = 1000;
-      if (timeSinceLastUpload < minInterval) {
-        await new Promise(resolve => setTimeout(resolve, minInterval - timeSinceLastUpload));
-      }
-      lastUploadTime = Date.now();
-
       socket.emit('message', {
         type: 'upload-progress',
         data: {
-          progress: Math.round((offset / totalSize) * 100)
+          progress: Math.round(((offset + currentChunk.length) / totalSize) * 100)
         }
       });
     }
@@ -6154,7 +6592,6 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
       emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
       return;
     }
-
     if (isFirstChunk) {
       // 终止正在进行的团购下载
       const terminatedCount = terminateDownloads('groupPurchasing');
@@ -6165,6 +6602,9 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
       downloadLocks.groupPurchasing = true;
       log(`团购下载已被锁定`, LOG_TYPES.INFO);
     }
+
+    const currentChunk = storage.chunks[storage.chunks.length - 1].data;
+    await scheduleUploadIngress(storage, 'groupPurchasingPackage', socket.id, Buffer.byteLength(fileData, 'utf8'), isLastChunk);
 
     if (isLastChunk) {
       const fullBuffer = assembleUploadBuffer(storage);
@@ -6191,18 +6631,10 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
 
       log(`团购安装包已更新: ${filePath}, 大小: ${fullBuffer.length} bytes`, LOG_TYPES.INFO);
     } else {
-      const now = Date.now();
-      const timeSinceLastUpload = now - lastUploadTime;
-      const minInterval = 1000;
-      if (timeSinceLastUpload < minInterval) {
-        await new Promise(resolve => setTimeout(resolve, minInterval - timeSinceLastUpload));
-      }
-      lastUploadTime = Date.now();
-
       socket.emit('message', {
         type: 'upload-progress',
         data: {
-          progress: Math.round((offset / totalSize) * 100)
+          progress: Math.round(((offset + currentChunk.length) / totalSize) * 100)
         }
       });
     }
@@ -6336,10 +6768,12 @@ async function handleUploadAsar(data, socket) {
       emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
       return;
     }
+    const currentChunk = storage.chunks[storage.chunks.length - 1].data;
+    await scheduleUploadIngress(storage, storageKey, socket.id, Buffer.byteLength(fileData, 'utf8'), isLastChunk);
 
     socket.emit('message', {
       type: 'upload-progress',
-      data: { progress: Math.round((offset / totalSize) * 100) }
+      data: { progress: Math.round(((offset + currentChunk.length) / totalSize) * 100) }
     });
 
     if (isLastChunk) {
@@ -6962,6 +7396,21 @@ io.on('connection', (socket) => {
 
   // Handle disconnection
   socket.on('disconnect', () => {
+    for (const [key, transfer] of remoteTransfers.entries()) {
+      if (transfer.desktopSocketId === socket.id || transfer.mobileSocketId === socket.id) {
+        cancelRemoteTransfer(key, '远程连接已断开', transfer.mobileSocketId !== socket.id);
+      }
+    }
+    for (const [key, command] of remoteCommandTimers.entries()) {
+      if (command.desktopSocketId === socket.id || command.mobileSocketId === socket.id) {
+        clearTimeout(command.timer);
+        remoteCommandTimers.delete(key);
+        if (command.mobileSocketId !== socket.id) {
+          const mobileSocket = io.sockets.sockets.get(command.mobileSocketId);
+          if (mobileSocket?.connected) emitMobileCommandError(mobileSocket, command.requestId, '远程连接已断开');
+        }
+      }
+    }
     // 从用户连接管理中移除
     const connData = getConnectionBySocketId(socket.id);
     if (connData) {
