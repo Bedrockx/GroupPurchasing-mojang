@@ -1055,7 +1055,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '2.1.0';
+        const VERSION = '2.1.1';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -6235,91 +6235,109 @@
                         
                         updateStatus.textContent = '文件保存完成，准备更新...';
                         
-                        // 启动更新器前标记流程，避免版本检查完成后继续进入主界面
+                        // 给文件系统短暂释放时间，再启动独立更新器。
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                        const updaterReadyPath = `${updateZipPath}.ready`;
+                        try {
+                            if (fs.existsSync(updaterReadyPath)) fs.unlinkSync(updaterReadyPath);
+                        } catch (error) {
+                            throw new Error(`清理更新器就绪标记失败: ${error.message}`);
+                        }
+
+                        addLog(`启动更新器: ${updaterPath}`, 'info');
+                        addLog(`参数: ${updateZipPath} ${currentDir}`, 'info');
+                        updateStatus.textContent = '正在校验更新包...';
+
+                        // 只有脚本完成参数、目录和压缩包校验并写入标记后，才允许当前应用退出。
+                        const { spawn } = require('child_process');
+                        await new Promise((resolve, reject) => {
+                            const updaterProcess = spawn('powershell.exe', [
+                                '-NoProfile', '-NonInteractive',
+                                '-ExecutionPolicy', 'Bypass',
+                                '-File', updaterPath,
+                                updateZipPath, currentDir, 'main', 'true'
+                            ], {
+                                detached: true,
+                                stdio: 'ignore',
+                                windowsHide: true
+                            });
+                            let settled = false;
+                            let readyPollId = null;
+                            let readyTimeoutId = null;
+
+                            const clearWaiters = () => {
+                                if (readyPollId) clearInterval(readyPollId);
+                                if (readyTimeoutId) clearTimeout(readyTimeoutId);
+                                readyPollId = null;
+                                readyTimeoutId = null;
+                            };
+                            const fail = (error) => {
+                                if (settled) return;
+                                settled = true;
+                                clearWaiters();
+                                try {
+                                    if (fs.existsSync(updaterReadyPath)) fs.unlinkSync(updaterReadyPath);
+                                } catch (cleanupError) {
+                                    addLog(`清理更新器就绪标记失败: ${cleanupError.message}`, 'warning');
+                                }
+                                try {
+                                    if (!updaterProcess.killed) updaterProcess.kill();
+                                } catch (killError) {
+                                    addLog(`终止无响应更新器失败: ${killError.message}`, 'warning');
+                                }
+                                reject(error);
+                            };
+                            const handleError = error => fail(new Error(`更新器进程启动失败: ${error.message}`));
+                            const handleExit = code => fail(new Error(`更新器未完成校验便已退出（退出码 ${code ?? '未知'}）`));
+
+                            updaterProcess.once('error', handleError);
+                            updaterProcess.once('exit', handleExit);
+                            updaterProcess.once('spawn', () => {
+                                readyPollId = setInterval(() => {
+                                    if (settled || !fs.existsSync(updaterReadyPath)) return;
+                                    settled = true;
+                                    clearWaiters();
+                                    updaterProcess.removeListener('error', handleError);
+                                    updaterProcess.removeListener('exit', handleExit);
+                                    updaterProcess.unref();
+                                    resolve();
+                                }, 100);
+                                readyTimeoutId = setTimeout(() => {
+                                    fail(new Error('更新器校验超时，已取消本次自动更新'));
+                                }, 8000);
+                            });
+                        });
+
                         if (isStartupUpdate) {
                             markClientUpdatePending(options.targetVersion);
                             startupClientUpdateTriggered = true;
                         }
 
-                        // 自动启动更新器
-                        setTimeout(() => {
-                            try {
-                                // 禁用重连
-                                reconnectDisabled = true;
-                                addLog('已禁用重连，准备更新主版本', 'info');
-                                
-                                // 先断开socket连接，防止更新过程中发车
-                                if (socket && socket.connected) {
-                                    addLog('断开socket连接...', 'info');
-                                    socket.disconnect();
-                                    addLog('socket连接已断开', 'info');
-                                }
-                                
-                                addLog(`启动更新器: ${updaterPath}`, 'info');
-                                addLog(`参数: ${updateZipPath} ${currentDir}`, 'info');
-                                
-                                // 通过参数数组启动独立更新器，避免路径空格和命令行转义问题
-                                const { spawn } = require('child_process');
-                                const updaterProcess = spawn('powershell.exe', [
-                                    '-NoProfile', '-NonInteractive',
-                                    '-ExecutionPolicy', 'Bypass',
-                                    '-File', updaterPath,
-                                    updateZipPath, currentDir, 'main', 'true'
-                                ], {
-                                    detached: true,
-                                    stdio: 'ignore',
-                                    windowsHide: true
-                                });
-                                let updaterStarted = false;
-                                updaterProcess.once('spawn', () => {
-                                    updaterStarted = true;
-                                    updaterProcess.unref();
-                                    addLog('更新器启动成功，准备关闭当前应用', 'info');
-                                    setTimeout(() => {
-                                        addLog('关闭当前应用...', 'info');
-                                        if (typeof window !== 'undefined' && window.close) {
-                                            window.close();
-                                        } else if (typeof process !== 'undefined' && process.exit) {
-                                            process.exit(0);
-                                        } else if (typeof require !== 'undefined') {
-                                            try {
-                                                const electron = require('electron');
-                                                if (electron.app) electron.app.quit();
-                                            } catch (e) {
-                                                addLog(`关闭应用失败: ${e.message}`, 'error');
-                                            }
-                                        }
-                                    }, 1000);
-                                });
-                                updaterProcess.once('error', (error) => {
-                                    addLog(`启动更新器失败: ${error.message}`, 'error');
-                                    if (!updaterStarted) {
-                                        clearClientUpdateState(options.targetVersion || null);
-                                        startupClientUpdateTriggered = false;
-                                        reconnectDisabled = false;
-                                        if (isStartupUpdate) {
-                                            hideUpdateUI();
-                                            showMainApp();
-                                        } else {
-                                            closeVersionCheckModal();
-                                        }
-                                    }
-                                });
+                        reconnectDisabled = true;
+                        addLog('更新器校验通过，已禁用重连', 'info');
+                        if (socket && socket.connected) {
+                            addLog('断开socket连接...', 'info');
+                            socket.disconnect();
+                            addLog('socket连接已断开', 'info');
+                        }
 
-                            } catch (error) {
-                                addLog(`启动更新器失败: ${error.message}`, 'error');
-                                clearClientUpdateState(options.targetVersion || null);
-                                startupClientUpdateTriggered = false;
-                                reconnectDisabled = false;
-                                if (isStartupUpdate) {
-                                    hideUpdateUI();
-                                    showMainApp();
-                                    return;
+                        updateStatus.textContent = '更新器已就绪，正在关闭应用...';
+                        setTimeout(() => {
+                            addLog('关闭当前应用...', 'info');
+                            if (typeof window !== 'undefined' && window.close) {
+                                window.close();
+                            } else if (typeof process !== 'undefined' && process.exit) {
+                                process.exit(0);
+                            } else if (typeof require !== 'undefined') {
+                                try {
+                                    const electron = require('electron');
+                                    if (electron.app) electron.app.quit();
+                                } catch (error) {
+                                    addLog(`关闭应用失败: ${error.message}`, 'error');
                                 }
-                                alert('启动更新器失败，请手动运行 updater.ps1 文件。');
-                                closeVersionCheckModal();
                             }
-                        }, 1000);
+                        }, 250);
                     } catch (error) {
                         if (isStartupUpdate) {
                             throw error;
