@@ -1055,7 +1055,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '2.1.2';
+        const VERSION = '2.1.3';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -3273,7 +3273,8 @@
                     break;
                 case 'get-screenshot':
                     try {
-                        const result = await window.electronAPI.captureDesktop({ maxWidth: params.maxWidth || 1080, maxHeight: params.maxHeight || 1080 });
+                        const maxWidth = Math.max(360, Math.min(3840, Math.round(Number(params.maxWidth) || 1080)));
+                        const result = await window.electronAPI.captureDesktop({ maxWidth });
                         sendMobileCommandPayload(params, requestId, 'screenshot-meta', { width: result.width, height: result.height });
                         await sendMobileCommandData(params, requestId, 'image', Uint8Array.from(atob(result.base64), c => c.charCodeAt(0)));
                     } catch (error) {

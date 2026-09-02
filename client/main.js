@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, desktopCapturer, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -55,7 +55,7 @@ function collectExecutables(rootPath, result = [], depth = 0, baseRootPath = roo
     const fullPath = path.join(rootPath, entry.name);
     if (entry.isDirectory()) {
       collectExecutables(fullPath, result, depth + 1, baseRootPath);
-    } else if (/\.(exe|bat|cmd|ps1)$/i.test(entry.name)) {
+    } else if (/\.(exe|bat|cmd|ps1|lnk)$/i.test(entry.name)) {
       try {
         const stat = fs.statSync(fullPath);
         const id = crypto.createHash('sha256').update(path.resolve(fullPath).toLowerCase()).digest('hex').slice(0, 24);
@@ -231,11 +231,11 @@ ipcMain.on('get-app-path', (event) => {
 ipcMain.handle('capture-desktop', async (_event, options = {}) => {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('主窗口不可用');
   const display = screen.getDisplayMatching(mainWindow.getBounds());
-  const sourceWidth = Math.max(1, display.bounds.width);
-  const sourceHeight = Math.max(1, display.bounds.height);
-  const maxWidth = Math.max(1, Math.min(1920, Number(options.maxWidth) || 1080));
-  const maxHeight = Math.max(1, Math.min(1080, Number(options.maxHeight) || 1080));
-  const scale = Math.min(1, maxWidth / sourceWidth, maxHeight / sourceHeight);
+  const scaleFactor = Math.max(1, Number(display.scaleFactor) || 1);
+  const sourceWidth = Math.max(1, Math.round(display.bounds.width * scaleFactor));
+  const sourceHeight = Math.max(1, Math.round(display.bounds.height * scaleFactor));
+  const maxWidth = Math.max(360, Math.min(3840, Math.round(Number(options.maxWidth) || 1080)));
+  const scale = Math.min(1, maxWidth / sourceWidth);
   const width = Math.max(1, Math.round(sourceWidth * scale));
   const height = Math.max(1, Math.round(sourceHeight * scale));
   const sources = await desktopCapturer.getSources({
@@ -329,9 +329,18 @@ ipcMain.handle('run-remote-executable', async (_event, { id } = {}) => {
   if (!filePath || !folders.some(folder => isWithinRoot(filePath, folder)) || !fs.existsSync(filePath)) throw new Error('可执行文件不在白名单中');
   const realFile = fs.realpathSync(filePath);
   if (!folders.some(folder => isWithinRoot(realFile, fs.realpathSync(folder)))) throw new Error('可执行文件不在白名单中');
+  if (path.extname(filePath).toLowerCase() === '.lnk') {
+    const error = await shell.openPath(filePath);
+    if (error) throw new Error(`快捷方式启动失败: ${error}`);
+    return { pid: null, name: path.basename(filePath) };
+  }
   const ext = path.extname(filePath).toLowerCase();
-  const command = ext === '.bat' || ext === '.cmd' ? 'cmd.exe' : ext === '.ps1' ? 'powershell.exe' : filePath;
-  const args = ext === '.bat' || ext === '.cmd' ? ['/c', filePath] : ext === '.ps1' ? ['-ExecutionPolicy', 'Bypass', '-File', filePath] : [];
+  const command = ext === '.bat' || ext === '.cmd' || ext === '.ps1' ? 'cmd.exe' : filePath;
+  const args = ext === '.bat' || ext === '.cmd'
+    ? ['/d', '/s', '/c', filePath]
+    : ext === '.ps1'
+      ? ['/d', '/s', '/c', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', filePath]
+      : [];
   const child = spawn(command, args, { cwd: path.dirname(filePath), detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   return { pid: child.pid, name: path.basename(filePath) };

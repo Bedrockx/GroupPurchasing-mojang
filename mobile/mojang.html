@@ -1219,8 +1219,7 @@
 
         #connection-list,
         #online-user-list,
-        #schedule-list,
-        #remote-log-files {
+        #schedule-list {
             min-height: 120px;
             max-height: min(38vh, 300px) !important;
         }
@@ -1307,6 +1306,7 @@
         .remote-preview-toolbar { align-items: end; }
         .remote-resolution { flex: 1; min-width: 0; }
         .remote-resolution label { margin-bottom: 5px; }
+        .remote-resolution input { width: 100%; min-height: 42px; }
         .remote-preview-toolbar > .button { flex: 0 0 auto; min-width: 112px; }
 
         .remote-subnav {
@@ -1337,6 +1337,7 @@
         .remote-tool-panel { animation: panel-in .18s ease-out; }
         .remote-tool-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
         .remote-tool-actions .button { min-width: 0; }
+        .remote-tool-actions .button[aria-pressed="true"] { color: #ffffff; background: #2f8bd1; border-color: #2375b4; }
         .remote-action-button { width: 100%; }
         .remote-tool-title { margin-bottom: 10px; }
         .remote-tool-title strong { color: #255c84; font-size: .92rem; }
@@ -1714,7 +1715,7 @@
                     <div class="remote-preview-empty">点击刷新获取桌面截图</div>
                 </div>
                 <div class="remote-preview-toolbar">
-                    <div class="remote-resolution"><label for="remote-screenshot-width">预览宽度</label><select id="remote-screenshot-width"><option value="360">360</option><option value="480" selected>480</option><option value="720">720</option><option value="1080">1080</option></select></div>
+                    <div class="remote-resolution"><label for="remote-screenshot-width">截图宽度（px）</label><input id="remote-screenshot-width" type="number" inputmode="numeric" min="360" max="3840" step="1" value="480"></div>
                     <button class="button button-primary" onclick="requestRemoteScreenshot()">刷新截图</button>
                 </div>
                 <div class="remote-subnav" role="tablist" aria-label="远程功能">
@@ -1723,9 +1724,18 @@
                     <button data-remote-tool="executables" onclick="switchRemoteTool('executables', this)"><span>▣</span>程序</button>
                 </div>
                 <div class="remote-tool-panel" id="remote-tool-logs">
-                    <div class="remote-tool-actions"><button class="button button-secondary" onclick="requestRemoteLogFiles('client')">客户端日志</button><button class="button button-secondary" onclick="requestRemoteLogFiles('bgi')">BGI日志</button></div>
+                    <div class="remote-tool-title">
+                        <div class="remote-tool-title-copy"><strong>选择日志文件</strong><span id="remote-log-summary">尚未加载</span></div>
+                        <button class="remote-icon-button" type="button" aria-label="刷新日志列表" title="刷新日志列表" onclick="requestRemoteLogFiles(remoteLogKind)">&#8635;</button>
+                    </div>
+                    <div class="remote-tool-actions"><button id="remote-log-client-button" class="button button-secondary" aria-pressed="true" onclick="requestRemoteLogFiles('client')">客户端日志</button><button id="remote-log-bgi-button" class="button button-secondary" aria-pressed="false" onclick="requestRemoteLogFiles('bgi')">BGI日志</button></div>
                     <div class="form-group"><label for="remote-log-kb">下载日志尾部（KB）</label><input id="remote-log-kb" type="number" min="1" max="4096" value="64"></div>
-                    <div id="remote-log-files" class="connection-list"></div>
+                    <div class="remote-file-search">
+                        <input id="remote-log-search" type="search" placeholder="搜索日志或路径" autocomplete="off" oninput="filterRemoteLogs()">
+                        <button id="remote-log-search-clear" class="remote-file-search-clear" type="button" aria-label="清除搜索" title="清除搜索" onclick="clearRemoteLogSearch()" hidden>&times;</button>
+                    </div>
+                    <nav id="remote-log-breadcrumb" class="remote-file-breadcrumb" aria-label="日志目录"><button type="button" aria-current="page" onclick="navigateRemoteLogFolder([])">客户端日志</button></nav>
+                    <div id="remote-log-files" class="remote-file-browser"><div class="remote-file-empty"><strong>尚未加载日志列表</strong></div></div>
                     <div class="remote-log-viewer">
                         <div class="remote-log-viewer-toolbar"><strong id="remote-log-preview-name">尚未选择日志</strong><button id="remote-log-save-button" class="button button-secondary" type="button" onclick="saveRemoteLogPreview()" disabled>保存文件</button></div>
                         <pre id="remote-log-preview-content">选择日志后将在这里显示内容</pre>
@@ -1846,6 +1856,9 @@
         let remoteLogPreviewUrl = '';
         let remoteLogPreviewName = '';
         let remoteScreenshotUrl = '';
+        let remoteLogPayload = null;
+        let remoteLogKind = 'client';
+        let remoteLogPath = [];
         let remoteExecutablePayload = null;
         let remoteExecutableRoot = '';
         let remoteExecutablePath = [];
@@ -1859,6 +1872,8 @@
                         if (request.command === 'list-executables') {
                             document.getElementById('remote-executable-summary').textContent = '请求超时';
                             document.getElementById('remote-program-status').textContent = '程序列表获取超时';
+                        } else if (request.command === (remoteLogKind === 'bgi' ? 'get-bgi-log-files' : 'get-client-log-files')) {
+                            document.getElementById('remote-log-summary').textContent = '请求超时';
                         }
                         remoteRequests.delete(id);
                     }
@@ -1892,10 +1907,27 @@
         }
 
         function requestRemoteScreenshot() {
-            remoteRequest('get-screenshot', { maxWidth: Number(document.getElementById('remote-screenshot-width').value) || 480, maxHeight: 1080 });
+            const input = document.getElementById('remote-screenshot-width');
+            const maxWidth = Math.max(360, Math.min(3840, Math.round(Number(input.value) || 480)));
+            input.value = String(maxWidth);
+            remoteRequest('get-screenshot', { maxWidth });
         }
 
-        function requestRemoteLogFiles(kind) { remoteRequest(kind === 'bgi' ? 'get-bgi-log-files' : 'get-client-log-files'); }
+        function requestRemoteLogFiles(kind = remoteLogKind) {
+            const nextKind = kind === 'bgi' ? 'bgi' : 'client';
+            if (nextKind !== remoteLogKind) {
+                remoteLogKind = nextKind;
+                remoteLogPayload = null;
+                remoteLogPath = [];
+                const search = document.getElementById('remote-log-search');
+                if (search) search.value = '';
+                renderRemoteLogBrowser();
+            }
+            document.getElementById('remote-log-client-button').setAttribute('aria-pressed', String(remoteLogKind === 'client'));
+            document.getElementById('remote-log-bgi-button').setAttribute('aria-pressed', String(remoteLogKind === 'bgi'));
+            const requestId = remoteRequest(remoteLogKind === 'bgi' ? 'get-bgi-log-files' : 'get-client-log-files');
+            if (requestId) document.getElementById('remote-log-summary').textContent = '正在刷新...';
+        }
         function requestRemoteExecutables() {
             const requestId = remoteRequest('list-executables');
             if (requestId) {
@@ -1973,6 +2005,9 @@
             if (remoteLogPreviewUrl) URL.revokeObjectURL(remoteLogPreviewUrl);
             remoteLogPreviewUrl = '';
             remoteLogPreviewName = '';
+            remoteLogPayload = null;
+            remoteLogKind = 'client';
+            remoteLogPath = [];
             remoteExecutablePayload = null;
             remoteExecutableRoot = '';
             remoteExecutablePath = [];
@@ -1980,12 +2015,17 @@
             const logName = document.getElementById('remote-log-preview-name');
             const logContent = document.getElementById('remote-log-preview-content');
             const saveButton = document.getElementById('remote-log-save-button');
+            const logSearch = document.getElementById('remote-log-search');
             const executableSearch = document.getElementById('remote-executable-search');
             if (screenshot) screenshot.innerHTML = '<div class="no-connection">点击刷新获取桌面截图</div>';
             if (logName) logName.textContent = '尚未选择日志';
             if (logContent) logContent.textContent = '选择日志并点击查看后，内容会显示在这里。';
             if (saveButton) saveButton.disabled = true;
+            if (logSearch) logSearch.value = '';
             if (executableSearch) executableSearch.value = '';
+            document.getElementById('remote-log-client-button').setAttribute('aria-pressed', 'true');
+            document.getElementById('remote-log-bgi-button').setAttribute('aria-pressed', 'false');
+            renderRemoteLogBrowser();
             renderRemoteExecutableBrowser();
             document.getElementById('remote-program-status').textContent = '等待选择程序';
         }
@@ -2037,7 +2077,8 @@
                     remoteRequests.delete(requestId);
                 }
                 else if (data.dataType === 'log-files') {
-                    renderRemoteLogFiles(payload);
+                    const responseKind = payload.kind === 'bgi' ? 'bgi' : 'client';
+                    if (responseKind === remoteLogKind) renderRemoteLogFiles(payload);
                     remoteRequests.delete(requestId);
                 }
                 else if (data.dataType === 'executables') {
@@ -2060,6 +2101,8 @@
                         if (request.command === 'list-executables') {
                             document.getElementById('remote-executable-summary').textContent = '刷新失败';
                             document.getElementById('remote-program-status').textContent = payload.message || '程序列表刷新失败';
+                        } else if (request.command === (remoteLogKind === 'bgi' ? 'get-bgi-log-files' : 'get-client-log-files')) {
+                            document.getElementById('remote-log-summary').textContent = '刷新失败';
                         }
                         showCmdMessage(payload.message || '远程操作失败');
                         remoteRequests.delete(requestId);
@@ -2110,40 +2153,177 @@
             return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
         }
 
-        function renderRemoteLogFiles(payload) {
-            const container = document.getElementById('remote-log-files');
-            const files = payload.files || [];
-            container.innerHTML = '';
-            if (!files.length) {
-                container.innerHTML = '<div class="no-connection">暂无日志</div>';
-                return;
-            }
-            files.forEach(file => {
-                const item = document.createElement('div');
-                item.className = 'connection-item';
-                const fileName = document.createElement('span');
-                fileName.textContent = file.path;
-                const actions = document.createElement('span');
-                actions.textContent = `${(file.size / 1024).toFixed(1)} KB `;
-                const viewButton = document.createElement('button');
-                viewButton.className = 'button';
-                viewButton.type = 'button';
-                viewButton.textContent = '查看';
-                viewButton.addEventListener('click', () => requestRemoteLogTail(payload.kind, encodeURIComponent(file.path)));
-                actions.appendChild(viewButton);
-                item.append(fileName, actions);
-                container.appendChild(item);
-            });
+        function normalizeRemoteLogPayload(payload) {
+            const kind = payload?.kind === 'bgi' ? 'bgi' : 'client';
+            const files = (Array.isArray(payload?.files) ? payload.files : []).map(file => {
+                const filePath = String(file?.path || '');
+                const segments = splitRemotePath(filePath);
+                return {
+                    ...file,
+                    path: filePath,
+                    name: segments[segments.length - 1] || filePath,
+                    segments,
+                    size: Math.max(0, Number(file?.size) || 0),
+                    modifiedAt: Number(file?.modifiedAt) || 0
+                };
+            }).filter(file => file.path && file.segments.length);
+            return { kind, files };
         }
 
-        function requestRemoteLogTail(kind, encodedPath) {
-            const filePath = decodeURIComponent(encodedPath);
+        function getRemoteLogRootLabel() {
+            return remoteLogKind === 'bgi' ? 'BGI日志' : '客户端日志';
+        }
+
+        function renderRemoteLogBreadcrumb(searching = false) {
+            const breadcrumb = document.getElementById('remote-log-breadcrumb');
+            breadcrumb.innerHTML = '';
+            const appendSeparator = () => {
+                const separator = document.createElement('span');
+                separator.className = 'remote-file-breadcrumb-separator';
+                separator.textContent = '›';
+                breadcrumb.appendChild(separator);
+            };
+            const appendButton = (label, segments, current = false) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = label;
+                if (current) button.setAttribute('aria-current', 'page');
+                button.addEventListener('click', () => navigateRemoteLogFolder(segments));
+                breadcrumb.appendChild(button);
+            };
+            appendButton(getRemoteLogRootLabel(), [], remoteLogPath.length === 0 && !searching);
+            if (searching) {
+                appendSeparator();
+                const current = document.createElement('button');
+                current.type = 'button';
+                current.textContent = '搜索结果';
+                current.setAttribute('aria-current', 'page');
+                breadcrumb.appendChild(current);
+                return;
+            }
+            remoteLogPath.forEach((segment, index) => {
+                appendSeparator();
+                appendButton(segment, remoteLogPath.slice(0, index + 1), index === remoteLogPath.length - 1);
+            });
+            requestAnimationFrame(() => { breadcrumb.scrollLeft = breadcrumb.scrollWidth; });
+        }
+
+        function navigateRemoteLogFolder(segments) {
+            remoteLogPath = Array.isArray(segments) ? segments.slice() : [];
+            const search = document.getElementById('remote-log-search');
+            if (search) search.value = '';
+            renderRemoteLogBrowser();
+        }
+
+        function filterRemoteLogs() {
+            renderRemoteLogBrowser();
+        }
+
+        function clearRemoteLogSearch() {
+            const search = document.getElementById('remote-log-search');
+            if (!search) return;
+            search.value = '';
+            search.focus();
+            renderRemoteLogBrowser();
+        }
+
+        function formatRemoteModifiedTime(value) {
+            const timestamp = Number(value);
+            if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+            const date = new Date(timestamp);
+            if (!Number.isFinite(date.getTime())) return '';
+            return date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+
+        function createRemoteLogRow(file, detail) {
+            const row = document.createElement('div');
+            row.className = 'remote-file-row';
+            const extension = String(file.name).split('.').pop().toUpperCase().slice(0, 4) || 'LOG';
+            row.append(createRemoteFileKind(extension), createRemoteFileDetails(file.name, detail));
+            const viewButton = document.createElement('button');
+            viewButton.className = 'button button-primary remote-file-run';
+            viewButton.type = 'button';
+            viewButton.textContent = '查看';
+            viewButton.addEventListener('click', () => requestRemoteLogTail(remoteLogKind, file.path));
+            row.appendChild(viewButton);
+            return row;
+        }
+
+        function renderRemoteLogBrowser() {
+            const container = document.getElementById('remote-log-files');
+            const summary = document.getElementById('remote-log-summary');
+            const search = document.getElementById('remote-log-search');
+            const clearButton = document.getElementById('remote-log-search-clear');
+            const query = String(search?.value || '').trim().toLocaleLowerCase();
+            container.innerHTML = '';
+            if (clearButton) clearButton.hidden = !query;
+            if (!remoteLogPayload || remoteLogPayload.kind !== remoteLogKind) {
+                summary.textContent = '尚未加载';
+                renderRemoteLogBreadcrumb(false);
+                appendRemoteFileEmpty(container, '尚未加载日志列表');
+                return;
+            }
+            const files = remoteLogPayload.files;
+            if (query) {
+                const matches = files.filter(file => file.path.toLocaleLowerCase().includes(query));
+                summary.textContent = `${matches.length} 个搜索结果`;
+                renderRemoteLogBreadcrumb(true);
+                if (!matches.length) return appendRemoteFileEmpty(container, '没有匹配的日志', query);
+                matches.slice().sort((a, b) => b.modifiedAt - a.modifiedAt || a.name.localeCompare(b.name, 'zh-CN', { numeric: true })).forEach(file => {
+                    const modified = formatRemoteModifiedTime(file.modifiedAt);
+                    const detail = `${file.path} · ${formatRemoteFileSize(file.size)}${modified ? ` · ${modified}` : ''}`;
+                    container.appendChild(createRemoteLogRow(file, detail));
+                });
+                return;
+            }
+            renderRemoteLogBreadcrumb(false);
+            const childFolders = new Map();
+            const visibleFiles = [];
+            files.forEach(file => {
+                const directories = file.segments.slice(0, -1);
+                const matchesCurrentPath = remoteLogPath.every((segment, index) => directories[index]?.toLocaleLowerCase() === segment.toLocaleLowerCase());
+                if (!matchesCurrentPath || directories.length < remoteLogPath.length) return;
+                if (directories.length === remoteLogPath.length) {
+                    visibleFiles.push(file);
+                    return;
+                }
+                const childName = directories[remoteLogPath.length];
+                const key = childName.toLocaleLowerCase();
+                const entry = childFolders.get(key) || { name: childName, count: 0 };
+                entry.count++;
+                childFolders.set(key, entry);
+            });
+            const sortedFolders = Array.from(childFolders.values()).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
+            visibleFiles.sort((a, b) => b.modifiedAt - a.modifiedAt || a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
+            summary.textContent = `${sortedFolders.length} 个文件夹 · ${visibleFiles.length} 个日志`;
+            sortedFolders.forEach(folder => {
+                container.appendChild(createRemoteFolderRow(folder.name, `${folder.count} 个日志`, () => navigateRemoteLogFolder([...remoteLogPath, folder.name])));
+            });
+            visibleFiles.forEach(file => {
+                const modified = formatRemoteModifiedTime(file.modifiedAt);
+                const detail = `${formatRemoteFileSize(file.size)}${modified ? ` · ${modified}` : ''}`;
+                container.appendChild(createRemoteLogRow(file, detail));
+            });
+            if (!sortedFolders.length && !visibleFiles.length) appendRemoteFileEmpty(container, '此文件夹没有日志');
+        }
+
+        function renderRemoteLogFiles(payload) {
+            remoteLogPayload = normalizeRemoteLogPayload(payload);
+            remoteLogKind = remoteLogPayload.kind;
+            remoteLogPath = [];
+            const search = document.getElementById('remote-log-search');
+            if (search) search.value = '';
+            renderRemoteLogBrowser();
+        }
+
+        function requestRemoteLogTail(kind, filePath) {
             const kb = Math.min(4096, Math.max(1, Number(document.getElementById('remote-log-kb').value) || 64));
+            document.getElementById('remote-log-kb').value = String(kb);
             const requestId = remoteRequest(kind === 'bgi' ? 'get-bgi-log-tail' : 'get-client-log-tail', { filePath, kb });
             if (requestId) remoteRequests.set(requestId, { command: 'log-tail', filePath, createdAt: Date.now() });
         }
 
-        function splitRemoteExecutablePath(value) {
+        function splitRemotePath(value) {
             return String(value || '').split(/[\\/]+/).filter(Boolean);
         }
 
@@ -2152,7 +2332,7 @@
         }
 
         function getRemoteFolderName(folder) {
-            const parts = splitRemoteExecutablePath(folder);
+            const parts = splitRemotePath(folder);
             return parts[parts.length - 1] || String(folder || '未命名目录');
         }
 
@@ -2335,7 +2515,7 @@
             const childFolders = new Map();
             const visibleFiles = [];
             rootFiles.forEach(file => {
-                const parts = splitRemoteExecutablePath(file.relativePath);
+                const parts = splitRemotePath(file.relativePath);
                 const directories = parts.slice(0, -1);
                 const matchesCurrentPath = remoteExecutablePath.every((segment, index) => directories[index]?.toLocaleLowerCase() === segment.toLocaleLowerCase());
                 if (!matchesCurrentPath || directories.length < remoteExecutablePath.length) return;
