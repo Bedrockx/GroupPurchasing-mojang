@@ -48,6 +48,12 @@
     "default": "手动进入后运行"
   },
   {
+    "name": "useAllTargetImages",
+    "type": "checkbox",
+    "label": "放人模板匹配使用全部图片\n关闭时为每个白名单队员选择文件名最相似的图片",
+    "default": false
+  },
+  {
     "name": "yourIndex",
     "type": "input-text",
     "label": "该部分配置请仔细阅读readme后填写\n强烈建议联机运行的所有成员以下配置除你的序号外【完全相同】\n你的序号"
