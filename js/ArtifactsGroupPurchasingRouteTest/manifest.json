@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "name": "联机团购路线测试",
+  "version": "1.0.0",
+  "bgi_version": "0.61.2",
+  "description": "依次测试联机团购内置收尾与占位路线，并按终点距离生成运行报告。",
+  "tags": [
+    "狗粮",
+    "测试",
+    "工具"
+  ],
+  "authors": [
+    {
+      "name": "mno",
+      "links": "https://github.com/Bedrockx"
+    }
+  ],
+  "settings_ui": "settings.json",
+  "main": "main.js",
+  "saved_files": [
+    "路线运行情况.txt"
+  ]
+}

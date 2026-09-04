@@ -1,0 +1,12 @@
+[
+  {
+    "name": "runMode",
+    "type": "select",
+    "label": "运行模式",
+    "options": [
+      "完整运行",
+      "查漏补缺"
+    ],
+    "default": "完整运行"
+  }
+]
