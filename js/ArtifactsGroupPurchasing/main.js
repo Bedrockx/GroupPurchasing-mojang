@@ -1,4 +1,5 @@
 const runExtra = settings.runExtra || false;
+const useAllTargetImages = settings.useAllTargetImages === true || settings.useAllTargetImages === "true";
 const leaveTeamRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/RecognitionObject/leaveTeam.png"));
 const scrollRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/拾取滚轮.png"), 1017, 496, 1093 - 581, 581 - 496);
 const kick2pRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/RecognitionObject/kickButton.png"), 1520, 277, 230, 120);
@@ -865,13 +866,17 @@ async function autoEnter(autoEnterSettings) {
             log.info(`跳过备注图片: ${baseName}`);
             continue;
         }
-        
+
         const mat = file.ReadImageMatSync(f.fullPath);
         const ro = RecognitionObject.TemplateMatch(mat, 664, 481, 1355 - 668, 588 - 484);
         targetsRo.push({ ro, baseName });
     }
     targetsRo.sort((a, b) => b.baseName.length - a.baseName.length);
     log.info(`加载完成共 ${targetsRo.length} 个目标`);
+    const selectedTargets = useAllTargetImages
+        ? mapAllTemplatesToClosestNames(targetList, targetsRo)
+        : selectClosestTemplates(targetList, targetsRo);
+    log.info(useAllTargetImages ? "放人模板匹配使用全部图片" : "放人模板匹配使用白名单名称最相似图片");
 
     // ===== 主循环 =====
     const totalTime = timeout * 60 * 1000;
@@ -1036,21 +1041,22 @@ async function autoEnter(autoEnterSettings) {
         try {
             const gameRegion = captureGameRegion();
             const matched = [];
-            for (const { ro, baseName } of targetsRo) {
+            for (const { ro, targetName, nameSimilarity } of selectedTargets) {
                 if (gameRegion.find(ro).isExist()) {
-                    matched.push(baseName);
+                    matched.push({ name: targetName, nameSimilarity });
                 }
             }
             gameRegion.dispose();
             if (matched.length > 0) {
-                // 有多张匹配时，优先选择在白名单中且未进入的
-                if (matched.length > 1) {
-                    const candidates = matched.filter(name => targetList.includes(name) && !enteredPlayers.includes(name));
-                    if (candidates.length > 0) {
-                        return { method: '模板匹配', result: candidates[0] };
-                    }
+                // 同时匹配到多张图片时，优先选择名称相似度更高且尚未进入的目标
+                matched.sort((a, b) => b.nameSimilarity - a.nameSimilarity);
+                const candidate = matched.find(item =>
+                    targetList.includes(item.name) && !enteredPlayers.includes(item.name)
+                );
+                if (candidate) {
+                    log.info(`模板匹配选择 ${candidate.name}，文件名相似度约 ${(candidate.nameSimilarity * 100).toFixed(1)}%`);
+                    return { method: '模板匹配', result: candidate.name };
                 }
-                return { method: '模板匹配', result: matched[0] };
             }
         } catch { }
         try {
@@ -1065,6 +1071,75 @@ async function autoEnter(autoEnterSettings) {
             if (!hit) resList.forEach(r => log.warn(`识别到"${r.text.trim()}"，不在白名单`));
             return { method: 'OCR识别', result: hit };
         } catch { return { method: '无', result: null }; }
+    }
+
+    // 为每个白名单名称选择文件名最相近的模板，避免依赖完全一致的文件名
+    function selectClosestTemplates(names, templates) {
+        const pairs = [];
+        for (const targetName of names) {
+            for (let i = 0; i < templates.length; i++) {
+                pairs.push({
+                    targetName,
+                    templateIndex: i,
+                    nameSimilarity: stringSimilarity(targetName, templates[i].baseName)
+                });
+            }
+        }
+
+        pairs.sort((a, b) =>
+            b.nameSimilarity - a.nameSimilarity || a.templateIndex - b.templateIndex
+        );
+        const usedNames = new Set();
+        const usedTemplates = new Set();
+        const selected = [];
+        for (const pair of pairs) {
+            if (usedNames.has(pair.targetName) || usedTemplates.has(pair.templateIndex)) continue;
+            usedNames.add(pair.targetName);
+            usedTemplates.add(pair.templateIndex);
+            selected.push({
+                ...templates[pair.templateIndex],
+                targetName: pair.targetName,
+                nameSimilarity: pair.nameSimilarity
+            });
+            log.info(`白名单 ${pair.targetName} 使用模板 ${templates[pair.templateIndex].baseName}，文件名相似度 ${(pair.nameSimilarity * 100).toFixed(1)}%`);
+        }
+        return selected;
+    }
+
+    // 全部图片模式：每张图片都参与匹配，但将其归属到文件名最相近的白名单名称
+    function mapAllTemplatesToClosestNames(names, templates) {
+        return templates.map(template => {
+            let targetName = null;
+            let nameSimilarity = 0;
+            for (const name of names) {
+                const similarity = stringSimilarity(name, template.baseName);
+                if (similarity > nameSimilarity) {
+                    targetName = name;
+                    nameSimilarity = similarity;
+                }
+            }
+            return { ...template, targetName, nameSimilarity };
+        });
+    }
+
+    // 使用归一化编辑距离计算两个名称的相似度，结果范围为 0-1
+    function stringSimilarity(left, right) {
+        const a = [...String(left || '').toLocaleLowerCase().replace(/\s+/g, '')];
+        const b = [...String(right || '').toLocaleLowerCase().replace(/\s+/g, '')];
+        if (a.join('') === b.join('')) return 1;
+        if (!a.length || !b.length) return 0;
+
+        const previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+        for (let i = 1; i <= a.length; i++) {
+            const current = [i];
+            for (let j = 1; j <= b.length; j++) {
+                current[j] = a[i - 1] === b[j - 1]
+                    ? previous[j - 1]
+                    : Math.min(previous[j - 1], previous[j], current[j - 1]) + 1;
+            }
+            for (let j = 0; j <= b.length; j++) previous[j] = current[j];
+        }
+        return 1 - previous[b.length] / Math.max(a.length, b.length);
     }
 
     return success;
