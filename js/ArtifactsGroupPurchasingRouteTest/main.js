@@ -22,7 +22,7 @@ function readPath(path) {
     // BetterGI 返回的是可枚举的 .NET 集合，不一定具备 JavaScript 数组方法。
     // 先转换为原生数组，再由调用方进行遍历和排序，兼容 ClearScript 运行时。
     const result = [];
-    const entries = file.readPathSync(path);
+    const entries = file.ReadPathSync(path);
     if (!entries) {
       return result;
     }
@@ -103,7 +103,7 @@ function loadPreviousRecords() {
   let content;
 
   try {
-    content = file.readTextSync(REPORT_PATH);
+    content = file.ReadTextSync(REPORT_PATH);
   } catch (_) {
     return records;
   }
@@ -154,7 +154,7 @@ function writeReport(routes, records, runMode, startedAt) {
     lines.push((records.get(route.key) || createPendingRecord(route)).line);
   }
 
-  const written = file.writeTextSync(REPORT_PATH, `${lines.join("\r\n")}\r\n`);
+  const written = file.WriteTextSync(REPORT_PATH, `${lines.join("\r\n")}\r\n`);
   if (!written) {
     throw new Error(`写入报告失败：${REPORT_PATH}`);
   }
@@ -164,7 +164,7 @@ function discoverRoutes() {
   const routes = [];
   const groupPaths = [];
   for (const path of readPath(ROUTE_ROOT)) {
-    if (file.isFolder(path)) {
+    if (file.IsFolder(path)) {
       groupPaths.push(path);
     }
   }
@@ -180,14 +180,14 @@ function discoverRoutes() {
       const typePath = combinePath(groupPath, routeType);
       const routeFiles = [];
       for (const path of readPath(typePath)) {
-        if (!file.isFolder(path) && path.toLowerCase().endsWith(".json")) {
+        if (!file.IsFolder(path) && path.toLowerCase().endsWith(".json")) {
           routeFiles.push(path);
         }
       }
       routeFiles.sort((a, b) => getFileName(a).localeCompare(getFileName(b), "zh-CN"));
 
       for (const fullPath of routeFiles) {
-        const routeData = JSON.parse(file.readTextSync(fullPath));
+        const routeData = JSON.parse(file.ReadTextSync(fullPath));
         if (!Array.isArray(routeData.positions) || routeData.positions.length === 0) {
           throw new Error(`路线没有有效点位：${fullPath}`);
         }
@@ -219,7 +219,7 @@ async function getCurrentPosition(route) {
 
   for (let attempt = 1; attempt <= POSITION_RETRY_COUNT; attempt++) {
     try {
-      const position = genshin.getPositionFromMap(route.mapName, route.endX, route.endY);
+      const position = genshin.GetPositionFromMap(route.mapName, route.endX, route.endY);
       if (position && isFiniteNumber(position.x) && isFiniteNumber(position.y)) {
         return { x: position.x, y: position.y };
       }
@@ -245,19 +245,19 @@ async function testRoute(route) {
   let currentPosition = null;
 
   try {
-    await genshin.returnMainUi();
-    log.info(`开始测试路线：${route.key}`);
-    await pathingScript.runFile(route.fullPath);
+    await genshin.ReturnMainUi();
+    log.Info(`开始测试路线：${route.key}`);
+    await pathingScript.RunFile(route.fullPath);
   } catch (error) {
     if (isCancellation(error)) {
       throw error;
     }
     routeError = `路线执行异常：${getErrorMessage(error)}`;
-    log.error(`${route.key} ${routeError}`);
+    log.Error(`${route.key} ${routeError}`);
   }
 
   try {
-    await genshin.returnMainUi();
+    await genshin.ReturnMainUi();
     await sleep(POSITION_RETRY_INTERVAL_MS);
     currentPosition = await getCurrentPosition(route);
   } catch (error) {
@@ -265,7 +265,7 @@ async function testRoute(route) {
       throw error;
     }
     positionError = `坐标获取异常：${getErrorMessage(error)}`;
-    log.error(`${route.key} ${positionError}`);
+    log.Error(`${route.key} ${positionError}`);
   }
 
   const distance = currentPosition
@@ -280,9 +280,9 @@ async function testRoute(route) {
   const note = notes.join("；") || "--";
 
   if (status === "成功") {
-    log.info(`${route.key} 测试成功，终点距离 ${formatNumber(distance)}`);
+    log.Info(`${route.key} 测试成功，终点距离 ${formatNumber(distance)}`);
   } else {
-    log.error(`${route.key} 测试失败，终点距离 ${formatNumber(distance)}`);
+    log.Error(`${route.key} 测试失败，终点距离 ${formatNumber(distance)}`);
   }
 
   return createRecord(route, status, currentPosition, distance, note, formatTime());
@@ -311,15 +311,15 @@ async function testRoute(route) {
   }
   writeReport(routes, records, runMode, startedAt);
 
-  log.info(`共发现 ${routes.length} 条路线，本轮需要测试 ${routesToRun.length} 条`);
+  log.Info(`共发现 ${routes.length} 条路线，本轮需要测试 ${routesToRun.length} 条`);
   if (routesToRun.length === 0) {
-    log.info(`没有需要补测的路线，报告路径：${REPORT_PATH}`);
+    log.Info(`没有需要补测的路线，报告路径：${REPORT_PATH}`);
     return;
   }
 
   for (let index = 0; index < routesToRun.length; index++) {
     const route = routesToRun[index];
-    log.info(`测试进度 ${index + 1}/${routesToRun.length}`);
+    log.Info(`测试进度 ${index + 1}/${routesToRun.length}`);
 
     try {
       records.set(route.key, await testRoute(route));
@@ -332,12 +332,12 @@ async function testRoute(route) {
         createRecord(route, "失败", null, null, `任务已取消：${getErrorMessage(error)}`, formatTime()),
       );
       writeReport(routes, records, runMode, startedAt);
-      log.warn(`测试已停止，当前进度已写入 ${REPORT_PATH}`);
+      log.Warn(`测试已停止，当前进度已写入 ${REPORT_PATH}`);
       return;
     }
 
     writeReport(routes, records, runMode, startedAt);
   }
 
-  log.info(`全部待测路线已执行完毕，报告路径：${REPORT_PATH}`);
+  log.Info(`全部待测路线已执行完毕，报告路径：${REPORT_PATH}`);
 })();
