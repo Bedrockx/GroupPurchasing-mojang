@@ -19,7 +19,17 @@ function combinePath(parent, child) {
 
 function readPath(path) {
   try {
-    return file.readPathSync(path);
+    // BetterGI 返回的是可枚举的 .NET 集合，不一定具备 JavaScript 数组方法。
+    // 先转换为原生数组，再由调用方进行遍历和排序，兼容 ClearScript 运行时。
+    const result = [];
+    const entries = file.readPathSync(path);
+    if (!entries) {
+      return result;
+    }
+    for (const item of entries) {
+      result.push(String(item));
+    }
+    return result;
   } catch (_) {
     return [];
   }
@@ -53,8 +63,13 @@ function getErrorMessage(error) {
 function isCancellation(error) {
   const message = getErrorMessage(error).toLowerCase();
   return message.includes("取消自动任务")
+    || message.includes("任务已取消")
+    || message.includes("操作已取消")
     || message.includes("a task was canceled")
     || message.includes("taskcanceledexception")
+    || message.includes("operationcanceledexception")
+    || message.includes("operation was canceled")
+    || message.includes("operation was cancelled")
     || message.includes("cancelled")
     || message.includes("canceled");
 }
@@ -90,6 +105,9 @@ function loadPreviousRecords() {
   try {
     content = file.readTextSync(REPORT_PATH);
   } catch (_) {
+    return records;
+  }
+  if (typeof content !== "string" || content.length === 0) {
     return records;
   }
 
@@ -144,9 +162,13 @@ function writeReport(routes, records, runMode, startedAt) {
 
 function discoverRoutes() {
   const routes = [];
-  const groupPaths = readPath(ROUTE_ROOT)
-    .filter((path) => file.isFolder(path))
-    .sort((a, b) => getFileName(a).localeCompare(getFileName(b), "zh-CN"));
+  const groupPaths = [];
+  for (const path of readPath(ROUTE_ROOT)) {
+    if (file.isFolder(path)) {
+      groupPaths.push(path);
+    }
+  }
+  groupPaths.sort((a, b) => getFileName(a).localeCompare(getFileName(b), "zh-CN"));
 
   for (const groupPath of groupPaths) {
     const groupName = getFileName(groupPath);
@@ -156,9 +178,13 @@ function discoverRoutes() {
 
     for (const routeType of ROUTE_TYPES) {
       const typePath = combinePath(groupPath, routeType);
-      const routeFiles = readPath(typePath)
-        .filter((path) => !file.isFolder(path) && path.toLowerCase().endsWith(".json"))
-        .sort((a, b) => getFileName(a).localeCompare(getFileName(b), "zh-CN"));
+      const routeFiles = [];
+      for (const path of readPath(typePath)) {
+        if (!file.isFolder(path) && path.toLowerCase().endsWith(".json")) {
+          routeFiles.push(path);
+        }
+      }
+      routeFiles.sort((a, b) => getFileName(a).localeCompare(getFileName(b), "zh-CN"));
 
       for (const fullPath of routeFiles) {
         const routeData = JSON.parse(file.readTextSync(fullPath));
@@ -245,8 +271,13 @@ async function testRoute(route) {
   const distance = currentPosition
     ? Math.hypot(currentPosition.x - route.endX, currentPosition.y - route.endY)
     : null;
+  // BetterGI 路径执行器会在引擎内部处理路线异常，通常不会把路线失败抛回 JS。
+  // 按需求仅以路线结束后的终点距离作为成功标准；坐标读取失败时 distance 为 null，自然判为失败。
   const status = isFiniteNumber(distance) && distance < SUCCESS_DISTANCE ? "成功" : "失败";
-  const note = [routeError, positionError].filter(Boolean).join("；") || "--";
+  const notes = [];
+  if (routeError) notes.push(routeError);
+  if (positionError) notes.push(positionError);
+  const note = notes.join("；") || "--";
 
   if (status === "成功") {
     log.info(`${route.key} 测试成功，终点距离 ${formatNumber(distance)}`);
@@ -272,7 +303,12 @@ async function testRoute(route) {
     records.set(route.key, previousRecords.get(route.key) || createPendingRecord(route));
   }
 
-  const routesToRun = routes.filter((route) => records.get(route.key).status !== "成功");
+  const routesToRun = [];
+  for (const route of routes) {
+    if (records.get(route.key).status !== "成功") {
+      routesToRun.push(route);
+    }
+  }
   writeReport(routes, records, runMode, startedAt);
 
   log.info(`共发现 ${routes.length} 条路线，本轮需要测试 ${routesToRun.length} 条`);
