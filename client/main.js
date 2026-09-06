@@ -615,6 +615,7 @@ ipcMain.on('read-image-file', (event, { filePath }) => {
       
       // 读取文件内容为base64
       const content = fs.readFileSync(filePath);
+      const sha256 = crypto.createHash('sha256').update(content).digest('hex');
       const base64 = content.toString('base64');
       
       event.reply('image-file-result', { 
@@ -622,13 +623,68 @@ ipcMain.on('read-image-file', (event, { filePath }) => {
         filePath, 
         base64, 
         fileName: path.basename(filePath),
-        fileSize 
+        fileSize,
+        sha256
       });
     } else {
       event.reply('image-file-result', { success: false, error: '文件不存在' });
     }
   } catch (error) {
     event.reply('image-file-result', { success: false, error: error.message });
+  }
+});
+
+// 读取图片元数据（仅返回文件名、大小和 SHA-256，不读取正文）
+ipcMain.handle('read-image-metadata', async (_event, filePath) => {
+  try {
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile()) throw new Error('路径不是文件');
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(filePath);
+      stream.on('data', chunk => hash.update(chunk));
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
+    return {
+      success: true,
+      filePath,
+      fileName: path.basename(filePath),
+      fileSize: stats.size,
+      sha256: hash.digest('hex')
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 扫描目录中的 PNG 图片并返回元数据清单
+ipcMain.handle('list-image-metadata', async (_event, directoryPath) => {
+  try {
+    const entries = await fs.promises.readdir(directoryPath, { withFileTypes: true });
+    const files = entries
+      .filter(entry => entry.isFile() && /\.png$/i.test(entry.name))
+      .map(entry => path.join(directoryPath, entry.name));
+    const metadata = [];
+    for (const filePath of files) {
+      const result = await new Promise(resolve => {
+        const hash = crypto.createHash('sha256');
+        let size = 0;
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', chunk => { size += chunk.length; hash.update(chunk); });
+        stream.on('end', () => resolve({
+          filePath,
+          fileName: path.basename(filePath),
+          fileSize: size,
+          sha256: hash.digest('hex')
+        }));
+        stream.on('error', () => resolve(null));
+      });
+      if (result) metadata.push(result);
+    }
+    return { success: true, files: metadata };
+  } catch (error) {
+    return { success: false, error: error.message, files: [] };
   }
 });
 

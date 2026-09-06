@@ -1055,7 +1055,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '2.1.3';
+        const VERSION = '2.1.4';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -1422,11 +1422,13 @@
                         } else if (data.type === 'ride-message-1') {
                             console.log('收到发车消息1:', data);
                             addLog(`收到发车消息1，准备处理...`, 'info');
-                            handleRideMessage1(data);
+                            handleRideMessage1(data).catch(error => addLog(`处理发车准备失败: ${error.message || error}`, 'error'));
                         } else if (data.type === 'ride-images') {
                             console.log('收到队员图片:', data);
                             addLog(`收到队员图片，准备处理...`, 'info');
                             handleRideImages(data);
+                        } else if (data.type === 'ride-image-request') {
+                            handleRideImageRequest(data);
                         } else if (data.type === 'ride-message-2') {
                             console.log('收到发车消息2:', data);
                             addLog(`收到发车消息2，准备处理...`, 'info');
@@ -4372,7 +4374,7 @@
         }
         
         // 处理发车消息1
-        function handleRideMessage1(data) {
+        async function handleRideMessage1(data) {
             const { rideId, rideInfo, rideIdentifier } = data;
             addLog(`收到发车消息1，准备处理...`, 'info');
             console.log('发车消息1详情:', data);
@@ -4440,7 +4442,9 @@
             // 判断是否是队员（不是房主）
             const isMember = rideInfo.host.username !== currentRider.username || rideInfo.host.uid !== currentRider.uid;
             
-            // 如果是队员，查找并发送图片
+            // 图片采用“元数据协商后再传正文”：队员上报自己的图片元数据，房主上报 targets 清单
+            let rideImageMeta = null;
+            let rideImageManifest = null;
             if (isMember) {
                 // 获取游戏名称（上线时使用的名称）
                 const gameName = currentRider.username;
@@ -4451,47 +4455,41 @@
                 
                 addLog(`队员查找图片: ${imagePath}`, 'info');
                 
-                // 尝试读取图片文件
-                if (window.electronAPI && window.electronAPI.readImageFile) {
-                    window.electronAPI.readImageFile(imagePath).then(result => {
-                        // 图片存在且符合大小要求，发送给服务端
-                        addLog(`找到图片: ${result.fileName}, 大小: ${result.fileSize}字节`, 'success');
-                        sendMessageToServer({
-                            type: 'ride-image',
-                            rideId: rideId,
-                            username: gameName,
-                            uid: currentRider.uid,
-                            imageData: result.base64,
-                            fileName: result.fileName
-                        });
-                        addLog('向服务端发送图片信息', 'info');
-                    }).catch(error => {
-                        // 图片不存在或读取失败，发送无图片信息
-                        addLog(`未找到图片或读取失败: ${error}`, 'info');
-                        sendMessageToServer({
-                            type: 'ride-image',
-                            rideId: rideId,
-                            username: gameName,
-                            uid: currentRider.uid,
-                            hasImage: false
-                        });
-                        addLog('向服务端发送无图片信息', 'info');
-                    });
+                if (window.electronAPI && window.electronAPI.readImageMetadata) {
+                    const result = await window.electronAPI.readImageMetadata(imagePath);
+                    if (result && result.success) {
+                        rideImageMeta = {
+                            hasImage: true,
+                            fileName: result.fileName,
+                            fileSize: result.fileSize,
+                            sha256: result.sha256
+                        };
+                        addLog(`找到图片元数据: ${result.fileName}, 大小: ${result.fileSize}字节`, 'success');
+                    } else {
+                        rideImageMeta = { hasImage: false };
+                        addLog(`未找到图片或读取失败: ${(result && result.error) || '未知错误'}`, 'info');
+                    }
                 } else {
-                    // API不可用，发送无图片信息
-                    addLog('图片读取API不可用', 'warning');
-                    sendMessageToServer({
-                        type: 'ride-image',
-                        rideId: rideId,
-                        username: gameName,
-                        uid: currentRider.uid,
-                        hasImage: false
-                    });
-                    addLog('向服务端发送无图片信息', 'info');
+                    // 旧版运行环境没有元数据 API，省略字段以触发服务端兼容回退
+                    addLog('图片元数据 API 不可用，将按兼容模式处理', 'warning');
                 }
             } else {
-                // 房主不需要发送图片
-                addLog('房主无需发送图片', 'info');
+                const targetsDir = `${matchedSchedule.action.config.jsFolder}/targets`;
+                if (window.electronAPI && window.electronAPI.listImageMetadata) {
+                    const result = await window.electronAPI.listImageMetadata(targetsDir);
+                    if (result && result.success) {
+                        rideImageManifest = result.files.map(file => ({
+                            fileName: file.fileName,
+                            fileSize: file.fileSize,
+                            sha256: file.sha256
+                        }));
+                        addLog(`已读取房主图片清单，共 ${rideImageManifest.length} 张`, 'info');
+                    } else {
+                        addLog(`读取房主图片清单失败: ${(result && result.error) || '未知错误'}，将按兼容模式处理`, 'warning');
+                    }
+                } else {
+                    addLog('图片清单 API 不可用，将按兼容模式处理', 'warning');
+                }
             }
             
             // 写入匹配信息到文件
@@ -4564,7 +4562,8 @@
                             ready: true,
                             username: currentRider.username,
                             gameName: currentRider.username,
-                            uid: currentRider.uid
+                            uid: currentRider.uid,
+                            ...(isMember ? { imageMeta: rideImageMeta } : { imageManifest: rideImageManifest })
                         });
                         addLog('向服务端发送信息: 发车准备状态 - true', 'info');
                         
@@ -4591,6 +4590,35 @@
                         uid: currentRider.uid
                     });
                 addLog('向服务端发送信息: 发车准备状态 - false', 'info');
+            }
+        }
+
+        // 服务端在哈希不一致或无法协商时请求图片正文
+        async function handleRideImageRequest(data) {
+            const { rideId, fileName } = data || {};
+            const imageDir = `${appPath}/namePng`;
+            const requestedName = fileName || (data.username ? `${data.username}.png` : '');
+            const safeFileName = requestedName && !/[\\/]/.test(requestedName) && !requestedName.includes('..') ? requestedName : '';
+            const imagePath = safeFileName ? `${imageDir}/${safeFileName}` : '';
+            if (!imagePath || !window.electronAPI || !window.electronAPI.readImageFile) {
+                sendMessageToServer({ type: 'ride-image', rideId, hasImage: false, uid: data.uid, username: data.username });
+                return;
+            }
+            try {
+                const result = await window.electronAPI.readImageFile(imagePath);
+                sendMessageToServer({
+                    type: 'ride-image',
+                    rideId,
+                    username: data.username || safeFileName.replace(/\.png$/i, ''),
+                    uid: data.uid,
+                    imageData: result.base64,
+                    fileName: result.fileName,
+                    sha256: result.sha256
+                });
+                addLog(`按服务端请求发送图片: ${result.fileName}`, 'info');
+            } catch (error) {
+                addLog(`读取请求图片失败: ${error}`, 'warning');
+                sendMessageToServer({ type: 'ride-image', rideId, hasImage: false, uid: data.uid, username: data.username });
             }
         }
         

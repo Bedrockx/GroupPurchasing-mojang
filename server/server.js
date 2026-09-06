@@ -565,7 +565,11 @@ const RideManager = {
       timeoutId: null,
       readyStatus: new Map(),
       removedUsersCache,
-      memberImages: []
+      memberImages: [],
+      imageMetadata: new Map(),
+      hostImageManifest: null,
+      imageUnavailable: new Set(),
+      imageNegotiationStarted: false
     };
   },
 
@@ -2997,6 +3001,55 @@ function updateRideRecordStatus(rideId, status, crashReports = []) {
 
 
 
+// 协商并收集发车所需的队员图片。哈希一致时跳过正文传输；旧版客户端或协商失败时回退为请求正文。
+async function negotiateRideImages(ride, rideId) {
+  if (!ride.memberImages) ride.memberImages = [];
+  if (!ride.imageMetadata) ride.imageMetadata = new Map();
+  const hostUid = ride.host && ride.host.uid;
+  const hostManifestMap = Array.isArray(ride.hostImageManifest)
+    ? new Map(ride.hostImageManifest
+      .filter(item => item && typeof item.fileName === 'string' && typeof item.sha256 === 'string')
+      .map(item => [item.fileName, item.sha256.toLowerCase()]))
+    : null;
+  const pending = [];
+
+  ride.riders.filter(rider => rider.uid !== hostUid).forEach(rider => {
+    const metadata = ride.imageMetadata.get(rider.uid);
+    const existing = ride.memberImages.find(image => image.uid === rider.uid);
+    if (existing || (ride.imageUnavailable && ride.imageUnavailable.has(rider.uid))) return;
+    if (metadata && metadata.hasImage === false) return;
+    const sameImage = hostManifestMap && metadata && metadata.fileName && metadata.sha256
+      && hostManifestMap.get(metadata.fileName) === String(metadata.sha256).toLowerCase();
+    if (sameImage) {
+      log(`队员 ${rider.username} (${rider.uid}) 图片哈希一致，跳过传输`, LOG_TYPES.RIDE, { rideId, uid: rider.uid, fileName: metadata.fileName });
+      return;
+    }
+    const riderSocket = io.sockets.sockets.get(rider.socketId);
+    if (riderSocket) {
+      riderSocket.emit('message', {
+        type: 'ride-image-request',
+        rideId,
+        uid: rider.uid,
+        username: rider.username,
+        fileName: metadata && metadata.fileName
+      });
+      pending.push(rider.uid);
+    }
+  });
+
+  // 等待正文上传，兼容旧版客户端主动发送 ride-image。超时不阻断发车。
+  const deadline = Date.now() + 5000;
+  while (pending.length > 0 && Date.now() < deadline) {
+    const remaining = pending.filter(uid => !ride.memberImages.some(image => image.uid === uid));
+    if (remaining.length === 0) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const unresolved = pending.filter(uid => !ride.memberImages.some(image => image.uid === uid));
+  if (unresolved.length > 0) {
+    log(`部分队员图片未在协商期限内上传: ${unresolved.join(', ')}`, LOG_TYPES.RIDE, { rideId, unresolved });
+  }
+}
+
 // 处理接收信息
 async function handleReceivedMessage(socket, message) {
   try {
@@ -3107,7 +3160,7 @@ async function handleReceivedMessage(socket, message) {
           break;
         case 'ride-ready': {
           // 处理发车准备状态
-          const { rideId, ready, uid } = message;
+          const { rideId, ready, uid, imageMeta, imageManifest } = message;
           const riderConnection = requireAuthenticated(socket);
           if (!riderConnection || riderConnection.isAdmin || typeof uid !== 'string' || typeof ready !== 'boolean') {
             emitSocketError(socket, '发车准备请求无效');
@@ -3129,11 +3182,26 @@ async function handleReceivedMessage(socket, message) {
                 ride.readyStatus = new Map();
               }
               ride.readyStatus.set(rider.uid, ready);
+              if (imageMeta && typeof imageMeta === 'object') {
+                ride.imageMetadata.set(rider.uid, {
+                  hasImage: imageMeta.hasImage !== false,
+                  fileName: typeof imageMeta.fileName === 'string' && imageMeta.fileName.length <= 128 && !/[\\/]/.test(imageMeta.fileName) && !imageMeta.fileName.includes('..') ? imageMeta.fileName : undefined,
+                  fileSize: Number.isFinite(imageMeta.fileSize) ? imageMeta.fileSize : undefined,
+                  sha256: typeof imageMeta.sha256 === 'string' ? imageMeta.sha256.toLowerCase() : undefined
+                });
+              }
+              if (rider.uid === ride.host.uid && Array.isArray(imageManifest)) {
+                ride.hostImageManifest = imageManifest.map(item => ({
+                  fileName: item && typeof item.fileName === 'string' && item.fileName.length <= 128 && !/[\\/]/.test(item.fileName) && !item.fileName.includes('..') ? item.fileName : '',
+                  fileSize: item && Number.isFinite(item.fileSize) ? item.fileSize : undefined,
+                  sha256: item && typeof item.sha256 === 'string' ? item.sha256.toLowerCase() : ''
+                })).filter(item => item.fileName && item.sha256);
+              }
 
               log(`发车准备: 用户 ${rider.username} (${rider.uid}) 状态: ${ready ? '就绪' : '未就绪'}`, LOG_TYPES.RIDE, { username: rider.username, uid: rider.uid, rideId: rideId, room: ride.roomName, ready: ready });
 
               // 检查是否所有用户都已回复
-              if (ride.readyStatus.size === ride.riders.length) {
+              if (ride.readyStatus.size === ride.riders.length && !ride.imageNegotiationStarted) {
                 // 处理未就绪的用户
                 const notReadyRiders = ride.riders.filter(rider => !ride.readyStatus.get(rider.uid));
                 if (notReadyRiders.length > 0) {
@@ -3169,6 +3237,7 @@ async function handleReceivedMessage(socket, message) {
                     RideManager.handleRideCancel(rideId, '所有骑手都未就绪');
                   }
                 } else {
+                  ride.imageNegotiationStarted = true;
                   // 所有用户都已就绪，发送发车消息2
                   ride.status = 'all_ready';
 
@@ -3228,15 +3297,17 @@ async function handleReceivedMessage(socket, message) {
                   }
                 }
 
-                // 收集队员的图片
-                if (!ride.memberImages) {
-                  ride.memberImages = [];
-                }
+                // 仅在全部骑手就绪后收集图片（先完成哈希协商，再发送需要更新的正文）
+                if (ride.imageNegotiationStarted) {
+                  if (!ride.memberImages) {
+                    ride.memberImages = [];
+                  }
 
                 // 检查房主是否存在
-                if (host) {
+                  if (host) {
                   const hostSocket = io.sockets.sockets.get(host.socketId);
                   if (hostSocket) {
+                    await negotiateRideImages(ride, rideId);
                     // 将收集到的图片发送给房主（最多发车人数-1张）
                     const maxImages = ride.riders.length - 1;
                     const imagesToSend = ride.memberImages.slice(0, maxImages);
@@ -3288,6 +3359,7 @@ async function handleReceivedMessage(socket, message) {
                   }
                 }
               }
+              }
             } else {
               log(`收到未在发车列表中的用户的准备状态，rideId: ${rideId}`, LOG_TYPES.ERROR, { rideId: rideId, uid: uid });
             }
@@ -3298,7 +3370,7 @@ async function handleReceivedMessage(socket, message) {
         }
         case 'ride-image': {
           // 处理队员发送的图片
-          const { rideId: imageRideId, username, uid, imageData, fileName, hasImage } = message;
+          const { rideId: imageRideId, username, uid, imageData, fileName, hasImage, sha256 } = message;
           const imageSender = requireAuthenticated(socket);
           if (!imageSender || imageSender.isAdmin || typeof uid !== 'string') {
             emitSocketError(socket, '图片上报请求无效');
@@ -3313,18 +3385,24 @@ async function handleReceivedMessage(socket, message) {
             }
             if (hasImage === false) {
               // 队员没有图片
+              if (!imageRide.imageUnavailable) imageRide.imageUnavailable = new Set();
+              imageRide.imageUnavailable.add(uid);
               log(`队员 ${username} (${uid}) 没有图片`, LOG_TYPES.RIDE, { username: username, uid: uid, rideId: imageRideId });
             } else if (imageData && fileName && fileName.length <= 128 && !fileName.includes('..') && imageData.length <= 10 * 1024 * 1024) {
               // 队员有图片，保存到发车信息中
               if (!imageRide.memberImages) {
                 imageRide.memberImages = [];
               }
-              imageRide.memberImages.push({
+              const imageRecord = {
                 username: username,
                 uid: uid,
                 imageData: imageData,
-                fileName: fileName
-              });
+                fileName: fileName,
+                sha256: typeof sha256 === 'string' ? sha256.toLowerCase() : undefined
+              };
+              const existingIndex = imageRide.memberImages.findIndex(image => image.uid === uid);
+              if (existingIndex >= 0) imageRide.memberImages[existingIndex] = imageRecord;
+              else imageRide.memberImages.push(imageRecord);
               log(`收到队员 ${username} (${uid}) 的图片: ${fileName}`, LOG_TYPES.RIDE, { username: username, uid: uid, rideId: imageRideId, fileName: fileName });
             }
           } else {
