@@ -131,6 +131,8 @@ window.electronAPI = {
       ipcRenderer.send('read-image-file', { filePath });
     });
   },
+  readImageMetadata: (filePath) => ipcRenderer.invoke('read-image-metadata', filePath),
+  listImageMetadata: (directoryPath) => ipcRenderer.invoke('list-image-metadata', directoryPath),
   // 保存图片文件（二进制）
   saveImageFile: (filePath, base64) => {
     return new Promise((resolve, reject) => {
