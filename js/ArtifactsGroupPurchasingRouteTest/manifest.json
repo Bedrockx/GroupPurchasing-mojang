@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "name": "联机团购路线测试",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "bgi_version": "0.61.2",
   "description": "依次测试联机团购内置收尾与占位路线，并按终点距离生成运行报告。",
   "tags": [

@@ -219,7 +219,9 @@ async function getCurrentPosition(route) {
 
   for (let attempt = 1; attempt <= POSITION_RETRY_COUNT; attempt++) {
     try {
-      const position = genshin.GetPositionFromMap(route.mapName, route.endX, route.endY);
+      // 仅使用地图参数，避免 ClearScript 在重载
+      // GetPositionFromMap(string, float, float) 上对 JS Number 的绑定失败。
+      const position = genshin.GetPositionFromMap(route.mapName);
       if (position && isFiniteNumber(position.x) && isFiniteNumber(position.y)) {
         return { x: position.x, y: position.y };
       }
