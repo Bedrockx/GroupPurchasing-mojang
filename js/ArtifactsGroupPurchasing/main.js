@@ -245,10 +245,10 @@ let skipLog = false;
             expGain = Math.max(0, expGain);
             moraGain = Math.max(0, moraGain);
 
-            log.info(`${gameAccount}可获得${expGain}经验`);
-            notification.send(`${gameAccount}可获得${expGain}经验`);
-            log.info(`${gameAccount}获得${moraGain}摩拉`);
-            notification.send(`${gameAccount}获得${moraGain}摩拉`);
+            log.info(`${gameAccount}：联机狗粮分解获得经验${expGain}`);
+            notification.send(`${gameAccount}：联机狗粮分解获得经验${expGain}`);
+            log.info(`${gameAccount}：联机狗粮获得摩拉${moraGain}`);
+            notification.send(`${gameAccount}：联机狗粮获得摩拉${moraGain}`);
 
             // 添加收益报告命令到全局数组
             commands.push({
@@ -849,6 +849,9 @@ async function autoEnter(autoEnterSettings) {
     let enterCount = 0;
     let targetsRo = [];
     let success = false;
+    // 倒计时 = 7s；静默期间循环仍在按 Y 接人，有新的同意就重置倒计时。
+    const COUNT_SETTLE_MS = 7000;
+    let lastAcceptAt = 0;   // 最近一次同意成功的时刻
 
     // ===== 初始化 =====
     setGameMetrics(1920, 1080, 1);
@@ -908,7 +911,9 @@ async function autoEnter(autoEnterSettings) {
 
             await sleep(500);
             if (!await findAndClick(requestEnterRo)) { await genshin.returnMainUi(); continue; }
-            await waitForMainUI(true, 20 * 1000);
+
+            const memberWaitMs = 3200 + Math.floor(Math.random() * 1001);
+            await waitForMainUI(true, memberWaitMs);
 
         } else { // 等待他人进入
             const playerSign = await getPlayerSign();
@@ -957,6 +962,7 @@ async function autoEnter(autoEnterSettings) {
                             doRunExtra = true;
                             await waitForMainUI(true, 20 * 1000);
                             enterCount++;
+                            lastAcceptAt = Date.now();
                             break;
                         }
                     } else {
@@ -966,6 +972,7 @@ async function autoEnter(autoEnterSettings) {
                             if (await findAndClick(allowEnterRo)) {
                                 await waitForMainUI(true, 20 * 1000);
                                 enterCount++;
+                                lastAcceptAt = Date.now();
                                 enteredPlayers = [...new Set([...enteredPlayers, result])];
                                 log.info(`${recognition.method}允许 ${result} 加入`);
                                 notification.send(`${recognition.method}允许 ${result} 加入`);
@@ -984,13 +991,24 @@ async function autoEnter(autoEnterSettings) {
             }
 
             if (enterCount >= maxEnterCount) {
-                await sleep(20000);
-                if (await findTotalNumber() === maxEnterCount + 1) {
-                    notification.send(`已达到预定人数：${maxEnterCount + 1}`);
-                    metExpectedCount = true;
-                    break;
+                // 倒计时版：最后一次同意后静默 7s 立即数人。
+                // 静默期间循环仍在按 Y 接人，有新的同意就重置倒计时（排队排空后再数）。
+                const quietMs = Date.now() - lastAcceptAt;
+                if (quietMs >= COUNT_SETTLE_MS) {
+                    let totalNumber = await findTotalNumber();
+                    for (let retry = 0; retry < 2 && totalNumber !== maxEnterCount + 1; retry++) {
+                        await sleep(1000);
+                        totalNumber = await findTotalNumber();
+                    }
+                    if (totalNumber === maxEnterCount + 1) {
+                        notification.send(`已达到预定人数：${maxEnterCount + 1}`);
+                        metExpectedCount = true;
+                        break;
+                    } else {
+                        // 用真实人数回填，避免“幽灵计数”累积
+                        enterCount = Math.max(0, totalNumber - 1);
+                    }
                 }
-                else enterCount--;
             }
         }
     }
