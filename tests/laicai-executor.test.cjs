@@ -29,6 +29,62 @@ async function admit(file, executor) {
 }
 const join = () => ({ op: "join-result", payload: { status: "joined", position: 2, fromSingle: true } });
 
+test("在补证期间收到取消、换路线、移出、退场或终止不会再提交旧证据", async () => {
+    const original = packet("r1", "run-route", { ...world, routeSeq: 1 });
+    const proof = { status: "success", evidence: "reward", isLast: false };
+    const commands = [
+        packet("cancel", "cancel-route", { ...world, routeSeq: 1 }, { targetMessageId: "r1" }),
+        packet("r2", "run-route", { ...world, routeSeq: 2 }),
+        packet("removed", "roster-update", { ...world, rosterVersion: 2 }, { roster: [] }),
+        packet("leave", "leave-world", world),
+        packet("end", "task-end")
+    ];
+    for (const cmd of commands) {
+        const file = fakeFile(), runs = [];
+        let reportReward;
+        const ex = createExecutor({ file, role: "big", actions: {
+            "join-world": join,
+            "leave-world": () => ({ op: "seat-left", payload: { single: true } }),
+            "run-route"(c) {
+                runs.push(c.routeSeq);
+                if (c.routeSeq === 2) return { op: "route-result", payload: proof };
+                return { op: "route-result", payload: { status: "await-team", isLast: false },
+                    observeProof: () => new Promise(resolve => { reportReward = resolve; }) };
+            }
+        } });
+        await admit(file, ex);
+        deliver(file, original); ex.poll();
+        await new Promise(resolve => setImmediate(resolve));
+        deliver(file, cmd); ex.poll();
+        reportReward(proof);
+        await ex.settle(); ex.poll(); await ex.settle();
+        const statuses = results(file, "route-result").filter(m => m.replyTo === "r1").map(m => m.payload.status);
+        assert.deepEqual(statuses, ["await-team"], cmd.op);
+        assert.deepEqual(runs, cmd.op === "run-route" ? [1, 2] : [1], cmd.op);
+    }
+});
+
+test("客户端离线期间保留两次路线回报，重复派发仅重放原消息", async () => {
+    const file = fakeFile(), original = packet("r", "run-route", { ...world, routeSeq: 1 });
+    let runs = 0;
+    const options = { file, role: "big", actions: { "join-world": join, "run-route"() {
+        runs++;
+        return { op: "route-result", payload: { status: "await-team", isLast: true },
+            observeProof: async () => ({ status: "success", evidence: "reward", isLast: true }) };
+    } } };
+    const ex = createExecutor(options);
+    await admit(file, ex);
+    deliver(file, original); ex.poll(); await ex.settle();
+    const saved = results(file, "route-result");
+    assert.deepEqual(saved.map(m => m.payload.status), ["await-team", "success"]);
+    assert.ok(saved.every(m => m.replyTo === original.messageId));
+    for (const key of file.files.keys()) if (key.startsWith("mailbox/out/")) file.files.delete(key);
+    const recovered = createExecutor(options);
+    recovered.poll(); await recovered.settle();
+    assert.deepEqual(results(file, "route-result"), saved);
+    assert.equal(runs, 1);
+});
+
 test("执行期间接收取消，旧世界和旧路线取消不触及当前追踪", async () => {
     const file = fakeFile();
     let cancelCalls = 0, finish;

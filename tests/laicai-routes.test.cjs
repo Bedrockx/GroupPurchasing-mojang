@@ -64,6 +64,16 @@ test("没有个人奖励的慢席仅报告自身完成，偏离终点或仍在�
         await assert.rejects(run(), /未能同时确认/);
     }
 });
+test("补证观察截止于追踪结束七秒或原授权超时，以先到者为准", async () => {
+    for (const [timeoutSeconds, cutoff] of [[30, 7000], [3, 3000]]) {
+        const { env, model, ops, control } = setup();
+        env.reward = () => model.t >= cutoff ? "角色经验+19" : "";
+        const result = await ops["run-route"]({ routeSeq: 1, payload: { timeoutSeconds } }, control, {});
+        assert.equal(result.payload.status, "await-team");
+        assert.equal(await result.observeProof(), null);
+        assert.equal(model.t, cutoff);
+    }
+});
 test("辅助追踪被取消后不开始主追踪，文件异常与全局停止分别传播", async () => {
     const { env, calls, control, sources, run } = setup();
     env.needFurina = () => true;

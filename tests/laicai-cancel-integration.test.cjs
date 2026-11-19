@@ -72,6 +72,8 @@ test('runFile 返回 finished 且到达终点，缺少本次战斗证据时向�
     await new Promise(resolve=>setImmediate(resolve));
   }
   assert(finished);
-  assert.deepEqual(await action,{op:'route-result',payload:{status:'await-team',isLast:false}});
+  const report=await action;
+  assert.equal(report.op,'route-result');
+  assert.deepEqual(report.payload,{status:'await-team',isLast:false});
   assert(host.tokens.every(token=>token.disposed && !token.canceled));
 });

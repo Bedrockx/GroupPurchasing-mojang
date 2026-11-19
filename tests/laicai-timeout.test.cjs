@@ -42,6 +42,25 @@ test('降员后保留同轮证据和存活席的原授权，只有小号确认�
   assert.equal(r.sent('route-release',{routeSeq:2}).length,2,'当前世界不增员');
 });
 
+test('降员后的存活大号可以按原路线授权补交迟到的同轮奖励',async t=>{
+  const r=await enter(t,{allowMissing:true});
+  const [a,b,c]=r.sent('route-release');
+  const proof={status:'success',isLast:false,evidence:'reward'};
+  await r.reply(a,'route-result',{status:'await-team',isLast:false});
+  await r.reply(c,'route-result',{status:'failed',reason:'追踪失败'});
+  await r.reply(b,'route-result',{status:'await-team',isLast:false});
+  await r.reply(r.sent('roster-update').find(x=>x.uid==='D'),'world-members',{
+    stable:true,ambiguous:false,members:r.members.slice(0,2),observedUid:a.data.worldUid,admissionMode:'confirm'
+  });
+  assert.equal(r.sent('route-release',{routeSeq:2}).length,0);
+  for (const fields of [{messageId:b.data.messageId},{rosterVersion:a.data.rosterVersion+1},{rosterVersion:99},{routeSeq:2}]) {
+    await assert.rejects(r.reply({...a,data:{...a.data,...fields}},'route-result',proof));
+  }
+  const report=await r.reply(a,'route-result',proof);
+  await r.send(a.uid,report);
+  assert.equal(r.sent('route-release',{routeSeq:2}).length,2);
+});
+
 test('严格房超时取消、清场超时持久隔离，服务重启后原客户端取得终态',async t=>{
   const directory=temporaryData(t);
   const r=await enter(t,{directory,bigCount:1});

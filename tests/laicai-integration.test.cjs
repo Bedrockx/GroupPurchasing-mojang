@@ -36,12 +36,12 @@ test('服务端、主用户及大号客户端通过实际邮箱连续完成两�
   assert.equal(room.sent('task-end')[0].data.payload.worldResults.length,2);
 });
 
-function teamGame(witnessUid) {
+function teamGame(witnessUid,rewardDelay=0) {
   const hosts=new Map();
   const game=gameScreen(async (command,{uid,now,wait,ui,control})=>{
     if (!hosts.has(uid)) {
       const number=Number(uid.slice(-1));
-      const host=pathingHost({now,wait,positionSign:ui.sign,duration:1500+number*1200,showReward:uid===witnessUid});
+      const host=pathingHost({now,wait,positionSign:ui.sign,duration:1500+number*1200,showReward:uid===witnessUid,rewardDelay});
       hosts.set(uid,host);
       host.actions.enablePickup();
     }
@@ -86,4 +86,24 @@ test('三大号都跑完、到终点且脱战，全队无人观察到战斗结�
   assert.equal(room.sent('route-release',{routeSeq:2}).length,0);
   assert.equal(room.sent('task-end').length,0);
   for (const host of hosts.values()) assert.deepEqual(host.calls,[catalog.routes.A.file]);
+});
+
+test('本席先报告 await-team，追踪结束 1.5 秒后出现的奖励按同一网络授权补报',async t=>{
+  const {game,hosts}=teamGame('100000001',1500);
+  let waitingSince;
+  const {room,trace}=await simulateTask(t,{workers:[{workerId:'worker1',uids:['200000001']}],
+    bigCount:1,makeActions:game.makeActions,
+    stopWhen:room=>{
+      const task=room.app.get('laicaiTasks').get('测试房间');
+      if (task?.phase==='waiting-evidence') waitingSince ??= room.app.clock.now;
+      return room.sent('route-release',{routeSeq:2}).length>0 || room.app.clock.now-waitingSince>8000;
+    }});
+  const sent=trace.filter(p=>p.direction==='up' && p.data.op==='route-result' && p.data.routeSeq===1);
+  const results=[...new Map(sent.map(p=>[p.data.messageId,p.data])).values()];
+  assert.deepEqual(results.map(m=>m.payload.status),['await-team','success']);
+  const original=room.sent('route-release',{routeSeq:1})[0].data;
+  assert.ok(results.every(m=>m.replyTo===original.messageId && m.worldAttemptId===original.worldAttemptId));
+  assert.equal(results[1].payload.evidence,'reward');
+  assert.equal(room.sent('route-release',{routeSeq:2}).length,1);
+  assert.deepEqual(hosts.get('100000001').calls,[catalog.routes.A.file]);
 });

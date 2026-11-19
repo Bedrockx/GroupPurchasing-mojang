@@ -200,6 +200,11 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
                     if (single) { closeWorld(s); s.single = true; }
                     emit(rec, result.op, result.payload);
                     if (single) emit(rec, "executor-ready", { role, laicaiVersion: LAICAI_VERSION, single: true }, true);
+                    if (result.observeProof) {
+                        job.awaitingProof = true;
+                        const proof = await result.observeProof();
+                        if (proof && !job.canceled) emit(rec, "route-result", proof);
+                    }
                 }
                 terminal(rec, "applied");
             } catch (error) {
@@ -237,6 +242,7 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
             return false;
         }
         if (!invalid && busy && !control.includes(c.op)) {
+            if (c.op === "run-route" && busy.awaitingProof && c.routeSeq > busy.command.routeSeq) cancel(busy);
             if (c.op === "leave-world" && c.worldAttemptId === busy.command.worldAttemptId &&
                 ["run-route", "join-world"].includes(busy.command.op)) cancel(busy);
             return false;
@@ -875,6 +881,13 @@ function createRouteActions(env) {
                     localCancel("本条路线已取消或超时");
                 }
             }
+            async function checkGlobalStop() {
+                try { await env.checkGlobal(); } catch {
+                    const stop = new Error("BetterGI 全局任务已停止");
+                    stop.globalStop = true;
+                    throw stop;
+                }
+            }
             let evidence = false;
             let prevReward;
             async function observeReward() {
@@ -907,6 +920,7 @@ function createRouteActions(env) {
                     if (status === "canceled") localCancel("本次地图追踪已局部取消");
                     if (status !== "finished") throw new Error("BetterGI 未返回预期的单次追踪结果");
                     check();
+                    return env.now();
                 } finally {
                     running = false;
                     control.cts = null;
@@ -918,32 +932,48 @@ function createRouteActions(env) {
                 check();
                 if (route.tp) { await env.teleport(...route.tp); check(); }
                 if (env.needFurina()) await track(env.routes.furina, false);
-                await track(route.file, true);
+                const finishedAt = await track(route.file, true);
                 let stable = 0;
-                const verifyUntil = Math.min(until, env.now() + 7000);
-                while (env.now() < verifyUntil) {
-                    check();
+                const isLast = cmd.routeSeq === ids.length;
+                const verifyUntil = Math.min(until, finishedAt + 7000);
+                async function sampleEnd() {
                     await observeReward();
-                    check();
                     const pos = await env.position(route.map);
                     const clear = near(route.end, pos) && [2, 3, 4].includes(env.sign()) && !env.enemyVisible();
                     stable = clear ? stable + 1 : 0;
-                    if (stable >= 2) {
-                        const isLast = cmd.routeSeq === ids.length;
-                        return { op: "route-result", payload: evidence
-                            ? { status: "success", evidence: "reward", isLast }
-                            : { status: "await-team", isLast } };
+                }
+                // 本席可先参加同步。迟到的奖励只能在原复核窗口和原授权内补报。
+                async function observeProof() {
+                    while (!control.canceled && env.now() < verifyUntil) {
+                        try {
+                            await env.wait(Math.min(450, verifyUntil - env.now()));
+                            if (control.canceled || env.now() >= verifyUntil) break;
+                            await sampleEnd();
+                        } catch {
+                            stable = 0;
+                            await checkGlobalStop();
+                            continue;
+                        }
+                        if (!control.canceled && env.now() < verifyUntil && stable >= 2 && evidence)
+                            return { status: "success", evidence: "reward", isLast };
                     }
-                    await env.wait(450);
+                    return null;
+                }
+                while (env.now() < verifyUntil) {
+                    check();
+                    await sampleEnd();
+                    check();
+                    if (env.now() >= verifyUntil) break;
+                    if (stable >= 2) {
+                        if (evidence) return { op: "route-result", payload: { status: "success", evidence: "reward", isLast } };
+                        return { op: "route-result", payload: { status: "await-team", isLast }, observeProof };
+                    }
+                    await env.wait(Math.min(450, verifyUntil - env.now()));
                 }
                 check();
                 throw new Error("未能同时确认终点、客人席位和脱离战斗");
             } catch (error) {
-                try { await env.checkGlobal(); } catch {
-                    const stop = new Error("BetterGI 全局任务已停止");
-                    stop.globalStop = true;
-                    throw stop;
-                }
+                await checkGlobalStop();
                 throw error;
             }
         }

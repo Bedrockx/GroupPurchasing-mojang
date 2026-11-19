@@ -3603,6 +3603,9 @@ function lcRuntime(task, seat, m) {
   const p = m.payload;
   const world = task.worlds.find(w => w.worldAttemptId === m.worldAttemptId && w.worldUid === m.worldUid);
   const pending = task.pending.find(i => i.seatId === seat.seatId && i.message.messageId === m.replyTo);
+  const priorRoute = m.op === 'route-result' && world?.completed?.find(r => r.seatId === seat.seatId);
+  const sameProofCommand = priorRoute?.status === 'await-team' && p.status === 'success' &&
+    priorRoute.commandId === m.replyTo && (priorRoute.rosterVersion ?? world.rosterVersion) === m.rosterVersion;
   if (m.op === 'ack' && pending?.message.op === 'cancel-attempt') {
     const sent = pending.message;
     if (['workerId','slotId','slotGeneration','worldAttemptId','worldUid'].some(key => sent[key] !== m[key])) throw Error('撤销回执尝试不匹配');
@@ -3620,6 +3623,7 @@ function lcRuntime(task, seat, m) {
   if (world && m.rosterVersion !== undefined && m.rosterVersion !== world.rosterVersion &&
       !(world.effective.includes(seat.seatId) && pending?.message.op==='route-release' &&
         pending.message.rosterVersion===m.rosterVersion && ['route-result','ack'].includes(m.op)) &&
+      !sameProofCommand &&
       !(m.op==='seat-left' && pending?.message.op==='leave-world' && world.removed?.includes(seat.seatId))) throw Error('旧名册');
   if (seat.role === 'big' && m.seatId && m.seatId !== seat.seatId) throw Error('席位不匹配');
   const complete = op => {
@@ -3738,13 +3742,12 @@ function lcRuntime(task, seat, m) {
         lcDrop(task,world,[seat.seatId],p.reason || '路线未完成');
         break;
       }
-      const prior = world.completed.find(r => r.seatId === seat.seatId);
-      if (prior) {
-        if (prior.status !== 'await-team' || p.status !== 'success' || prior.commandId !== m.replyTo ||
-            prior.isLast !== p.isLast || (world.proofUntil && Date.now() >= world.proofUntil)) throw Error('此席路线回报已处理');
+      if (priorRoute) {
+        if (!sameProofCommand || priorRoute.isLast !== p.isLast ||
+            (world.proofUntil && Date.now() >= world.proofUntil)) throw Error('此席路线回报已处理');
       } else complete('route-release');
-      const result = {seatId:seat.seatId,commandId:m.replyTo,isLast:p.isLast,status:p.status};
-      if (prior) Object.assign(prior,result);
+      const result = {seatId:seat.seatId,commandId:m.replyTo,rosterVersion:m.rosterVersion,isLast:p.isLast,status:p.status};
+      if (priorRoute) Object.assign(priorRoute,result);
       else world.completed.push(result);
       if (p.status === 'success' && !world.proof) world.proof = {seatId:seat.seatId,evidence:p.evidence,routeSeq:m.routeSeq};
       lcRouteBarrier(task,world);
