@@ -1,96 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-
-const filename = path.join(__dirname, '..', 'server', 'server.js');
-const source = fs.readFileSync(filename, 'utf8');
-const seats = ['A', 'B', 'C', 'D'].map(uid => ({
-  uid, username: uid, socketId: uid, accountId: uid === 'C' ? 'B' : uid, notHost: uid !== 'A'
-}));
-
-function temporaryData(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mojang-server-test-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-// 每次创建独立的服务端运行环境。账本使用临时目录，监听、网络和定时任务由测试接管。
-async function boot(dir) {
-  const clock = { now: Date.parse('2024-03-01T04:30:00+08:00') };
-  class ClockDate extends Date {
-    constructor(...args) { super(...(args.length ? args : [clock.now])); }
-    static now() { return clock.now; }
-  }
-  const messages = [];
-  const sockets = new Map(seats.map(({ uid }) => [uid, {
-    id: uid, connected: true,
-    emit(_event, data) { messages.push({ uid, data }); }
-  }]));
-  let started, failed;
-  const ready = new Promise((resolve, reject) => { started = resolve; failed = reject; });
-  const noop = () => {};
-  const express = Object.assign(() => ({ get: noop, use: noop }), { static: noop });
-  const disk = Object.create(fs);
-  disk.appendFile = (_file, _data, callback) => callback(null);
-  const modules = {
-    express, fs: disk, path, crypto: require('node:crypto'),
-    http: { createServer: () => ({ listen: started }) },
-    'socket.io': () => ({ sockets: { sockets }, on: noop })
-  };
-  const ctx = vm.createContext({
-    __dirname: dir, Date: ClockDate, Buffer,
-    require(name) { assert(Object.hasOwn(modules, name), name); return modules[name]; },
-    console: { log: noop, error: noop, warn: noop },
-    process: { pid: process.pid, on: noop, exit: code => failed(new Error('初始化退出 ' + code)) },
-    setTimeout(callback, delay) {
-      if (delay === 2000) queueMicrotask(callback); // 图片传输后的发车延时
-      return { unref: noop };
-    },
-    setInterval: () => ({ unref: noop }), clearTimeout: noop, clearInterval: noop
-  });
-  vm.runInContext(source, ctx, { filename });
-  await ready;
-  const get = name => vm.runInContext(name, ctx);
-  for (const seat of seats) {
-    const accounts = get('userAccounts');
-    accounts[seat.accountId] ||= { points: 20, rooms: ['测试房间'] };
-    const connections = get('userConnections');
-    if (!connections.has(seat.accountId)) {
-      connections.set(seat.accountId, { userInfo: { username: seat.accountId }, connections: [] });
-    }
-    connections.get(seat.accountId).connections.push(seat);
-  }
-  return {
-    clock, disk, get, messages,
-    async send(uid, message) { await get('handleReceivedMessage')(sockets.get(uid), message); },
-    async openRide() {
-      const room = { name: '测试房间', mode: 'random', count: 4, users: [...seats] };
-      if (!get('rooms').some(r => r.name === room.name)) get('rooms').push(room);
-      get('roomUsers').set(room.name, room);
-      await get('checkAndHandleRideInternal')(room.name);
-      const ride = [...get('RideManager').activeRides.values()][0];
-      assert(ride, '房间应已匹配');
-      return ride.record.rideId;
-    },
-    report(uid, rideId, evidence = {}) {
-      get('handleReportCrash')({
-        rideIdentifier: rideId, reportId: rideId + '-' + uid,
-        crashInfo: { reporter: { uid }, crashType: uid === 'A' ? 'waitForExpectedPlayers' : 'playerTimeoutEnterWorld', ...evidence }
-      }, sockets.get(uid));
-      assert.equal(messages.at(-1).data.type, 'report-ack');
-      assert.equal(messages.at(-1).data.success, true);
-    },
-    async ranking(gainType, date) {
-      await get('handleGetGainRecords')({ gainType, date }, sockets.get('A'));
-      const response = messages.at(-1).data;
-      assert.equal(response.type, 'gain-records');
-      return new Map(response.data.map(row => [row.gameAccount, row.expGain + row.moraGain]));
-    }
-  };
-}
+const { boot, temporaryData, seats } = require('./helpers/server-fixture.cjs');
 
 async function prepare(app, id, ackUids) {
   for (const { uid } of seats) {
@@ -215,4 +127,71 @@ test('收益回执丢失后跨重启、跨四点重试保留真零且只落盘�
   assert.equal(readDay('2024-02-29').B[0].expGain, 0);
   assert(!Object.hasOwn(readDay('2024-02-29').B[0], 'moraGain'));
   assert.equal(readDay('2024-03-01').B, undefined);
+});
+
+const lcRoom = '测试房间';
+const uid1 = '100000010';
+let lcSequence = 0;
+async function lcSend(app, socket, op, payload, scope = {}) {
+  const m = {type:'laicai', version:1, messageId:'m' + (++lcSequence), roomName:lcRoom, op, payload, ...scope};
+  await app.send(socket, m);
+  return app.messages.filter(entry => entry.uid === socket && entry.data.replyTo === m.messageId).at(-1)?.data;
+}
+function lcReady(role, clientId, data = {}) {
+  return {role,clientId, laicaiVersion:'1.0.0', ...(role === 'big' ? {gameName:clientId, uid:'100000001'} :
+    {workers:[{workerId:'worker_1',uids:[uid1]}]}), ...data};
+}
+function lcRoomSetup(app, config = {}) {
+  const laicai = {bigCount:1, worldUids:[uid1], allowMissing:true, timeoutSeconds:120, ...config};
+  app.get('rooms').push({name:lcRoom, mode:'random', count:laicai.bigCount+1, roomType:'laicai', laicai});
+}
+
+test('来财认证报名与撤销，兼容旧房并只在角色全部就绪时启动一次', async t => {
+  const dir = temporaryData(t);
+  const app = await boot(dir);
+  lcRoomSetup(app);
+  const bad = await lcSend(app,'B','seat-ready', lcReady('host','pc_B',{workers:[{workerId:'w',uids:[uid1,uid1]}]}));
+  assert.ok(bad, JSON.stringify(app.messages.slice(-2)));
+  assert.equal(bad.payload.status,'rejected');
+  await lcSend(app,'A','seat-ready',lcReady('big','pc_A'));
+  await lcSend(app,'A','seat-withdraw',{clientId:'pc_A'});
+  await lcSend(app,'B','seat-ready',lcReady('host','pc_B'));
+  assert.equal(app.get('laicaiTasks').size,0);
+  assert.equal((await lcSend(app,'A','seat-ready',lcReady('big','pc_A',{laicaiVersion:'2'}))).payload.status,'rejected');
+  assert.equal((await lcSend(app,'A','seat-ready',lcReady('big','pc_A'))).payload.status,'applied');
+  const start = app.messages.filter(o => o.data.op === 'task-start');
+  assert.equal(start.length,2);
+  assert.equal(start[0].data.taskId,start[1].data.taskId);
+  await app.get('checkAndHandleRideInternal')(lcRoom);
+  assert.equal(app.get('RideManager').activeRides.size,0);
+  app.get('adminConnections').set('管理员', {adminInfo:{username:'管理员'},connections:[{socketId:'adminSocket'}]});
+  let details;
+  app.get('handleGetRoomUsers')({roomName:lcRoom},{id:'adminSocket', emit:(_, msg) => {details=msg;}});
+  assert.equal(details.roomProperties.roomType,'laicai');
+  assert.equal(details.roomProperties.laicai.worldUids[0],uid1);
+  assert.ok(details.users.some(s => s.role === 'host' && s.online && s.uid === ''));
+  assert.equal((await lcSend(app,'D','state-request',{clientId:'pc_A'})).payload.task,null);
+  const next = await boot(dir);
+  lcRoomSetup(next);
+  const state = await lcSend(next,'A','state-request',{clientId:'pc_A'});
+  assert.equal(state.payload.task.taskId,start[0].data.taskId);
+  assert.equal(next.messages.filter(o => o.data.op === 'task-start').length,1);
+});
+
+test('管理员创建及编辑来财参数经房间查询回显，旧房不被自动转换', async t => {
+  const app = await boot(temporaryData(t));
+  app.get('adminConnections').set('管理', {adminInfo:{username:'管理'},connections:[{socketId:'q'}]});
+  const replies = [];
+  const socket = {id:'q',emit:(_, m) => replies.push(m)};
+  const admin = m => app.get('handleReceivedMessage')(socket,m);
+  const config = {bigCount:3,worldUids:[uid1],allowMissing:false,timeoutSeconds:15};
+  await admin({type:'create-room',roomName:lcRoom,roomType:'laicai',laicai:config});
+  await admin({type:'get-rooms-status'});
+  assert.equal(replies.at(-1).data[lcRoom].count,4);
+  assert.equal(replies.at(-1).data[lcRoom].laicai.timeoutSeconds,15);
+  await admin({type:'edit-room-properties',roomName:lcRoom,newRoomName:lcRoom,roomMode:'random',roomCount:4,roomType:'laicai',laicai:{...config,bigCount:4}});
+  assert.equal(replies.at(-1).type,'error');
+  await admin({type:'edit-room-properties',roomName:lcRoom,newRoomName:lcRoom,roomMode:'random',roomCount:4,roomType:'group'});
+  await admin({type:'get-rooms-status'});
+  assert.equal(replies.at(-1).data[lcRoom].roomType,undefined);
 });

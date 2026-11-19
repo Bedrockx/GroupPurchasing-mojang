@@ -16,6 +16,61 @@ const crypto = require('crypto');
 // 服务端版本号
 const SERVER_VERSION = '1.4.0';
 
+// 来财 v1。字段组按操作组合，收件人由当前登录连接或绑定的本地邮箱确认。
+const LAICAI_OPS = {
+  'seat-ready': ['big host', ''], 'seat-withdraw': ['big host', ''],
+  'task-start': ['server', 'T'], 'executor-ready': ['big host', 'T'],
+  heartbeat: ['big host', 'T'], 'state-request': ['big host', ''],
+  'state-snapshot': ['server', ''], ack: ['server big host', ''],
+  'prepare-world': ['server', 'TWK'], 'worker-stage': ['host', 'TWK'],
+  'world-ready': ['host', 'TWK'], 'open-admission': ['server', 'TWKN'],
+  'admission-opened': ['host', 'TWKN'], 'admit-seat': ['server', 'TWKNS'],
+  'seat-armed': ['host', 'TWKNS'], 'join-world': ['server', 'TWNS'],
+  'join-result': ['big', 'TWNS'], 'world-members': ['host', 'TWKN'],
+  'route-release': ['server', 'TWNSR'], 'route-result': ['big', 'TWNSR'],
+  'run-route': ['bridge', 'TWNSR'], 'roster-update': ['server', 'TWN'],
+  'cancel-route': ['server bridge', 'TWNSR'], 'leave-world': ['server', 'TWNS'],
+  'seat-left': ['big', 'TWNS'], 'check-clear': ['server', 'TWKN'],
+  'world-cleared': ['host', 'TWKN'], 'release-world': ['server', 'TWK'],
+  'cancel-attempt': ['server host', 'TWK'], 'task-end': ['server', 'T']
+};
+
+function laicaiEnvelopeError(message, sender, expected = {}) {
+  const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+  const positive = value => Number.isSafeInteger(value) && value >= 1;
+  if (!message || message.type !== 'laicai' || message.version !== 1 ||
+      !Object.hasOwn(LAICAI_OPS, message.op) || !id(message.messageId) ||
+      typeof message.roomName !== 'string' || !message.roomName.trim() ||
+      !message.payload || typeof message.payload !== 'object' || Array.isArray(message.payload)) return 'invalid-envelope';
+  const [allowed, scope] = LAICAI_OPS[message.op];
+  if (!allowed.split(' ').includes(sender)) return 'wrong-role';
+  if (scope.includes('T') && !id(message.taskId)) return 'invalid-task';
+  if (scope.includes('W') && (!id(message.worldAttemptId) ||
+      typeof message.worldUid !== 'string' || !/^\d{9,10}$/.test(message.worldUid))) return 'invalid-world';
+  if (scope.includes('K') && (!id(message.workerId) || ![1, 2].includes(message.slotId) ||
+      !positive(message.slotGeneration))) return 'invalid-worker';
+  if (scope.includes('N') && !positive(message.rosterVersion)) return 'invalid-roster';
+  if (scope.includes('S') && !id(message.seatId)) return 'invalid-seat';
+  if (scope.includes('R') && !positive(message.routeSeq)) return 'invalid-route';
+  if (message.replyTo !== undefined && !id(message.replyTo)) return 'invalid-reply';
+  const directReply = ['ack', 'world-ready', 'admission-opened', 'seat-armed', 'join-result',
+    'route-result', 'seat-left', 'world-cleared'];
+  if (directReply.includes(message.op) && !id(message.replyTo)) return 'invalid-reply';
+  for (const [field, value] of Object.entries(expected)) {
+    if (message[field] !== value) return 'stale-context';
+  }
+  const p = message.payload;
+  if (message.op === 'world-ready' && (p.observedUid !== message.worldUid ||
+      !Number.isSafeInteger(p.exactReads) || p.exactReads < 2)) return 'invalid-evidence';
+  if (message.op === 'route-result' && (!['success','await-team','failed','canceled','empty'].includes(p.status) ||
+      (['success','await-team'].includes(p.status) && typeof p.isLast !== 'boolean') ||
+      (p.status === 'success' && !['reward','combat-transition'].includes(p.evidence)) ||
+      (['failed','canceled'].includes(p.status) && !(typeof p.reason === 'string' && p.reason.trim())))) return 'invalid-result';
+  if (message.op === 'open-admission' && (!Array.isArray(p.roster) || !p.roster.length)) return 'invalid-roster';
+  if (message.op === 'admit-seat' && (!/^\d{9,10}$/.test(p.uid) || typeof p.gameName !== 'string' || !p.gameName.trim())) return 'invalid-seat';
+  return null;
+}
+
 // 错误类型枚举
 const ErrorType = {
   VALIDATION: 'VALIDATION',
@@ -378,6 +433,12 @@ function bandwidthLimitMiddleware(req, res, next) {
 // 数据文件路径
 const DATA_DIR = path.join(__dirname, 'data');
 const ROOMS_FILE = path.join(DATA_DIR, 'rooms.json');
+const LAICAI_FILE = path.join(DATA_DIR, 'laicai_tasks.json');
+const LAICAI_RESULTS_DIR = path.join(DATA_DIR, 'laicai-results');
+const laicaiTasks = new Map();
+const laicaiSeen = new Map();
+const laicaiWaiting = new Map();
+const laicaiRegistrationAcks = new Map();
 const USER_ACCOUNTS_FILE = path.join(DATA_DIR, 'user_accounts.json');
 const VERSIONS_FILE = path.join(DATA_DIR, 'versions.json');
 const ADMIN_ACCOUNTS_FILE = path.join(DATA_DIR, 'adminAccounts.json');
@@ -1964,6 +2025,7 @@ function getOrCreateRoom(roomName) {
     roomUsers.set(roomName, {
       mode: mode,
       count: count,
+      ...(roomConfig?.roomType === 'laicai' && {roomType:'laicai', laicai:roomConfig.laicai}),
       users: []
     });
   }
@@ -2637,6 +2699,10 @@ function handleUserOffline(data, socket) {
 // 处理用户上线（添加到房间）
 function handleUserOnline(data, socket) {
   const { username, uid, room: roomName, operatorAccountId, notHost } = data;
+  if (rooms.some(room => room.name === roomName && room.roomType === 'laicai')) {
+    if (socket) emitSocketError(socket, '来财房间请通过角色报名');
+    return;
+  }
 
   // 验证必要参数
   if (!username || !uid || !roomName) {
@@ -3129,6 +3195,738 @@ async function prepareRideLaunch(rideId, ride) {
   }
 }
 
+// 来财房间和报名。任务状态写入成功后才允许发送启动指令。
+function normalizeLaicaiConfig(config) {
+  if (!config || !Number.isInteger(config.bigCount) || config.bigCount < 1 || config.bigCount > 3 ||
+      !Array.isArray(config.worldUids) || !config.worldUids.length || config.worldUids.length > 45 ||
+      !config.worldUids.every(uid => typeof uid === 'string' && /^\d{9,10}$/.test(uid)) ||
+      new Set(config.worldUids).size !== config.worldUids.length) return null;
+  const {bigCount, worldUids, allowMissing = false, timeoutSeconds = 120} = config;
+  if (typeof allowMissing !== 'boolean' || !Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 86400) return null;
+  return {bigCount, worldUids: [...worldUids], allowMissing, timeoutSeconds};
+}
+
+function laicaiRoomsView(room) {
+  if (room.roomType !== 'laicai') return {};
+  const task = laicaiTasks.get(room.name);
+  const seats = task?.seats || laicaiWaiting.get(room.name) || [];
+  const active = task?.worlds.find(w => w.worldAttemptId === task.active);
+  return {roomType:'laicai', laicai:room.laicai, laicaiPhase:task?.phase || 'gathering',
+    laicaiProgress:task && {worldUid:active?.worldUid, preparedUid:task.worlds.find(w => w !== active)?.worldUid,
+      routeSeq:active?.routeSeq, localComplete:active?.completed?.length || 0,
+      complete:active?.proof ? active.completed.filter(r => active.effective.includes(r.seatId)).length : 0,total:active?.effective.length || 0,
+      processedWorlds:task.results.length},
+    users:seats.map(s => ({role:s.role, username:s.gameName || s.accountId, uid:s.uid || '',
+      accountId:s.accountId, seatId:s.seatId, connected:Boolean(io.sockets.sockets.get(s.socketId)?.connected)}))};
+}
+
+function laicaiMsg(roomName, op, payload, context = {}) {
+  return {type:'laicai', version:1, op, roomName, messageId:crypto.randomUUID(), payload, ...context};
+}
+
+function laicaiSaveTasks() {
+  saveDataSync(LAICAI_FILE, [...laicaiTasks.values()]);
+}
+
+// 写盘失败时内存回滚，客户端必须保留原信封。业务验证失败不走此路径。
+class LaicaiStorageError extends Error {
+  constructor(error) {
+    super('来财任务状态暂未保存，请用原消息重试');
+    this.cause = error;
+  }
+}
+
+function lcReliableAck(m) {
+  return m.op === 'ack' && ['started','applied','rejected'].includes(m.payload?.status);
+}
+
+function laicaiRoster(task) {
+  return task.seats.filter(s => s.role === 'big').map(({seatId, uid, gameName}) => ({seatId, uid, gameName}));
+}
+
+function laicaiSnapshot(task, seat) {
+  if (!task || !seat) return null;
+  return {taskId:task.taskId, phase:task.phase, role:seat.role, seatId:seat.seatId,
+    laicaiVersion:seat.laicaiVersion, roster:laicaiRoster(task), ...task.config,
+    worlds:task.worlds.map(w => ({worldUid:w.worldUid, worldAttemptId:w.worldAttemptId, slotId:w.slotId,
+      slotGeneration:w.slotGeneration, workerId:w.workerId, phase:w.phase, rosterVersion:w.rosterVersion,
+      effectiveSeats:w.effective, routeSeq:w.routeSeq, completed:w.completed, deadline:w.recheck?.deadline || w.deadline,
+      waitingForRemoval:Boolean(w.recheck), seats:w.effective.map(seatId=>{
+        const command=task.pending.find(i=>i.seatId===seatId && i.message.op==='route-release' && i.message.worldAttemptId===w.worldAttemptId);
+        return {seatId,status:w.completed.some(r=>r.seatId===seatId)?'waiting':command?.ack || w.phase,deadline:command?.deadline};
+      })})),
+    results:task.results, pending:task.pending.filter(p => p.seatId === seat.seatId).map(p => p.message)};
+}
+
+function lcQueue(task, seat, op, world, extra = {}, payload = {}) {
+  const scope = {taskId:task.taskId, ...extra};
+  if (world) {
+    Object.assign(scope, {worldUid:world.worldUid, worldAttemptId:world.worldAttemptId});
+    if (seat.role === 'host') Object.assign(scope, {workerId:world.workerId,slotId:world.slotId,slotGeneration:world.slotGeneration});
+    if (world.rosterVersion) scope.rosterVersion = world.rosterVersion;
+  }
+  const message = laicaiMsg(task.roomName,op,payload,scope);
+  task.pending.push({seatId:seat.seatId,message, deadline:Date.now()+task.config.timeoutSeconds*1000});
+  if (world && ['open-admission','admit-seat','join-world','check-clear','release-world'].includes(op)) world.deadline=task.pending.at(-1).deadline;
+}
+
+function lcFillSlots(task) {
+  const host = task.seats.find(s => s.role === 'host');
+  const occupied = new Set(task.worlds.map(w => w.workerId));
+  for (const slotId of [1,2]) {
+    if (task.worlds.some(w => w.slotId === slotId) || task.quarantined?.includes(slotId)) continue;
+    const uid = task.config.worldUids.find(uid => !task.results.some(r => r.worldUid === uid) &&
+      !task.worlds.some(w => w.worldUid === uid) &&
+      host.workers.some(worker => worker.uids.includes(uid) && !occupied.has(worker.workerId)));
+    if (!uid) continue;
+    const worker = host.workers.find(w => w.uids.includes(uid));
+    const generation = (task.generations[slotId] || 0) + 1;
+    task.generations[slotId] = generation;
+    const world = {worldUid:uid,worldAttemptId:crypto.randomUUID(),workerId:worker.workerId,slotId,slotGeneration:generation,
+      phase:'preparing', effective:[], admitted:[], left:[], completed:[], routeSeq:0,
+      deadline:Date.now()+90000, prepareUntil:Date.now()+360000, stage:'starting'};
+    task.worlds.push(world);
+    occupied.add(worker.workerId);
+    lcQueue(task,host,'prepare-world',world,{}, {deadline:world.deadline,prepareUntil:world.prepareUntil});
+  }
+}
+
+function lcTryOpen(task) {
+  if (task.active || task.stopping) return;
+  const world = task.worlds[0];
+  if (!world || world.phase !== 'ready') return;
+  const roster = laicaiRoster(task).filter(r => task.seats.some(s => s.seatId === r.seatId && s.ready));
+  if (!roster.length || (!task.config.allowMissing && roster.length < task.config.bigCount) ||
+      task.seats.some(s => s.role === 'big' && !s.ready && !s.removed)) {
+    task.waitReadyUntil ??= Date.now()+task.config.timeoutSeconds*1000;
+    return;
+  }
+  task.waitReadyUntil = null;
+  task.active = world.worldAttemptId;
+  task.phase = 'admission';
+  world.phase = 'opening';
+  world.rosterVersion = 1;
+  world.effective = roster.map(s => s.seatId);
+  const host = task.seats.find(s => s.role === 'host');
+  lcQueue(task,host,'open-admission',world,{}, {roster});
+}
+
+function lcNextApplicant(task, world) {
+  const seat = task.seats.find(s => world.effective.includes(s.seatId) && !world.admitted.includes(s.seatId));
+  if (!seat) return lcStartRoute(task,world);
+  world.phase = 'arming';
+  world.applicant = seat.seatId;
+  world.joinedPosition = null;
+  world.members = [];
+  lcQueue(task,task.seats.find(s => s.role === 'host'),'admit-seat',world,{seatId:seat.seatId},{uid:seat.uid,gameName:seat.gameName});
+}
+
+function lcConfirmAdmission(task, world) {
+  if (!world.joinedPosition || !world.members.some(m => m.seatId === world.applicant && m.position === world.joinedPosition)) return;
+  world.admitted.push(world.applicant);
+  lcNextApplicant(task,world);
+}
+
+function lcStartRoute(task, world) {
+  world.phase = task.phase = 'route';
+  world.deadline = null;
+  world.routeSeq++;
+  world.completed = [];
+  world.proof = null;
+  world.proofUntil = null;
+  for (const seat of task.seats.filter(s => world.effective.includes(s.seatId))) {
+    lcQueue(task,seat,'route-release',world,{seatId:seat.seatId,routeSeq:world.routeSeq});
+  }
+}
+
+function lcRouteBarrier(task, world) {
+  if (world.recheck || world.phase === 'leaving' || world.phase === 'releasing') return;
+  if (!world.effective.length) return;
+  const current = world.completed.filter(r => world.effective.includes(r.seatId));
+  if (current.length !== world.effective.length) return;
+  const labels = new Set(current.map(r => r.status === 'empty' ? 'empty' : String(r.isLast)));
+  if (labels.size > 1) {
+    world.phase = task.phase = 'conflict';
+    world.deadline = Date.now() + task.config.timeoutSeconds * 1000;
+  } else if (labels.has('empty')) {
+    lcLeave(task,world,'empty');
+  } else if (!world.proof) {
+    world.phase = task.phase = 'waiting-evidence';
+    world.proofUntil ??= Date.now() + task.config.timeoutSeconds * 1000;
+    world.deadline = world.proofUntil;
+  } else if (labels.has('false')) {
+    lcStartRoute(task,world);
+  } else {
+    lcLeave(task,world,'completed');
+  }
+}
+
+function lcLeave(task, world, result) {
+  world.phase = task.phase = 'leaving';
+  world.result = result;
+  for (const seat of task.seats.filter(s => (world.admitted.includes(s.seatId) || s.seatId === world.applicant) && !world.left.includes(s.seatId))) {
+    if (task.pending.some(i => i.seatId === seat.seatId && i.message.op === 'leave-world' && i.message.worldAttemptId === world.worldAttemptId)) continue;
+    lcQueue(task,seat,'leave-world',world,{seatId:seat.seatId});
+  }
+  lcQueue(task,task.seats.find(s => s.role === 'host'),'check-clear',world);
+}
+
+function lcCheckLeft(task, world) {
+  const needed = new Set([...world.admitted,world.applicant].filter(Boolean));
+  if (!world.cleared || [...needed].some(id => !world.left.includes(id) && !world.removed?.includes(id))) return;
+  world.phase = 'releasing';
+  lcQueue(task,task.seats.find(s => s.role === 'host'),'release-world',world);
+}
+
+function lcReleased(task, world) {
+  for (const seat of task.seats.filter(s=>world.removed?.includes(s.seatId))) seat.worldReleased=true;
+  task.results.push({worldUid:world.worldUid,status:world.removed?.length && world.result === 'completed' ? 'partial' : world.result,
+    removed:world.removed || []});
+  task.worlds = task.worlds.filter(w => w !== world);
+  task.pending = task.pending.filter(i => i.message.worldAttemptId !== world.worldAttemptId);
+  task.active = null;
+  task.phase = 'preparing';
+  if (task.stopping) lcEnd(task,task.stopping);
+  else lcContinue(task);
+}
+
+function lcEnd(task, reason, unsafeWorlds = []) {
+  if (task.phase === 'ended') return;
+  for (const uid of task.config.worldUids) {
+    if (!task.results.some(r => r.worldUid === uid)) task.results.push({worldUid:uid,status:uid===unsafeWorlds[0]?.worldUid?'unconfirmed':'skipped',reason});
+  }
+  task.phase = 'ended';
+  const status = task.stopping ? 'terminated' : task.results.every(r => r.status === 'completed') ? 'completed' : 'partial';
+  const isolated = [...unsafeWorlds,...(task.unsafeWorlds || []),...task.pending.filter(i=>i.message.op==='cancel-attempt').map(i=>i.message)];
+  task.terminal = {status,reason,worldResults:task.results,unsafeWorlds:isolated.filter((w,index)=>isolated.findIndex(x=>x.worldAttemptId===w.worldAttemptId)===index).map(
+    ({worldAttemptId,worldUid,workerId,slotId,slotGeneration}) => ({worldAttemptId,worldUid,workerId,slotId,slotGeneration}))};
+  task.pending = task.pending.filter(i=>i.message.op==='cancel-attempt');
+  for (const member of task.seats) lcQueue(task,member,'task-end',null,{},task.terminal);
+}
+
+function lcStop(task, reason) {
+  if (task.stopping) return;
+  task.stopping = reason;
+  const world = task.worlds.find(w => w.worldAttemptId === task.active);
+  const host = task.seats.find(s => s.role === 'host');
+  for (const standby of task.worlds.filter(w=>w!==world)) lcQueue(task,host,'cancel-attempt',standby,{}, {reason});
+  task.worlds = world ? [world] : [];
+  if (!world) return lcEnd(task,reason);
+  if (world.phase === 'releasing' || world.phase === 'leaving') return;
+  task.pending = task.pending.filter(i => ['cancel-attempt','cancel-route','leave-world'].includes(i.message.op));
+  world.recheck = null;
+  for (const s of task.seats.filter(s => world.effective.includes(s.seatId) && world.routeSeq && !world.completed.some(r=>r.seatId===s.seatId))) {
+    lcQueue(task,s,'cancel-route',world,{seatId:s.seatId,routeSeq:world.routeSeq},{reason});
+  }
+  lcLeave(task,world,'failed');
+}
+
+function lcDrop(task,world,ids,reason) {
+  const removed = ids.filter(id=>world.effective.includes(id));
+  if (!removed.length) return;
+  if (!task.config.allowMissing) return lcStop(task,reason);
+  world.removed ||= [];
+  world.removed.push(...removed);
+  world.rosterVersion++;
+  world.effective = world.effective.filter(id=>!removed.includes(id));
+  const host = task.seats.find(s => s.role === 'host');
+  const roster = laicaiRoster(task).filter(s=>world.effective.includes(s.seatId));
+  task.pending = task.pending.filter(i=>i.message.op !== 'roster-update' && !(removed.includes(i.seatId) && ['join-world','route-release'].includes(i.message.op)));
+  for (const member of task.seats) {
+    lcQueue(task,member,'roster-update',world,member.role==='big'?{seatId:member.seatId}:{},{roster,removed:[...world.removed],reason});
+    if (!removed.includes(member.seatId)) continue;
+    member.ready=false;
+    member.removed=true;
+    member.needsSingle=true;
+    member.worldReleased=false;
+    if (world.routeSeq && !world.completed.some(r=>r.seatId===member.seatId)) lcQueue(task,member,'cancel-route',world,{seatId:member.seatId,routeSeq:world.routeSeq},{reason});
+    lcQueue(task,member,'leave-world',world,{seatId:member.seatId});
+  }
+  if (!world.effective.length) {
+    world.recheck = null;
+    lcLeave(task,world,'failed');
+    return;
+  }
+  const watch = task.pending.find(i=>i.message.op==='roster-update' && i.seatId===host.seatId);
+  world.recheck={replyTo:watch.message.messageId,deadline:Date.now()+task.config.timeoutSeconds*1000};
+}
+
+function lcContinue(task) {
+  if (task.phase === 'ended' || task.stopping) return;
+  lcFillSlots(task);
+  if (task.worlds.length) return lcTryOpen(task);
+  const missing = task.config.worldUids.filter(uid => !task.results.some(r => r.worldUid === uid));
+  if (missing.length && task.pending.some(item => item.message.op === 'cancel-attempt')) return;
+  for (const worldUid of missing) task.results.push({worldUid,status:'skipped',reason:'无可安全使用的位置'});
+  lcEnd(task,task.results.every(r => r.status === 'completed') ? '世界计划已完成' : '全部可用世界已处理');
+}
+
+function lcSkipWorker(task, world, reason, reusable) {
+  const host = task.seats.find(s => s.role === 'host');
+  const worker = host.workers.find(w => w.workerId === world.workerId);
+  task.worlds = task.worlds.filter(w => w !== world);
+  task.pending = task.pending.filter(i => i.message.worldAttemptId !== world.worldAttemptId);
+  for (const worldUid of worker.uids) {
+    if (task.results.some(r => r.worldUid === worldUid)) continue;
+    task.results.push({worldUid,workerId:world.workerId,status:worldUid === world.worldUid ? 'prepare-failed' : 'skipped',reason});
+  }
+  if (!reusable) {
+    (task.quarantined ||= []).push(world.slotId);
+    (task.unsafeWorlds ||= []).push({worldAttemptId:world.worldAttemptId,worldUid:world.worldUid,workerId:world.workerId,slotId:world.slotId,slotGeneration:world.slotGeneration});
+    lcQueue(task,host,'cancel-attempt',world,{}, {reason});
+    task.pending.at(-1).deadline = Date.now() + task.config.timeoutSeconds * 1000;
+  }
+  lcContinue(task);
+}
+
+function lcPublish(task, draft) {
+  const before = new Set(task.pending.map(i => i.message.messageId));
+  laicaiTasks.set(task.roomName,draft);
+  try {
+    if (draft.phase === 'ended') {
+      fs.mkdirSync(LAICAI_RESULTS_DIR,{recursive:true});
+      saveDataSync(path.join(LAICAI_RESULTS_DIR,draft.taskId + '.json'),{taskId:draft.taskId,roomName:task.roomName,
+        seats:draft.seats.map(({seatId,accountId,clientId})=>({seatId,accountId,clientId})),
+        controlReceipts:draft.receipts.filter(r=>r.ackStatus),
+        finalCommands:draft.pending.filter(i=>i.message.op==='task-end').map(i=>({seatId:i.seatId,commandId:i.message.messageId})),
+        terminal:draft.terminal,results:draft.results});
+      laicaiTasks.delete(task.roomName);
+    }
+    laicaiSaveTasks();
+  } catch (error) { laicaiTasks.set(task.roomName,task); throw new LaicaiStorageError(error); }
+  if (draft.phase==='ended') {
+    for (const key of laicaiSeen.keys()) if (key.startsWith(task.taskId+':')) laicaiSeen.delete(key);
+  }
+  for (const item of draft.pending) {
+    if (!before.has(item.message.messageId)) {
+      const target = draft.seats.find(s => s.seatId === item.seatId);
+      io.sockets.sockets.get(target.socketId)?.emit('message',item.message);
+    }
+  }
+}
+
+function lcTimeout(task, now) {
+  if (task.phase==='starting' && task.startUntil<=now) {
+    const missing=task.seats.filter(s=>!s.started);
+    if (!task.config.allowMissing || missing.some(s=>s.role==='host') || !task.seats.some(s=>s.role==='big'&&s.started))
+      return draft=>lcStop(draft,'参与客户端启动超时');
+    return draft=>{
+      for (const s of draft.seats.filter(s=>!s.started)) { s.removed=true; s.ready=false; }
+      draft.pending=draft.pending.filter(i=>i.message.op!=='task-start' || draft.seats.some(s=>s.seatId===i.seatId && s.started));
+      draft.phase='preparing'; draft.generations={}; lcFillSlots(draft);
+    };
+  }
+  if (task.waitReadyUntil && now>=task.waitReadyUntil && !task.active) {
+    return draft=>{
+      const available=draft.seats.some(s=>s.role==='big'&&s.ready);
+      if (!available || !draft.config.allowMissing) return lcStop(draft,'大号执行端未就绪');
+      for (const s of draft.seats.filter(s=>s.role==='big'&&!s.ready)) s.removed=true;
+      lcTryOpen(draft);
+    };
+  }
+  const w = task.worlds.find(w=>w.worldAttemptId===task.active);
+  if (!w) return null;
+  const onWorld=fn=>draft=>fn(draft,draft.worlds.find(x=>x.worldAttemptId===w.worldAttemptId));
+  if (w.recheck && w.recheck.deadline<=now) return onWorld(d=>lcStop(d,'小号未确认异常席位已经离场'));
+  if (w.phase==='route') {
+    const overdue=task.pending.filter(i=>i.message.op==='route-release' && i.deadline<=now && i.message.worldAttemptId===w.worldAttemptId).map(i=>i.seatId);
+    if (overdue.length) return onWorld((d,v)=>lcDrop(d,v,overdue,'路线接单或执行超时'));
+  }
+  if (['leaving','releasing'].includes(w.phase) && w.deadline<=now) {
+    return onWorld((d,v)=>{d.stopping='退场、清场或释放未确认'; lcEnd(d,d.stopping,[v]);});
+  }
+  if (w.recheck) return null;
+  if (['opening','arming','conflict','waiting-evidence'].includes(w.phase) && w.deadline<=now) {
+    return onWorld((d,v)=>{
+      if (v.phase==='waiting-evidence' && d.config.allowMissing) lcLeave(d,v,'unproven');
+      else lcStop(d,'世界阶段超时：'+v.phase);
+    });
+  }
+  if (w.phase==='joining' && w.deadline<=now) return onWorld((d,v)=>lcDrop(d,v,[v.applicant],'大号入场超时'));
+  // 初次心跳建立两条独立时钟。准备计时与路线执行计时均不能通过心跳续期。
+  if (['route','joining','waiting-evidence'].includes(w.phase)) {
+    // 心跳大约每五秒一次，短命令超时不应把两个正常心跳之间的间隔判为失联。
+    const livenessWindow=Math.max(15000,task.config.timeoutSeconds*1000);
+    const stale=s=>(s.offlineSince && now-s.offlineSince>=livenessWindow) || ['client','executor'].some(source=>{
+      const suffix=s.role==='host' && source==='executor' ? ':'+w.worldAttemptId : '';
+      const at=laicaiSeen.get(task.taskId+':'+s.seatId+':'+source+suffix);
+      return at!==undefined && now-at>=livenessWindow;
+    });
+    if (task.seats.some(s=>s.role==='host' && stale(s))) return onWorld(d=>lcStop(d,'小号主用户失联'));
+    const lost=task.seats.filter(s=>w.effective.includes(s.seatId) && stale(s) &&
+      (w.phase!=='joining'||s.seatId===w.applicant)).map(s=>s.seatId);
+    if (lost.length) return onWorld((d,v)=>lcDrop(d,v,lost,'大号失联'));
+  }
+  return null;
+}
+
+function lcPrepareTick(task) {
+  const now = Date.now();
+  const overdue = task.worlds.filter(w => w.phase === 'preparing' && w.deadline <= now);
+  const cancelExpired = task.pending.filter(i => i.message.op === 'cancel-attempt' && i.deadline <= now);
+  const transition=lcTimeout(task,now);
+  if (!overdue.length && !cancelExpired.length && !transition) return;
+  const draft = JSON.parse(JSON.stringify(task));
+  draft.pending = draft.pending.filter(i => !cancelExpired.some(c => c.message.messageId === i.message.messageId));
+  for (const old of overdue) {
+    const world = draft.worlds.find(w => w.worldAttemptId === old.worldAttemptId);
+    if (world) lcSkipWorker(draft,world,'多用户准备超时：' + world.stage,false);
+  }
+  if (transition && draft.phase!=='ended') transition(draft);
+  if (draft.phase!=='starting') lcContinue(draft);
+  lcPublish(task,draft);
+  sendRoomsStatusToAll();
+}
+
+function lcTick() {
+  for (const task of [...laicaiTasks.values()]) {
+    try { lcPrepareTick(task); } catch (error) { handleError(error,'lcTick'); }
+  }
+}
+
+function lcRuntime(task, seat, m) {
+  const p = m.payload;
+  const world = task.worlds.find(w => w.worldAttemptId === m.worldAttemptId && w.worldUid === m.worldUid);
+  const pending = task.pending.find(i => i.seatId === seat.seatId && i.message.messageId === m.replyTo);
+  if (m.op === 'ack' && pending?.message.op === 'cancel-attempt') {
+    const sent = pending.message;
+    if (['workerId','slotId','slotGeneration','worldAttemptId','worldUid'].some(key => sent[key] !== m[key])) throw Error('撤销回执尝试不匹配');
+    if (p.status !== 'applied') return;
+    task.pending.splice(task.pending.indexOf(pending),1);
+    if (p.slotReusable === true && task.generations[m.slotId] === m.slotGeneration) {
+      task.quarantined = task.quarantined?.filter(slotId => slotId !== m.slotId);
+      task.unsafeWorlds = task.unsafeWorlds?.filter(w=>w.worldAttemptId!==m.worldAttemptId);
+    }
+    lcContinue(task);
+    return;
+  }
+  if (m.worldAttemptId && (!world || (seat.role === 'host' &&
+      (world.slotId !== m.slotId || world.workerId !== m.workerId || world.slotGeneration !== m.slotGeneration)))) throw Error('旧世界或位置');
+  if (world && m.rosterVersion !== undefined && m.rosterVersion !== world.rosterVersion &&
+      !(world.effective.includes(seat.seatId) && pending?.message.op==='route-release' &&
+        pending.message.rosterVersion===m.rosterVersion && ['route-result','ack'].includes(m.op)) &&
+      !(m.op==='seat-left' && pending?.message.op==='leave-world' && world.removed?.includes(seat.seatId))) throw Error('旧名册');
+  if (seat.role === 'big' && m.seatId && m.seatId !== seat.seatId) throw Error('席位不匹配');
+  const complete = op => {
+    if (!pending || pending.message.op !== op ||
+        ['worldAttemptId','worldUid','seatId','routeSeq'].some(key => pending.message[key] !== undefined && pending.message[key] !== m[key])) throw Error('回报不对应授权');
+    task.pending.splice(task.pending.indexOf(pending),1);
+  };
+  const phase = name => { if (!world || world.phase !== name) throw Error('世界阶段不匹配'); };
+  if (m.op === 'ack') {
+    if (!pending) return;
+    if (p.status === 'started' || p.status === 'received') {
+      if (p.status==='started' && pending.ack!=='started') {
+        if (pending.message.op==='route-release') pending.deadline=Date.now()+task.config.timeoutSeconds*1000;
+        pending.ack='started';
+      } else if (!pending.ack) pending.ack=p.status;
+      return;
+    }
+    if (p.status==='rejected') {
+      if (['cancel-route','roster-update','leave-world','check-clear','release-world','admit-seat','open-admission'].includes(pending.message.op)) return;
+      if (pending.message.op==='task-start' && !task.config.allowMissing) return lcStop(task,p.reason || '启动被拒绝');
+      if (world && ['join-world','route-release'].includes(pending.message.op)) return lcDrop(task,world,[seat.seatId],p.reason || '执行端拒绝操作');
+      return;
+    }
+    if (p.status !== 'applied') throw Error(p.reason || '操作未执行');
+    if (pending.message.op === 'task-start') {
+      complete('task-start');
+      seat.started = true;
+      if (task.phase === 'starting' && task.seats.every(s => s.started)) {
+        task.phase = 'preparing';
+        task.generations = {};
+        lcFillSlots(task);
+      }
+    } else if (pending.message.op === 'release-world') {
+      phase('releasing');
+      complete('release-world');
+      lcReleased(task,world);
+    } else if (['roster-update','cancel-route','task-end','cancel-attempt'].includes(pending.message.op)) complete(pending.message.op);
+    else if (pending.ack!=='started') pending.ack = 'applied';
+    return;
+  }
+  switch (m.op) {
+    case 'executor-ready':
+      if (p.role !== seat.role || p.laicaiVersion !== seat.laicaiVersion) throw Error('执行端身份或版本不符');
+      if (seat.removed && (m.worldAttemptId || (seat.needsSingle && !(seat.worldReleased && p.single===true)))) throw Error('尚未确认该席的单人待命状态');
+      seat.needsSingle=false;
+      seat.ready = true;
+      lcTryOpen(task);
+      break;
+    case 'heartbeat': break;
+    case 'worker-stage': {
+      phase('preparing');
+      if (pending?.message.op !== 'prepare-world' || pending.message.worldAttemptId !== world.worldAttemptId) throw Error('未绑定准备授权');
+      if (p.stage === 'failed') {
+        lcSkipWorker(task,world,p.reason || '多用户明确失败',p.slotReusable === true);
+        break;
+      }
+      const limits = {starting:90000, game:180000, switching:180000, verifying:30000};
+      const sequence = Object.keys(limits);
+      if (!Object.hasOwn(limits,p.stage)) throw Error('未知准备阶段');
+      if (sequence.indexOf(p.stage) > sequence.indexOf(world.stage)) {
+        world.stage = p.stage;
+        world.deadline = Math.min(world.prepareUntil,Date.now() + limits[p.stage]);
+      }
+      break;
+    }
+    case 'world-ready':
+      phase('preparing'); complete('prepare-world'); world.phase = 'ready'; lcTryOpen(task); break;
+    case 'admission-opened':
+      phase('opening'); complete('open-admission'); lcNextApplicant(task,world); break;
+    case 'seat-armed':
+      phase('arming'); complete('admit-seat');
+      if (!Array.isArray(p.members) || p.members.length !== world.admitted.length ||
+          new Set(p.members.map(i => i?.position)).size !== p.members.length ||
+          !world.admitted.every(id => p.members.some(i => i?.seatId === id && [2,3,4].includes(i.position))) ||
+          p.ambiguous === true || p.stable === false) throw Error('放行前席位基线不一致');
+      world.baseline = p.members;
+      world.armId = m.replyTo;
+      world.phase = 'joining';
+      lcQueue(task,task.seats.find(s => s.seatId === world.applicant),'join-world',world,{seatId:world.applicant});
+      break;
+    case 'join-result':
+      phase('joining'); complete('join-world');
+      if (p.status==='failed') {lcDrop(task,world,[seat.seatId],p.reason || '入场失败'); break;}
+      if (p.status !== 'joined' || p.fromSingle !== true || ![2,3,4].includes(p.position)) throw Error('未确认入场');
+      world.joinedPosition = p.position;
+      lcConfirmAdmission(task,world);
+      break;
+    case 'world-members':
+      if (world?.recheck && m.replyTo===world.recheck.replyTo) {
+        const expected=world.admitted.filter(id=>world.effective.includes(id));
+        if (p.stable!==true || p.ambiguous!==false || p.observedUid!==world.worldUid || p.admissionMode!=='confirm' ||
+            !Array.isArray(p.members) || p.members.length!==expected.length ||
+            !expected.every(id=>p.members.some(r=>r?.seatId===id && [2,3,4].includes(r.position))) ||
+            new Set(p.members.map(r=>r.position)).size!==p.members.length) break;
+        world.recheck=null;
+        world.admitted=expected;
+        if (world.phase==='joining') lcNextApplicant(task,world);
+        else lcRouteBarrier(task,world);
+        break;
+      }
+      if (world?.phase !== 'joining') throw Error('此时未申请');
+      if (m.replyTo !== world.armId) throw Error('非本次申请的成员观测');
+      if (p.stable !== true || p.ambiguous !== false || !Array.isArray(p.members)) { world.members=[]; break; }
+      if (!p.members.every(i => i && (world.admitted.includes(i.seatId) || i.seatId === world.applicant) && [2,3,4].includes(i.position)) ||
+          new Set(p.members.map(i => i.position)).size !== p.members.length ||
+          new Set(p.members.map(i => i.seatId)).size !== p.members.length ||
+          !world.baseline.every(old => p.members.some(i => i.seatId === old.seatId && i.position === old.position))) {
+        world.members = []; break;
+      }
+      world.members = p.members; lcConfirmAdmission(task,world); break;
+    case 'route-result': {
+      if (!world || !['route','waiting-evidence'].includes(world.phase) || m.routeSeq !== world.routeSeq ||
+          !world.effective.includes(seat.seatId)) throw Error('路线授权已失效');
+      if (p.status==='failed' || p.status==='canceled') {
+        complete('route-release');
+        lcDrop(task,world,[seat.seatId],p.reason || '路线未完成');
+        break;
+      }
+      const prior = world.completed.find(r => r.seatId === seat.seatId);
+      if (prior) {
+        if (prior.status !== 'await-team' || p.status !== 'success' || prior.commandId !== m.replyTo ||
+            prior.isLast !== p.isLast || (world.proofUntil && Date.now() >= world.proofUntil)) throw Error('此席路线回报已处理');
+      } else complete('route-release');
+      const result = {seatId:seat.seatId,commandId:m.replyTo,isLast:p.isLast,status:p.status};
+      if (prior) Object.assign(prior,result);
+      else world.completed.push(result);
+      if (p.status === 'success' && !world.proof) world.proof = {seatId:seat.seatId,evidence:p.evidence,routeSeq:m.routeSeq};
+      lcRouteBarrier(task,world);
+      break;
+    }
+    case 'seat-left':
+      if (!world?.removed?.includes(seat.seatId)) phase('leaving');
+      complete('leave-world');
+      if (p.single !== true) throw Error('未返回单人');
+      seat.needsSingle=false;
+      world.left.push(seat.seatId);
+      if (world.phase==='leaving') lcCheckLeft(task,world);
+      break;
+    case 'world-cleared':
+      phase('leaving'); complete('check-clear');
+      if (p.stable !== true || p.memberCount !== 0) throw Error('世界未清空');
+      world.cleared = true; lcCheckLeft(task,world); break;
+    default: throw Error('当前操作不能推进任务');
+  }
+}
+
+function laicaiRegister(socket, accountId, room, m) {
+  const p = m.payload;
+  const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+  if (!id(p.clientId)) throw Error('客户端标识无效');
+  const waiting = (laicaiWaiting.get(room.name) || []).filter(s =>
+    io.sockets.sockets.get(s.socketId)?.connected && getConnectionBySocketId(s.socketId)?.accountId === s.accountId &&
+    userAccounts[s.accountId]?.rooms?.includes(room.name));
+  const same = s => s.clientId === p.clientId && s.accountId === accountId;
+  if (m.op === 'seat-withdraw') {
+    laicaiWaiting.set(room.name, waiting.filter(s => !(same(s) && s.socketId === socket.id)));
+    return;
+  }
+  if (laicaiTasks.has(room.name) || [...laicaiTasks.values()].some(t => t.seats.some(same))) throw Error('任务已占用');
+  if ([...laicaiWaiting.entries()].some(([key, list]) => key !== room.name && list.some(same))) throw Error('客户端已报名其他房间');
+  const others = waiting.filter(s => !same(s));
+  if (others.some(s => s.socketId === socket.id) || waiting.some(s => same(s) && s.socketId !== socket.id)) throw Error('客户端席位已绑定');
+  if (!['big','host'].includes(p.role) || typeof p.laicaiVersion !== 'string' || !p.laicaiVersion.trim() ||
+      others.some(s => s.laicaiVersion !== p.laicaiVersion)) throw Error('角色或来财版本不匹配');
+  const seat = {seatId:waiting.find(same)?.seatId || crypto.randomUUID(), role:p.role, accountId,
+    clientId:p.clientId, socketId:socket.id, laicaiVersion:p.laicaiVersion};
+  if (p.role === 'big') {
+    if (typeof p.uid !== 'string' || !/^\d{9,10}$/.test(p.uid) || typeof p.gameName !== 'string' || !p.gameName.trim() ||
+        room.laicai.worldUids.includes(p.uid) || others.some(s => s.uid === p.uid) ||
+        others.filter(s => s.role === 'big').length >= room.laicai.bigCount) throw Error('大号人数或身份不符');
+    Object.assign(seat, {uid:p.uid, gameName:p.gameName});
+  } else {
+    if (others.some(s => s.role === 'host') || !Array.isArray(p.workers) || p.workers.length > 45 ||
+        p.workers.some(w => !w || !id(w.workerId) || !Array.isArray(w.uids) || !w.uids.length || w.uids.length > 3) ||
+        new Set(p.workers.map(w => w.workerId)).size !== p.workers.length) throw Error('多用户配置无效');
+    const uids = p.workers.flatMap(w => w.uids);
+    if (new Set(uids).size !== uids.length || uids.length !== room.laicai.worldUids.length ||
+        room.laicai.worldUids.some(uid => !uids.includes(uid))) throw Error('多用户与房间 UID 不一致');
+    seat.workers = p.workers.map(({workerId,uids}) => ({workerId, uids:[...uids]}));
+  }
+  const seats = [...others, seat];
+  if (seats.length !== room.laicai.bigCount + 1) {
+    laicaiWaiting.set(room.name, seats);
+    return;
+  }
+  const task = {taskId:crypto.randomUUID(), roomName:room.name, phase:'starting',
+    config:room.laicai, seats, pending:[], receipts:[], worlds:[], results:[],startUntil:Date.now()+room.laicai.timeoutSeconds*1000};
+  for (const member of seats) {
+    const start = laicaiMsg(room.name, 'task-start', laicaiSnapshot(task, member), {taskId:task.taskId});
+    task.pending.push({seatId:member.seatId, message:start});
+  }
+  laicaiTasks.set(room.name, task);
+  try { laicaiSaveTasks(); } catch (err) { laicaiTasks.delete(room.name); throw new LaicaiStorageError(err); }
+  laicaiWaiting.delete(room.name);
+  for (const {seatId,message} of task.pending) {
+    const member = seats.find(s => s.seatId === seatId);
+    io.sockets.sockets.get(member.socketId)?.emit('message', message);
+  }
+}
+
+function lcPriorArchive(identity, m) {
+  if ((m.op!=='state-request' && !lcReliableAck(m)) || !identity || identity.isAdmin || laicaiEnvelopeError(m,'big')) return null;
+  const priorId=m.op==='ack' ? m.taskId : (m.payload.taskId || m.taskId);
+  if (typeof priorId!=='string' || !/^[A-Za-z0-9_-]{1,128}$/.test(priorId)) return null;
+  // 当前任务账本拥有优先权，避免在写盘回滚时发放未提交的终态。
+  if ([...laicaiTasks.values()].some(task=>task.taskId===priorId)) return null;
+  const archive=path.join(LAICAI_RESULTS_DIR,priorId+'.json');
+  let record;
+  try { record=JSON.parse(fs.readFileSync(archive,'utf8')); }
+  catch (error) {
+    if (error.code==='ENOENT') return null;
+    throw new LaicaiStorageError(error);
+  }
+  if (record.roomName!==m.roomName) return null;
+  const seat=record.seats?.find(s=>s.accountId===identity.accountId && s.clientId===m.payload.clientId);
+  return seat ? {record, seat} : null;
+}
+
+function handleLaicaiMessage(socket, identity, m) {
+  const ack = (status, reason, retryable=false) => socket.emit('message', laicaiMsg(m.roomName,'ack',
+    {status, reason, ...(retryable && {retryable:true})},{replyTo:m.messageId, ...(m.taskId && {taskId:m.taskId})}));
+  try { lcHandleAuthenticated(socket,identity,m,ack); }
+  catch (error) { ack('rejected',error.message,error instanceof LaicaiStorageError); }
+}
+
+function lcHandleAuthenticated(socket, identity, m, ack) {
+  const archive=lcPriorArchive(identity,m);
+  const terminal=archive ? {taskId:archive.record.taskId,...archive.record.terminal} : null;
+  if (archive && lcReliableAck(m)) {
+    const mine=r=>r.seatId===archive.seat.seatId;
+    const saved=archive.record.controlReceipts?.some(r=>mine(r) && r.messageId===m.messageId && r.replyTo===m.replyTo && r.ackStatus===m.payload.status);
+    const closing=m.payload.status==='applied' && archive.record.finalCommands?.some(r=>mine(r) && r.commandId===m.replyTo);
+    return saved || closing ? ack('applied') : ack('rejected','原任务已结束，该回执无对应授权');
+  }
+  const room = rooms.find(r => r.name === m.roomName && r.roomType === 'laicai');
+  if (terminal && (!room || !userAccounts[identity.accountId]?.rooms?.includes(m.roomName))) {
+    socket.emit('message',laicaiMsg(m.roomName,'state-snapshot',{task:null,terminal},{replyTo:m.messageId}));
+    return;
+  }
+  if (!identity || identity.isAdmin || !userAccounts[identity.accountId]?.rooms?.includes(m.roomName)) {
+    return ack('rejected','账号未获得该来财房的权限');
+  }
+  if (!room) return ack('rejected','来财房间不存在');
+  if (laicaiTasks.has(room.name)) lcPrepareTick(laicaiTasks.get(room.name));
+  const task = laicaiTasks.get(room.name);
+  const seat = task?.seats.find(s => s.accountId === identity.accountId &&
+    (m.op === 'state-request' ? s.clientId === m.payload?.clientId &&
+      (s.socketId === socket.id || !io.sockets.sockets.get(s.socketId)?.connected) : s.socketId === socket.id));
+  const role = seat?.role || m.payload?.role || 'big';
+  const err = laicaiEnvelopeError(m, role);
+  if (err) return ack('rejected', err);
+  if (m.op === 'state-request') {
+    if (!seat && task?.seats.some(s => s.accountId === identity.accountId && s.clientId === m.payload.clientId)) {
+      return ack('rejected','原客户端连接仍在线，请在连接释放后重试',true);
+    }
+    if (seat) {
+      seat.socketId = socket.id;
+      delete seat.offlineSince;
+      laicaiSeen.set(task.taskId+':'+seat.seatId+':client',Date.now());
+    }
+    const recent=!terminal && !task && lcPriorArchive(identity,m);
+    socket.emit('message', laicaiMsg(room.name, 'state-snapshot', {task:laicaiSnapshot(task,seat),
+      terminal:terminal || (recent ? {taskId:recent.record.taskId,...recent.record.terminal} : null)}, {replyTo:m.messageId}));
+    if (seat) for (const item of task.pending.filter(o => o.seatId === seat.seatId)) socket.emit('message',item.message);
+    return;
+  }
+  if (m.op === 'seat-ready' || m.op === 'seat-withdraw') {
+    let ids = laicaiRegistrationAcks.get(socket.id);
+    if (!ids) laicaiRegistrationAcks.set(socket.id, ids = new Set());
+    if (!ids.has(m.messageId)) {
+      laicaiRegister(socket, identity.accountId, room, m);
+      ids.add(m.messageId);
+      sendRoomsStatusToAll();
+    }
+    return ack('applied');
+  }
+  if (!seat || task.taskId !== m.taskId) {
+    if (m.op==='ack' && !lcReliableAck(m)) return;
+    throw Error('无有效任务席位');
+  }
+  if (lcReliableAck(m) && m.payload.clientId!==undefined && m.payload.clientId!==seat.clientId)
+    return ack('rejected','回执客户端与已绑定席位不匹配');
+  if (m.op==='heartbeat') {
+    if (m.payload.role!==seat.role || m.payload.laicaiVersion!==seat.laicaiVersion || !['client','executor'].includes(m.payload.source)) throw Error('心跳身份不匹配');
+    if (m.payload.source==='executor' && seat.role==='host') {
+      const active=task.worlds.find(w=>w.worldAttemptId===task.active);
+      if (!active || ['worldUid','worldAttemptId','workerId','slotId','slotGeneration'].some(k=>m[k]!==active[k])) {ack('applied'); return;}
+    }
+    if (m.payload.source==='executor' && seat.role==='big' &&
+        ((m.seatId && m.seatId!==seat.seatId) || (m.worldAttemptId && m.worldAttemptId!==task.active))) {ack('applied'); return;}
+    const suffix=seat.role==='host' && m.payload.source==='executor' ? ':'+m.worldAttemptId : '';
+    laicaiSeen.set(task.taskId+':'+seat.seatId+':'+m.payload.source+suffix,Date.now());
+    ack('applied');
+    return;
+  }
+  const receipt=task.receipts.find(r=>r.seatId===seat.seatId && r.messageId===m.messageId);
+  if (receipt) {
+    if ((receipt.op && receipt.op!==m.op) || (receipt.ackStatus && (receipt.replyTo!==m.replyTo || receipt.ackStatus!==m.payload.status)))
+      return ack('rejected','消息编号已用于其他请求');
+    if (m.op !== 'ack' || lcReliableAck(m)) ack('applied');
+    return;
+  }
+  if (m.op==='ack' && !task.pending.some(i=>i.seatId===seat.seatId && i.message.messageId===m.replyTo)) {
+    if (lcReliableAck(m)) ack('rejected','该控制授权已经完成或失效');
+    return;
+  }
+  // 收到通知只用于展示，不改变截止时间。由后续 started、业务结果或终结回执确认执行。
+  if (m.op==='ack' && m.payload.status==='received') {
+    const pending=task.pending.find(i=>i.seatId===seat.seatId && i.message.messageId===m.replyTo);
+    if (!pending.ack) pending.ack='received';
+    return;
+  }
+  // 在副本上裁决与保存。验证或写盘失败时，真实任务及其待办不动。
+  const draft = JSON.parse(JSON.stringify(task));
+  lcRuntime(draft,draft.seats.find(s => s.seatId === seat.seatId),m);
+  if (m.op !== 'ack' || lcReliableAck(m)) draft.receipts.push({seatId:seat.seatId,messageId:m.messageId,op:m.op,
+    ...(lcReliableAck(m) && {replyTo:m.replyTo,ackStatus:m.payload.status})});
+  lcPublish(task,draft);
+  if (m.op !== 'ack' || lcReliableAck(m)) ack('applied');
+  if (m.op !== 'heartbeat') sendRoomsStatusToAll();
+}
+
 // 处理接收信息
 async function handleReceivedMessage(socket, message) {
   try {
@@ -3200,6 +3998,9 @@ async function handleReceivedMessage(socket, message) {
     // 根据type处理不同类型的消息
     if (message.type) {
       switch (message.type) {
+        case 'laicai':
+          handleLaicaiMessage(socket, getConnectionBySocketId(socket.id), message);
+          break;
         case 'login':
           handleUserLogin(message, socket);
           break;
@@ -3589,6 +4390,11 @@ async function handleCreateRoom(data, socket) {
     mode: roomMode,
     count: normalizedRoomCount
   };
+  if (data.roomType === 'laicai') {
+    const config = normalizeLaicaiConfig(data.laicai);
+    if (!config) return emitSocketError(socket, '来财房间参数无效');
+    Object.assign(newRoom, {roomType:'laicai', laicai:config, count:config.bigCount + 1});
+  }
   
   rooms.push(newRoom);
   await saveData(ROOMS_FILE, rooms);
@@ -3626,6 +4432,7 @@ async function handleDeleteRoom(data, socket) {
   }
 
   const { roomName } = data;
+  if (laicaiTasks.has(roomName) || laicaiWaiting.get(roomName)?.length) return emitSocketError(socket, '来财房间已被占用');
   
   if (!roomName) {
     socket.emit('message', {
@@ -3721,7 +4528,8 @@ function handleGetRoomUsers(data, socket) {
     return;
   }
   
-  const room = roomUsers.get(roomName);
+  const {users:lcSeats, ...roomProperties} = laicaiRoomsView(roomInfo);
+  const room = lcSeats ? {users:lcSeats} : roomUsers.get(roomName);
   const users = [];
   
   // 首先获取所有具有该房间权限的用户
@@ -3737,7 +4545,7 @@ function handleGetRoomUsers(data, socket) {
           users.push({
             ...user,
             accountId: accountId,
-            online: true // 新结构中只存储在线用户
+            online: user.connected ?? true
           });
           hasEntry = true;
         });
@@ -3763,7 +4571,8 @@ function handleGetRoomUsers(data, socket) {
     roomProperties: {
       name: roomInfo.name,
       mode: roomInfo.mode,
-      count: roomInfo.count
+      count: roomInfo.count,
+      ...roomProperties
     }
   });
   log(`发送房间 ${roomName} 的用户列表和属性给管理员`);
@@ -3928,6 +4737,7 @@ async function handleEditRoomName(data, socket) {
   }
 
   const { roomName, newRoomName } = data;
+  if (laicaiTasks.has(roomName) || laicaiWaiting.get(roomName)?.length) return emitSocketError(socket, '来财房间已被占用');
   
   if (!isValidRoomName(roomName) || !isValidRoomName(newRoomName)) {
     socket.emit('message', {
@@ -4058,9 +4868,21 @@ async function handleEditRoomProperties(data, socket) {
   }
 
   // 更新房间属性
+  if (laicaiTasks.has(roomName) || laicaiWaiting.get(roomName)?.length) return emitSocketError(socket, '来财房间已被占用');
+  const editType = data.roomType ?? rooms[roomIndex].roomType;
+  if (editType === 'laicai' && ['大澡堂','待机'].includes(roomName)) return emitSocketError(socket, '系统房间不能设为来财');
+  if (editType === 'laicai') {
+    const config = normalizeLaicaiConfig(data.laicai ?? rooms[roomIndex].laicai);
+    if (!config) return emitSocketError(socket, '来财房间参数无效');
+    Object.assign(rooms[roomIndex], {roomType:'laicai', laicai:config});
+  } else {
+    delete rooms[roomIndex].roomType;
+    delete rooms[roomIndex].laicai;
+  }
   rooms[roomIndex].name = newRoomName;
   rooms[roomIndex].mode = roomMode;
-  rooms[roomIndex].count = normalizedRoomCount;
+  rooms[roomIndex].count = editType === 'laicai' ? rooms[roomIndex].laicai.bigCount + 1 : normalizedRoomCount;
+  if (roomUsers.has(roomName)) Object.assign(roomUsers.get(roomName), {roomType:editType, laicai:rooms[roomIndex].laicai, mode:roomMode, count:rooms[roomIndex].count});
   await saveData(ROOMS_FILE, rooms);
   resetDataChangeTimer();
   
@@ -4130,6 +4952,7 @@ function scheduleRideCheck(roomName) {
  * @param {string} roomName - 房间名称
  */
 async function checkAndHandleRideInternal(roomName) {
+  if (rooms.some(room => room.name === roomName && room.roomType === 'laicai')) return;
   if (RideManager.roomLocks.get(roomName)) {
     log(`房间 ${roomName} 正在检查发车中，跳过`);
     return;
@@ -5232,7 +6055,8 @@ function handleGetRoomsStatus(socket) {
     roomsStatus[roomName] = {
       users: onlineUsers,
       mode: room.mode,
-      count: room.count
+      count: room.count,
+      ...laicaiRoomsView(room)
     };
   });
 
@@ -5329,7 +6153,8 @@ function sendRoomsStatusToAll() {
         roomsStatus[roomName] = {
           users: onlineUsers,
           mode: room.mode,
-          count: room.count
+          count: room.count,
+          ...laicaiRoomsView(room)
         };
       });
 
@@ -5816,6 +6641,10 @@ async function startServer() {
   try {
     // 初始化数据
     await initData();
+    for (const task of await loadData(LAICAI_FILE, [])) {
+      for (const seat of task.seats) { seat.socketId = null; seat.offlineSince = Date.now(); }
+      laicaiTasks.set(task.roomName, task);
+    }
 
     // 初始化房间用户
     await initRoomUsers();
@@ -6015,8 +6844,8 @@ function setupScheduledRestart() {
     log('开始执行定时重启任务...', LOG_TYPES.INFO);
 
     // 检查是否有正在进行的发车任务
-    if (RideManager.activeRides.size > 0) {
-      log(`发现 ${RideManager.activeRides.size} 个正在进行的发车任务，延迟重启`, LOG_TYPES.INFO, { activeRides: RideManager.activeRides.size });
+    if (RideManager.activeRides.size > 0 || laicaiTasks.size > 0) {
+      log('仍有发车任务，延迟重启', LOG_TYPES.INFO, { activeRides: RideManager.activeRides.size, laicaiTasks:laicaiTasks.size });
 
       // 等待30秒后再次检查
       timerManager.setTimeout(async () => {
@@ -7093,6 +7922,14 @@ io.on('connection', (socket) => {
 
   // Handle disconnection
   socket.on('disconnect', () => {
+    for (const t of laicaiTasks.values()) {
+      const s=t.seats.find(s=>s.socketId===socket.id);
+      if (s) s.offlineSince=Date.now();
+    }
+    for (const [roomName, seats] of laicaiWaiting) {
+      laicaiWaiting.set(roomName, seats.filter(seat => seat.socketId !== socket.id));
+    }
+    laicaiRegistrationAcks.delete(socket.id);
     for (const [key, transfer] of remoteTransfers.entries()) {
       if (transfer.desktopSocketId === socket.id || transfer.mobileSocketId === socket.id) {
         cancelRemoteTransfer(key, '远程连接已断开', transfer.mobileSocketId !== socket.id);
@@ -7282,6 +8119,7 @@ startServer().then(() => {
   initGainRecordsFile();
   loadGainReportKeys();
   setInterval(cleanupRemoteTransfers, 30000).unref();
+  setInterval(lcTick, 1000).unref();
   setupDailyOfflineTask();
   setupScheduledRestart();
   server.listen(PORT, '0.0.0.0', () => log(`服务器运行于 http://0.0.0.0:${PORT}`));
