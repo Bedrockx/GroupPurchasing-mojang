@@ -1849,6 +1849,8 @@
         let userRooms = [];
         let schedules = [];
         let selectedScheduleId = null;
+        let scheduleSourceId = null;
+        let scheduleRequestId = null;
         const remoteTransfers = new Map();
         const remoteRequests = new Map();
         const remoteCmdQueue = [];
@@ -1869,7 +1871,10 @@
                     if (id === activeRemoteCmdRequestId) {
                         finishRemoteCmdRequest(id, { success: false, output: '命令执行超时' });
                     } else {
-                        if (request.command === 'list-executables') {
+                        if (id === scheduleRequestId) {
+                            clearSchedules();
+                            showCmdMessage('调度列表请求超时，请重新打开调度面板');
+                        } else if (request.command === 'list-executables') {
                             document.getElementById('remote-executable-summary').textContent = '请求超时';
                             document.getElementById('remote-program-status').textContent = '程序列表获取超时';
                         } else if (request.command === (remoteLogKind === 'bgi' ? 'get-bgi-log-files' : 'get-client-log-files')) {
@@ -1994,7 +1999,21 @@
             if (requestId) remoteRequests.set(requestId, { command: 'reset-cmd', createdAt: Date.now() });
         }
 
+        function clearSchedules() {
+            if (scheduleRequestId) remoteRequests.delete(scheduleRequestId);
+            scheduleRequestId = null;
+            scheduleSourceId = null;
+            schedules = [];
+            selectedScheduleId = null;
+            document.getElementById('schedule-list').replaceChildren();
+            renderSchedules();
+        }
+
         function resetRemoteControlState(clearResults = false) {
+            clearSchedules();
+            selectedUser = null;
+            onlineUsers = [];
+            renderOnlineUsers();
             remoteCmdQueue.length = 0;
             activeRemoteCmdRequestId = null;
             remoteRequests.clear();
@@ -2780,6 +2799,7 @@
                         loadOnlineUsers();
                     }
                 } else {
+                    if (result.requestId && result.requestId === scheduleRequestId) clearSchedules();
                     const remoteRequestState = result.requestId ? remoteRequests.get(result.requestId) : null;
                     if (remoteRequestState?.command === 'execute-cmd') {
                         finishRemoteCmdRequest(result.requestId, { success: false, output: result.message || '命令执行失败' });
@@ -2805,6 +2825,7 @@
                 } else {
                     onlineUsers = [];
                 }
+                selectedUser = onlineUsers.find(user => selectedUser && user.uid === selectedUser.uid && user.room === selectedUser.room) || null;
                 renderOnlineUsers();
                 updateMobileRoomsDisplay(rooms);
             } else if (data.type === 'available-rooms') {
@@ -2833,7 +2854,13 @@
                     loadMobileRooms();
                 }
             } else if (data.type === 'schedules-list') {
-                schedules = data.data && Array.isArray(data.data.schedules) ? data.data.schedules : [];
+                const payload = data.data;
+                if (!scheduleRequestId || payload?.requestId !== scheduleRequestId ||
+                    payload.sourceConnectionId !== selectedConnectionId || !Array.isArray(payload.schedules)) return;
+                remoteRequests.delete(scheduleRequestId);
+                scheduleRequestId = null;
+                scheduleSourceId = selectedConnectionId;
+                schedules = payload.schedules.filter(item => item && item.id != null && String(item.id) !== '');
                 renderSchedules();
             } else if (data.type === 'mobile-command-data') {
                 handleRemoteData(data);
@@ -2892,7 +2919,7 @@
 
                 let roomPropertiesHTML = `<span>${modeText}</span>`;
                 if (roomInfo.mode !== 'none') {
-                    roomPropertiesHTML += `<span>${roomInfo.count}人发车</span>`;
+                    roomPropertiesHTML += `<span>${escapeRemoteText(roomInfo.count)}人发车</span>`;
                 }
                 roomPropertiesHTML += `<span style="color: ${permissionColor};">${permissionText}</span>`;
 
@@ -3018,6 +3045,7 @@
             loadingEl.classList.add('hidden');
 
             if (connections.length === 0) {
+                if (selectedConnectionId) resetRemoteControlState(true);
                 selectedConnectionId = null;
                 listEl.classList.add('hidden');
                 noConEl.classList.remove('hidden');
@@ -3056,8 +3084,11 @@
         }
 
         function selectConnection(connectionId, closeModal = true) {
-            if (selectedConnectionId && selectedConnectionId !== connectionId) resetRemoteControlState(true);
+            const changed = selectedConnectionId !== connectionId;
+            if (changed) resetRemoteControlState(true);
             selectedConnectionId = connectionId;
+            if (changed && !document.getElementById('schedule-panel').classList.contains('hidden')) loadSchedules();
+            if (changed && !document.getElementById('offline-panel').classList.contains('hidden')) loadOnlineUsers();
             document.querySelectorAll('.connection-item').forEach(item => {
                 if (item.dataset.id === connectionId) {
                     item.classList.add('selected');
@@ -3070,19 +3101,15 @@
         }
 
         function loadSchedules() {
+            clearSchedules();
             if (!selectedConnectionId) return;
 
             document.getElementById('schedule-loading').classList.remove('hidden');
             document.getElementById('schedule-list').classList.add('hidden');
             document.getElementById('no-schedule').classList.add('hidden');
 
-            socket.emit('message', {
-                type: 'mobile-command',
-                data: {
-                    targetConnectionId: selectedConnectionId,
-                    command: 'get-schedules'
-                }
-            });
+            scheduleRequestId = remoteRequest('get-schedules');
+            if (!scheduleRequestId) renderSchedules();
         }
 
         function renderSchedules() {
@@ -3126,7 +3153,7 @@
                     } else if (action.type === 'execute-file') {
                         actionDesc = `执行文件: ${actionConfig.filePath || ''}`;
                     }
-                    const scheduleIdValue = String(schedule.id || '');
+                    const scheduleIdValue = String(schedule.id);
                     const item = document.createElement('div');
                     item.className = 'schedule-item';
                     item.dataset.id = scheduleIdValue;
@@ -3169,7 +3196,8 @@
                 return;
             }
 
-            if (!selectedScheduleId) {
+            if (scheduleSourceId !== selectedConnectionId || !selectedScheduleId ||
+                !schedules.some(item => String(item.id) === selectedScheduleId)) {
                 showCmdMessage('请选择一个调度');
                 return;
             }
@@ -3369,9 +3397,9 @@
                 html += `
                     <tr style="${rowStyle}">
                         <td style="width: 45px; padding: 6px; text-align: center; border-bottom: 1px solid #e0e0e0; font-weight: bold; color: #1976D2;">${index + 1}</td>
-                        <td style="flex: 1; padding: 6px; text-align: left; border-bottom: 1px solid #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.displayName}</td>
-                        <td style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #e0e0e0;">${item.expGain.toLocaleString()}</td>
-                        <td style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #e0e0e0;">${item.moraGain.toLocaleString()}</td>
+                        <td style="flex: 1; padding: 6px; text-align: left; border-bottom: 1px solid #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeRemoteText(item.displayName)}</td>
+                        <td style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #e0e0e0;">${escapeRemoteText(item.expGain.toLocaleString())}</td>
+                        <td style="width: 75px; padding: 6px; text-align: right; border-bottom: 1px solid #e0e0e0;">${escapeRemoteText(item.moraGain.toLocaleString())}</td>
                     </tr>
                 `;
             });
@@ -3412,14 +3440,24 @@
                 listEl.classList.remove('hidden');
                 noUserEl.classList.add('hidden');
 
-                listEl.innerHTML = onlineUsers.map(user => `
-                    <div class="online-user-item" data-id="${user.uid}" data-room="${user.room}" onclick="selectOnlineUser('${user.uid}', '${user.room}')">
-                        <div>
-                            <div>${user.username}</div>
-                            <div style="font-size: 0.8rem; color: #666;">UID: ${user.uid} - 房间: ${user.room}</div>
-                        </div>
-                    </div>
-                `).join('');
+                listEl.replaceChildren();
+                onlineUsers.forEach(user => {
+                    const item = document.createElement('div');
+                    item.className = 'online-user-item';
+                    item.dataset.id = user.uid;
+                    item.dataset.room = user.room;
+                    item.classList.toggle('selected', user === selectedUser);
+                    item.onclick = () => selectOnlineUser(user.uid, user.room);
+                    const info = document.createElement('div');
+                    const name = document.createElement('div');
+                    name.textContent = user.username;
+                    const detail = document.createElement('div');
+                    detail.style.cssText = 'font-size: 0.8rem; color: #666;';
+                    detail.textContent = `UID: ${user.uid} - 房间: ${user.room}`;
+                    info.append(name, detail);
+                    item.appendChild(info);
+                    listEl.appendChild(item);
+                });
             }
         }
 
@@ -3526,15 +3564,15 @@
                 recordDiv.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <strong>${record.roomName || '未知房间'}</strong>
+                            <strong>${escapeRemoteText(record.roomName || '未知房间')}</strong>
                             ${isHost ? '<span style="color: #f44336; margin-left: 8px;">[房主]</span>' : '<span style="color: #4CAF50; margin-left: 8px;">[队员]</span>'}
                         </div>
                         <span style="color: #666; font-size: 12px;">${startTime}</span>
                     </div>
                     <div style="margin-top: 8px; font-size: 13px; color: #666;">
-                        <div>房主: ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${maskUid(host.uid)})` : '无'}</div>
-                        <div>队员: ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${maskUid(m.uid)})`).join(', ') : '无'}</div>
-                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : record.status}</div>
+                        <div>房主: ${host ? `${escapeRemoteText(host.accountId || '未知')}-${escapeRemoteText(host.username)} (UID: ${escapeRemoteText(maskUid(host.uid))})` : '无'}</div>
+                        <div>队员: ${members.length > 0 ? members.map(m => `${escapeRemoteText(m.accountId || '未知')}-${escapeRemoteText(m.username)} (UID: ${escapeRemoteText(maskUid(m.uid))})`).join(', ') : '无'}</div>
+                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : escapeRemoteText(record.status)}</div>
                     </div>
                 `;
                 container.appendChild(recordDiv);
