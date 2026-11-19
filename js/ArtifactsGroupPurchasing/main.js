@@ -213,7 +213,12 @@ let skipLog = false;
         }
 
     }
-    await genshin.tpToStatueOfTheSeven();
+    // 传送回神像失败不应中断后续收尾
+    try {
+        await genshin.tpToStatueOfTheSeven();
+    } catch (e) {
+        log.warn(`传送回神像失败，跳过：${e.message}`);
+    }
 
     try {
         if (skipRunning && !runnedEnding) {
@@ -392,16 +397,17 @@ async function runGroupPurchasing(runExtra) {
     } else if (groupNumBer > 1) {
         await goToTarget(groupNumBer);
         let start = new Date();
-        while (new Date() - start < 2 * 60 * 60 * 1000) {
-            if (await waitForMainUI(false, 60 * 60 * 1000)) {
+        while (new Date() - start < 90 * 60 * 1000) {
+            // 界面稳定时才判定是否已退出世界
+            if (await isMainUI() && await getPlayerSign() === 0) {
+                break;
+            }
+            if (await waitForMainUI(false, 10 * 60 * 1000)) {
                 await waitForMainUI(true);
                 await genshin.returnMainUi();
-                if (await getPlayerSign() === 0) {
-                    break;
-                }
             }
         }
-        if (new Date() - start > 2 * 60 * 60 * 1000) {
+        if (new Date() - start >= 90 * 60 * 1000) {
             log.warn("超时仍未回到主界面，主动退出");
         }
         let leaveAttempts = 0;
@@ -849,6 +855,9 @@ async function autoEnter(autoEnterSettings) {
     let enterCount = 0;
     let targetsRo = [];
     let success = false;
+    // 倒计时7s；静默期间循环仍在按 Y 接人，有新的同意就重置倒计时。
+    const COUNT_SETTLE_MS = 7000;
+    let lastAcceptAt = 0;   // 最近一次同意成功的时刻
 
     // ===== 初始化 =====
     setGameMetrics(1920, 1080, 1);
@@ -908,7 +917,9 @@ async function autoEnter(autoEnterSettings) {
 
             await sleep(500);
             if (!await findAndClick(requestEnterRo)) { await genshin.returnMainUi(); continue; }
-            await waitForMainUI(true, 20 * 1000);
+
+            const memberWaitMs = 3200 + Math.floor(Math.random() * 1001);
+            await waitForMainUI(true, memberWaitMs);
 
         } else { // 等待他人进入
             const playerSign = await getPlayerSign();
@@ -957,6 +968,7 @@ async function autoEnter(autoEnterSettings) {
                             doRunExtra = true;
                             await waitForMainUI(true, 20 * 1000);
                             enterCount++;
+                            lastAcceptAt = Date.now();
                             break;
                         }
                     } else {
@@ -966,6 +978,7 @@ async function autoEnter(autoEnterSettings) {
                             if (await findAndClick(allowEnterRo)) {
                                 await waitForMainUI(true, 20 * 1000);
                                 enterCount++;
+                                lastAcceptAt = Date.now();
                                 enteredPlayers = [...new Set([...enteredPlayers, result])];
                                 log.info(`${recognition.method}允许 ${result} 加入`);
                                 notification.send(`${recognition.method}允许 ${result} 加入`);
@@ -984,13 +997,19 @@ async function autoEnter(autoEnterSettings) {
             }
 
             if (enterCount >= maxEnterCount) {
-                await sleep(20000);
-                if (await findTotalNumber() === maxEnterCount + 1) {
-                    notification.send(`已达到预定人数：${maxEnterCount + 1}`);
-                    metExpectedCount = true;
-                    break;
+                // 最后一次同意后静默 7s 数一次人数（静默期间继续接人，有新的同意就重新计时）
+                const quietMs = Date.now() - lastAcceptAt;
+                if (quietMs >= COUNT_SETTLE_MS) {
+                    const totalNumber = await findTotalNumber();
+                    if (totalNumber === maxEnterCount + 1) {
+                        notification.send(`已达到预定人数：${maxEnterCount + 1}`);
+                        metExpectedCount = true;
+                        break;
+                    } else {
+                        // 按实际人数回填计数，上限为 maxEnterCount - 1
+                        enterCount = Math.min(Math.max(0, totalNumber - 1), maxEnterCount - 1);
+                    }
                 }
-                else enterCount--;
             }
         }
     }
@@ -2081,14 +2100,15 @@ async function handleOnlineRecordAndReonline(isCrash, crashType = null) {
 
     // 如果是炸车，直接重新上线
     if (isCrash) {
-        log.info(`炸车后重新上线，不消耗次数`);
-
-        // autoReonline 为 0 时不进行重上线
+        // autoReonline 为 0 时不上线，但仍上报炸车信息
         const autoReonline = parseInt(settings.autoReonline) || 0;
         if (autoReonline === 0) {
-            log.info(`autoReonline 设置为 0，炸车后不重新上线`);
+            log.info(`重上线为0仅运行一次即停，炸车不再上线，仅上报炸车信息。想确保当上房主，请填大于 0 的值`);
+            await generateReonlineCommand(null, true, crashType, true);
             return;
         }
+
+        log.info(`炸车后重新上线，不消耗次数`);
 
         // 读取匹配信息.json，保留 notHost 设置
         let crashOnlineInfo = null;
@@ -2176,7 +2196,7 @@ async function handleOnlineRecordAndReonline(isCrash, crashType = null) {
         // 生成重新上线命令
         await generateReonlineCommand(reonlineInfo, false, null);
     } else {
-        log.info(`autoReonline设置为0，不执行自动重新上线`);
+        log.info(`autoReonline为0，不执行自动重新上线`);
 
         // 如果settings.afterOneDragon存在，单独启动该一条龙
         if (settings.afterOneDragon) {
@@ -2186,7 +2206,7 @@ async function handleOnlineRecordAndReonline(isCrash, crashType = null) {
 }
 
 // 生成重新上线命令（只添加到数组，不写入文件）
-async function generateReonlineCommand(onlineInfo = null, isCrash = false, crashType = null) {
+async function generateReonlineCommand(onlineInfo = null, isCrash = false, crashType = null, skipReonline = false) {
     try {
         // 如果没有提供onlineInfo，则从匹配信息.json中读取
         if (!onlineInfo) {
@@ -2205,6 +2225,12 @@ async function generateReonlineCommand(onlineInfo = null, isCrash = false, crash
         if (isCrash) {
             // 情况2：房主超时未等到所有队员到达预期坐标 - 无需报告，直接上线和启动等待一条龙
             if (crashType === "waitForPlayersArrive") {
+                // 仅上报模式：情况2 不生成炸车报告，无内容可写
+                if (skipReonline) {
+                    log.info(`仅上报模式：情况2 无炸车报告，跳过上线命令`);
+                    return;
+                }
+
                 // 添加上线指令
                 commands.push({
                     "command": "online",
@@ -2288,6 +2314,12 @@ async function generateReonlineCommand(onlineInfo = null, isCrash = false, crash
                         "rideIdentifier": onlineInfo.rideIdentifier || ""
                     }
                 });
+
+                // 仅上报模式：炸车报告已生成，跳过上线和一条龙命令
+                if (skipReonline) {
+                    log.info(`仅上报模式：已生成炸车报告，跳过上线和一条龙命令`);
+                    return;
+                }
 
                 // 添加上线指令
                 commands.push({
