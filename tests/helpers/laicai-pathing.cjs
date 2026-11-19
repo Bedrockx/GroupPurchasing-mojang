@@ -4,7 +4,7 @@ const {createRouteActions} = require('../../js/来财/main.js');
 
 // 模拟 BetterGI 单次追踪的取消令牌，以及角色位置、队伍席位和击败敌人后的屏幕提示。
 function pathingHost({now,wait,positionSign,duration=2500,onRun=()=>{},showReward=true,rewardDelay=0}) {
-  const calls = [], tokens = [];
+  const calls = [], teleports = [], tokens = [];
   let reward = '', rewardAt = Infinity, end = [0,0], pickups = 0;
   function newCTS() {
     const token = {canceled:false};
@@ -13,6 +13,13 @@ function pathingHost({now,wait,positionSign,duration=2500,onRun=()=>{},showRewar
     return source;
   }
   async function runFile(file,token) {
+    const teleport=Object.values(catalog.routes).some(route=>route.teleportFile===file);
+    if (teleport) {
+      teleports.push(file);
+      const until=now()+duration;
+      while (now()<until && !token.canceled) await wait(200);
+      return token.canceled?'canceled':'finished';
+    }
     const route=Object.values(catalog.routes).find(route=>route.file===file);
     assert(route,'只应调用当前包声明的追踪');
     calls.push(file);
@@ -34,9 +41,9 @@ function pathingHost({now,wait,positionSign,duration=2500,onRun=()=>{},showRewar
   }
   const actions=createRouteActions({pack:'前两条传奇',routes:catalog,now,wait,
     position:()=>({x:end[0],y:end[1]}),sign:positionSign,reward:()=>now()>=rewardAt?'角色经验+19':reward,
-    teleport:async()=>{},needFurina:()=>false,enemyVisible:()=>false,
+    needFurina:()=>false,enemyVisible:()=>false,
     runFile,newCTS,checkGlobal:async()=>{},autoPick:()=>{pickups++;}});
-  return {actions,calls,tokens,get pickups(){return pickups;}, clearReward(){reward=''; rewardAt=Infinity;}};
+  return {actions,calls,teleports,tokens,get pickups(){return pickups;}, clearReward(){reward=''; rewardAt=Infinity;}};
 }
 
 module.exports = {pathingHost};

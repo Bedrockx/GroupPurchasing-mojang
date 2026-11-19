@@ -6,8 +6,9 @@ const {temporaryData}=require('./helpers/server-fixture.cjs');
 const {limitedFile,createDesktopFiles}=require('./helpers/laicai-files.cjs');
 const {pathingHost}=require('./helpers/laicai-pathing.cjs');
 const {createExecutor,createWorldActions}=require('../js/来财/main.js');
+const catalog=require('../js/来财/routes/catalog.json');
 
-test('追踪中的执行端通过文件接收取消，等追踪收尾后仍能按令退出世界',async t=>{
+for (const [routeSeq,stage] of [[1,'主追踪'],[2,'前置传送']]) test(stage+'通过文件接收取消后可按令退出世界',async t=>{
   const root=temporaryData(t), folder=path.join(root,'来财');
   fs.mkdirSync(folder);
   const desktop=createDesktopFiles(root);
@@ -43,16 +44,20 @@ test('追踪中的执行端通过文件接收取消，等追踪收尾后仍能�
   await pumpUntil(()=>event('start','executor-ready'));
   publish('join','join-world',world);
   await pumpUntil(()=>event('join','join-result'));
-  publish('run','run-route',{...world,routeSeq:2});
-  await pumpUntil(()=>host.tokens.length && host.calls.length);
-  publish('old','cancel-route',{...world,routeSeq:1});
+  publish('run','run-route',{...world,routeSeq});
+  await pumpUntil(()=>host.tokens.length && (routeSeq===1?host.calls.length:host.teleports.length));
+  publish('old','cancel-route',{...world,routeSeq:routeSeq+1});
   await pumpUntil(()=>event('old','ack','applied'));
   assert.equal(host.tokens[0].canceled,false);
-  publish('cancel','cancel-route',{...world,routeSeq:2,rosterVersion:2},{reason:'路线超时'});
-  await pumpUntil(()=>event('run','route-result','canceled'));
-  assert(host.tokens[0].canceled && host.tokens[0].disposed);
+  publish('cancel','cancel-route',{...world,routeSeq,rosterVersion:2},{reason:'路线超时'});
   publish('exit','leave-world',{...world,rosterVersion:2});
   await pumpUntil(()=>event('exit','seat-left'));
+  assert(event('run','route-result','canceled'));
+  assert(host.tokens[0].canceled && host.tokens[0].disposed);
+  if (routeSeq===2) {
+    assert.deepEqual(host.teleports,[catalog.routes.B.teleportFile]);
+    assert.deepEqual(host.calls,[],'传送取消后不启动主追踪');
+  }
   assert.equal(sign,0);
   assert.equal(event('run','route-result','success'),undefined);
 });

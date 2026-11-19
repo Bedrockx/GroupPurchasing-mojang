@@ -13,7 +13,7 @@ function setup() {
         wait: async ms => { await new Promise(resolve => setImmediate(resolve)); model.t += ms; },
         sign: () => 2, position: () => ({ x: model.point[0], y: model.point[1] }),
         reward: () => model.reward, enemyVisible: () => false, autoPick: () => model.pick++,
-        needFurina: () => false, teleport: (...p) => calls.push(p), checkGlobal: async () => {},
+        needFurina: () => false, checkGlobal: async () => {},
         newCTS() {
             const cts = { Token: {}, CancelAfter(ms) { this.ms = ms; }, Dispose() { this.closed = true; } };
             sources.push(cts);
@@ -21,7 +21,7 @@ function setup() {
         },
         runFile: async (file, token) => {
             calls.push(file); assert.equal(token, sources.at(-1).Token);
-            if (file !== routes.furina) model.reward = "角色经验+19";
+            if (Object.values(routes.routes).some(route => route.file === file)) model.reward = "角色经验+19";
             return "finished";
         }
     };
@@ -41,17 +41,47 @@ test("三种内置路线包均引用真实战斗路线，定位终点与作者�
     assert.ok(JSON.parse(fs.readFileSync(path.join(dir, routes.furina), "utf8").replace(/^\uFEFF/, "")).positions.length);
 });
 
-test("辅助、主追踪各用独立 CTS；本地路线包末条标记与传送", async () => {
+test("B、C、D 的前置传送保留原强制传送点，A 无前置传送", () => {
+    assert.equal(routes.routes.A.teleportFile, undefined);
+    for (const [id,x,y] of [["B",3035.6297,3727.4091],["C",9724.212890625,5444.53515625],["D",837.51,235.14]]) {
+        const file = routes.routes[id].teleportFile;
+        const task = JSON.parse(fs.readFileSync(path.join(dir,file)));
+        assert.equal(task.info.map_name, "Teyvat");
+        assert.deepEqual(task.positions, [{id:1,type:"teleport",action:"force_tp",x,y}]);
+    }
+});
+
+test("前置传送、辅助和主追踪各用独立 CTS，按原顺序执行", async () => {
     const { env,ops,model,sources,calls,run } = setup();
     ops.enablePickup(); ops.enablePickup();
     assert.equal(model.pick, 1);
     env.needFurina = () => true;
     model.point = routes.routes.B.end;
     const result = await run(2);
-    assert.deepEqual(calls, [routes.routes.B.tp, routes.furina, routes.routes.B.file]);
+    assert.deepEqual(calls, [routes.routes.B.teleportFile, routes.furina, routes.routes.B.file]);
     assert.deepEqual(result.payload, { status: "success", evidence: "reward", isLast: true });
-    assert.ok(sources.length === 2 && sources.every(s => s.closed && s.ms > 0));
-    assert.notEqual(sources[0].Token, sources[1].Token);
+    assert.ok(sources.length === 3 && sources.every(s => s.closed && s.ms > 0));
+    assert.equal(new Set(sources.map(s => s.Token)).size, 3);
+});
+
+test("前置传送取消、异常或全局停止后不启动黑芙辅助和主追踪", async () => {
+    for (const flavor of ["局部取消","文件异常","全局停止"]) {
+        const {env, calls, sources, run} = setup();
+        env.needFurina = () => true;
+        env.runFile = async (file, token) => {
+            calls.push(file);
+            assert.equal(token, sources[0].Token);
+            if (flavor === "局部取消") return "canceled";
+            throw Error("前置传送执行失败");
+        };
+        if (flavor === "全局停止") env.checkGlobal = async () => { throw Error("已停止"); };
+        await assert.rejects(run(2),
+            flavor === "局部取消" ? error => error.localCancel === true :
+            flavor === "全局停止" ? error => error.globalStop === true : /前置传送执行失败/);
+        assert.deepEqual(calls,[routes.routes.B.teleportFile]);
+        assert.equal(sources.length,1);
+        assert.equal(sources[0].closed,true);
+    }
 });
 test("没有个人奖励的慢席仅报告自身完成，偏离终点或仍在战斗不接受团队代证", async () => {
     const slow = setup();

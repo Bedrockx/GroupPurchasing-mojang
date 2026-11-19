@@ -950,7 +950,7 @@ function createRouteActions(env) {
             }
             try {
                 check();
-                if (route.tp) { await env.teleport(...route.tp); check(); }
+                if (route.teleportFile) await track(route.teleportFile, false);
                 if (env.needFurina()) await track(env.routes.furina, false);
                 const finishedAt = await track(route.file, true);
                 let stable = 0;
@@ -1019,7 +1019,6 @@ function createRouteEnvironment(ui) {
             return match ? match[0] : "";
         },
         enemyVisible: () => readLines([265, 65, 1270, 720]).some(line => /(?:Lv\.?|等级)\s*\d+/i.test(line)),
-        teleport: (x, y, map) => genshin.tp(x, y, map || "Teyvat", true),
         needFurina: () => Boolean(ui.picture("assets/界面/白芙图标.png", [1634, 967, 116, 103])),
         newCTS: () => new CancellationTokenSource(), runFile: (path, token) => pathingScript.runFile(path, token),
         checkGlobal: () => sleep(1),

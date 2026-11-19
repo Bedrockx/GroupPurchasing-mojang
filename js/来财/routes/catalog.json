@@ -32,11 +32,7 @@
         2898.1633,
         3783.851
       ],
-      "tp": [
-        3035.6297,
-        3727.4091,
-        "Teyvat"
-      ]
+      "teleportFile": "routes/B前置传送.json"
     },
     "C": {
       "file": "routes/CF2传奇-曼巴草.json",
@@ -45,11 +41,7 @@
         9668.3274,
         5349.3198
       ],
-      "tp": [
-        9724.212890625,
-        5444.53515625,
-        "Teyvat"
-      ]
+      "teleportFile": "routes/C前置传送.json"
     },
     "D": {
       "file": "routes/DF2小怪-蚊子-芙莉-璃月-琼玑野-渌华池-2只.json",
@@ -58,11 +50,7 @@
         855.8763,
         176.2633
       ],
-      "tp": [
-        837.51,
-        235.14,
-        "Teyvat"
-      ]
+      "teleportFile": "routes/D前置传送.json"
     }
   },
   "furina": "routes/强制黑芙.json"
