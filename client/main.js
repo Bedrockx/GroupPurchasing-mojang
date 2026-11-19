@@ -428,6 +428,170 @@ ipcMain.handle('write-file', (_event, { filePath, content }) => {
   return true;
 });
 
+// 来财的本地目录通过本机选择并持久绑定。网络消息只可携带逻辑多用户标识。
+const laicaiDirectoriesFile = path.join(app.getPath('userData'), 'laicai-directories.json');
+function laicaiDirectories() {
+  try { return JSON.parse(fs.readFileSync(laicaiDirectoriesFile, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+function laicaiConfiguredDirectory(directory) {
+  const own = desktopConfig.bgiFolder && path.join(desktopConfig.bgiFolder, 'User', 'JsScript', '来财');
+  if (!validPath(directory) || path.basename(directory) !== '来财' ||
+      !(own && key(own) === key(directory)) && !laicaiDirectories().includes(key(directory))) {
+    throw new Error('请选择本机或对应 Windows 用户的来财脚本目录');
+  }
+  return path.resolve(directory);
+}
+function laicaiScriptDirectory(directory) {
+  return fs.realpathSync(laicaiConfiguredDirectory(directory));
+}
+ipcMain.handle('laicai-select-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const directory = fs.realpathSync(result.filePaths[0]);
+  if (path.basename(directory) !== '来财') throw new Error('请选择名为“来财”的 BetterGI 脚本目录');
+  const allowed = new Set(laicaiDirectories());
+  allowed.add(key(directory));
+  fs.writeFileSync(laicaiDirectoriesFile, JSON.stringify([...allowed]));
+  return directory;
+});
+ipcMain.handle('laicai-version', (_event, directory) => {
+  const folder = laicaiScriptDirectory(directory);
+  const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8').replace(/^\uFEFF/, ''));
+  if (manifest.name !== '来财' || !/^\d+\.\d+\.\d+$/.test(manifest.version) ||
+      !fs.statSync(path.join(folder, 'main.js')).isFile()) throw new Error('来财脚本不完整或版本无效');
+  return manifest.version;
+});
+
+ipcMain.handle('laicai-start-worker', async (_event, id) => {
+  const folders = readRemoteWhitelist().filter(folder => fs.existsSync(folder));
+  // 缓存会随应用重启清空。每次启动都按当前白名单重新解析稳定标识。
+  const file = folders.flatMap(folder => collectExecutables(folder)).find(item => item.id === id && /\.bat$/i.test(item.name));
+  if (!file) return {started:false,reason:'该多用户 BAT 已不在本机白名单'};
+  const target = fs.realpathSync(remoteExecutableCache.get(id));
+  if (!folders.some(folder => isWithinRoot(target,fs.realpathSync(folder)))) return {started:false,reason:'BAT 路径越出白名单'};
+  return new Promise(resolve => {
+    const child = spawn('cmd.exe',['/d','/v:off','/s','/c','""%MOJANG_LAICAI_WORKER_BAT%""'], {
+      cwd:path.dirname(target),env:{...process.env,MOJANG_LAICAI_WORKER_BAT:target},windowsVerbatimArguments:true,
+      windowsHide:true,detached:true,stdio:'ignore'
+    });
+    child.once('error',e=>resolve({started:false,reason:e.message,retryable:['EBUSY','EAGAIN'].includes(e.code)}));
+    child.once('spawn',()=>{child.unref();resolve({started:true,pid:child.pid});});
+  });
+});
+
+// 每份脚本使用本目录的邮箱，渲染层只能发布来财指令、读取已交付事件。
+function laicaiMailbox(directory, side) {
+  const script = laicaiScriptDirectory(directory);
+  let folder = script;
+  for (const part of ['mailbox',side]) {
+    folder = path.join(folder,part);
+    try { fs.mkdirSync(folder); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    if (!fs.lstatSync(folder).isDirectory() || key(fs.realpathSync(folder)) !== key(folder)) throw new Error('来财邮箱指向了其他目录');
+  }
+  return folder;
+}
+function laicaiFile(folder, id, suffix, prefix='') {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('来财消息编号无效');
+  const file = path.join(folder, prefix + id + suffix);
+  try {
+    if (!fs.lstatSync(file).isFile()) throw new Error('来财消息不是普通文件');
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  return file;
+}
+ipcMain.handle('laicai-publish', (_event, {directory,message}) => {
+  if (message?.type !== 'laicai' || message.version !== 1 || typeof message.op !== 'string') throw new Error('无效的来财指令');
+  const folder = laicaiMailbox(directory,'in');
+  const file = laicaiFile(folder,message.messageId,'.json');
+  const body = JSON.stringify(message);
+  if (fs.existsSync(file)) {
+    if (fs.readFileSync(file,'utf8') !== body) throw new Error('来财指令编号冲突');
+    return;
+  }
+  const temp = path.join(folder,crypto.randomUUID()+'.tmp');
+  try {
+    fs.writeFileSync(temp,body,{flag:'wx'});
+    fs.renameSync(temp,file);
+  } finally { fs.rmSync(temp,{force:true}); }
+});
+ipcMain.handle('laicai-events', (_event,directory) => {
+  const folder = laicaiMailbox(directory,'out');
+  const messages = [];
+  for (const name of fs.readdirSync(folder)) {
+    const match = /^([A-Za-z0-9_-]{1,128})\.ready\.json$/.exec(name);
+    if (!match) continue;
+    const file = laicaiFile(folder,match[1],'.json');
+    const marker = laicaiFile(folder,match[1],'.ready.json');
+    try {
+      if (JSON.parse(fs.readFileSync(marker,'utf8').replace(/^\uFEFF/,'')).messageId !== match[1]) continue;
+      const message = JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
+      if (message?.messageId === match[1] && message.type === 'laicai' && message.version === 1) messages.push(message);
+    } catch (error) {
+      if (!(error instanceof SyntaxError) && error.code !== 'ENOENT') throw error;
+    }
+  }
+  return messages;
+});
+ipcMain.handle('laicai-consume', (_event,{directory,id,side}) => {
+  if (!['in','out'].includes(side)) throw new Error('无效的来财消息方向');
+  const folder = laicaiMailbox(directory,side);
+  if (side === 'out') fs.rmSync(laicaiFile(folder,id,'.ready.json'),{force:true});
+  fs.rmSync(laicaiFile(folder,id,'.json'),{force:true});
+});
+
+// 任务归属留在本机客户端数据目录。更换安装目录、登录账号或角色都不能解除其他任务的隔离。
+function laicaiOwner(directory, owner) {
+  if (!owner || ![owner.taskId,owner.clientId].every(id=>typeof id==='string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id)) ||
+      !['big','host'].includes(owner.role) || ![owner.roomName,owner.accountId].every(v=>typeof v==='string' && v.trim())) {
+    throw new Error('来财任务归属信息不完整');
+  }
+  const folder=key(laicaiConfiguredDirectory(directory));
+  const record={directory:folder,taskId:owner.taskId,clientId:owner.clientId,accountId:owner.accountId,roomName:owner.roomName,role:owner.role};
+  const id=crypto.createHash('sha256').update(JSON.stringify([folder,owner.taskId])).digest('hex');
+  const file=path.join(app.getPath('userData'),'laicai-owners',id+'.json');
+  return {record,file};
+}
+function writeLaicaiOnce(file, body) {
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  const temp=path.join(path.dirname(file),crypto.randomUUID()+'.tmp');
+  try {
+    fs.writeFileSync(temp,body,{flag:'wx'});
+    // 同目录原子发布。即使另一客户端同时登记，也不能覆盖原所有者。
+    try { fs.linkSync(temp,file); } catch(error) { if (error.code!=='EEXIST') throw error; }
+    if (fs.readFileSync(file,'utf8')!==body) throw new Error('本机记录与当前任务归属不符');
+  } finally { fs.rmSync(temp,{force:true}); }
+}
+function bindLaicaiOwner({directory,owner}) {
+  const {record,file}=laicaiOwner(directory,owner);
+  writeLaicaiOnce(file,JSON.stringify(record));
+}
+ipcMain.handle('laicai-bind-owner',(_event,request)=>bindLaicaiOwner(request));
+ipcMain.on('laicai-hold-owner',(event,request)=>{
+  try { bindLaicaiOwner(request); event.returnValue={ok:true}; }
+  catch(error) { event.returnValue={ok:false,reason:error.message}; }
+});
+ipcMain.handle('laicai-clear-task-input',async (_event,{directory,owner})=>{
+  const {record,file:binding}=laicaiOwner(directory,owner);
+  if (fs.readFileSync(binding,'utf8')!==JSON.stringify(record)) throw new Error('不能解除其他客户端或账号的任务隔离');
+  const {taskId,roomName,role,clientId,accountId}=record;
+  const answer=await dialog.showMessageBox(mainWindow,{type:'question',buttons:['保留隔离','已核对，解除隔离'],
+    defaultId:0,cancelId:0,message:'请确认旧来财执行端已停止，且大号已回单人或小号世界已清场。',
+    detail:[roomName,accountId,taskId,directory].join('\n')});
+  if (answer.response!==1) return false;
+  const state=laicaiMailbox(directory,'state');
+  const barrier=laicaiFile(state,taskId,'.json','end-');
+  writeLaicaiOnce(barrier,JSON.stringify({type:'laicai-local-end',version:1,taskId,roomName,role,clientId,accountId}));
+  const folder=laicaiMailbox(directory,'in');
+  for (const name of fs.readdirSync(folder)) {
+    const match=/^([a-zA-Z0-9_-]{1,128})\.json$/.exec(name);
+    if (!match) continue;
+    const file=laicaiFile(folder,match[1],'.json');
+    const m=JSON.parse(fs.readFileSync(file,'utf8'));
+    if (m.type==='laicai' && m.taskId===taskId && m.roomName===roomName && m.messageId===match[1]) fs.rmSync(file,{force:true});
+  }
+  return true;
+});
+
 function commandSnapshot(filePath) {
   const file = desktopFile(filePath, true);
   const content = fs.readFileSync(file, 'utf8');

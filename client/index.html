@@ -652,6 +652,19 @@
                     <div style="margin-bottom: 10px;">
                         <!-- 标题已移至导航栏 -->
                     </div>
+                    <details id="lc-panel" hidden>
+                        <summary>来财房间报名</summary>
+                        <label>房间 <select id="lc-room"></select></label>
+                        <label>角色 <select id="lc-role" onchange="lcRoleFields()"><option value="big">大号</option><option value="host">小号侧主用户</option></select></label>
+                        <fieldset id="lc-big"><label>大号 UID <input id="lc-uid" inputmode="numeric"></label>
+                            <label>游戏昵称 <input id="lc-name"></label><label>来财一条龙名称 <input id="lc-dragon" value="来财"></label></fieldset>
+                        <fieldset id="lc-host" hidden><legend>多用户配置</legend><div id="lc-workers"></div>
+                            <button type="button" onclick="lcAddWorker()">添加多用户</button></fieldset>
+                        <button type="button" onclick="lcEnroll().catch(lcError)">就绪并参与</button>
+                        <button type="button" onclick="lcWithdraw()">关闭参与</button>
+                        <div id="lc-quarantines"></div>
+                        <output id="lc-status" aria-live="polite"></output>
+                    </details>
                     <div class="rooms-container" id="pools-container">
                         <p style="color: #999; text-align: center; margin-top: 50px;">暂无在线用户</p>
                     </div>
@@ -1086,6 +1099,989 @@
         const BGI_FOLDER_PLACEHOLDER = '点击以选择bgi文件夹';
         const remoteChunkAcknowledgements = new Map();
 
+        let lcRooms = {};
+        let lcState = null;
+        let lcEpoch = 0;
+        let lcLiveSince = 0;
+        function lcElement(name) { return document.getElementById('lc-' + name); }
+        function lcError(error) {
+            lcElement('status').textContent = error.message;
+            addLog('来财：' + error.message, 'warning');
+        }
+        function lcQuarantines() { return JSON.parse(localStorage.getItem('laicai-quarantines') || '[]'); }
+        function lcLocalOwner(taskId) {
+            return {taskId,roomName:lcState.room,role:lcState.options.role,clientId:lcClientId(),accountId};
+        }
+        function lcHoldDirectory(directory, source, reason) {
+            if (!directory) return;
+            const records=lcQuarantines();
+            if (!records.some(r=>r.directory.toLowerCase()===directory.toLowerCase() && r.taskId===source.taskId)) {
+                const owner=lcLocalOwner(source.taskId);
+                // 异常终态也可能来自尚未收到 prepare 的旧会话。解除任务占用前先保存该目录的归属。
+                window.electronAPI.holdLaicaiOwner(directory,owner);
+                records.push({directory,...owner,reason,at:Date.now()});
+                localStorage.setItem('laicai-quarantines',JSON.stringify(records));
+            }
+        }
+        function lcShowQuarantines() {
+            const container=lcElement('quarantines');
+            container.replaceChildren();
+            for (const item of lcQuarantines().filter(r=>r.accountId===accountId)) {
+                const button=document.createElement('button');
+                button.textContent='核对并解除隔离 · '+item.directory;
+                button.onclick=async()=>{
+                    try {
+                        if (item.accountId!==accountId || item.clientId!==lcClientId() ||
+                            !lcQuarantines().some(r=>r.directory===item.directory && r.taskId===item.taskId && r.accountId===accountId)) return;
+                        if (!await window.electronAPI.clearLaicaiTaskInput(item.directory,item)) return;
+                        localStorage.setItem('laicai-quarantines',JSON.stringify(lcQuarantines().filter(
+                            r=>r.taskId!==item.taskId || r.directory!==item.directory || r.accountId!==item.accountId)));
+                        lcShowQuarantines();
+                    } catch(error) { lcError(error); }
+                };
+                container.appendChild(button);
+            }
+        }
+        function lcGameLock() {
+            const lock=lcLock();
+            return lock && lock.role!=='host' ? lock : null;
+        }
+        function lcClientId() {
+            let id = localStorage.getItem('laicai-client-id');
+            if (!id) { id = crypto.randomUUID(); localStorage.setItem('laicai-client-id', id); }
+            return id;
+        }
+        function lcPersist() {
+            if (accountId && lcState) localStorage.setItem('laicai-seat-' + accountId, JSON.stringify(lcState));
+        }
+        function lcLock() {
+            try { return JSON.parse(localStorage.getItem('laicai-task-lock') || 'null'); }
+            catch { return { taskId: 'unknown' }; }
+        }
+        function lcSend(op, context, payload) {
+            let message = { type:'laicai', version:1, op, messageId:crypto.randomUUID(), roomName:lcState.room, ...context, payload };
+            if (op==='heartbeat') {
+                lcEmit(message);
+                return message.messageId;
+            }
+            const controls=lcControls();
+            const membership=op==='seat-ready' || op==='seat-withdraw';
+            for (const old of Object.values(controls)) {
+                if (old.roomName!==message.roomName || !(old.op===op || membership && ['seat-ready','seat-withdraw'].includes(old.op))) continue;
+                if (old.op===op && JSON.stringify(old.payload)===JSON.stringify(payload)) message=old;
+                else { delete controls[old.messageId]; lcControlSent.delete(old.messageId); }
+            }
+            if (op==='state-request') lcState.snapshotId=message.messageId;
+            if (op==='seat-ready') lcState.readyId=message.messageId;
+            lcPersist();
+            lcControl(message);
+            return message.messageId;
+        }
+        function lcRoleFields() {
+            const host = lcElement('role').value === 'host';
+            lcElement('host').hidden = !host;
+            lcElement('big').hidden = host;
+        }
+        function lcAddWorker(value = {}) {
+            const row = document.createElement('fieldset');
+            row.innerHTML = '<label>多用户编号 <input class="lc-worker-id"></label> <label>1–3 个 UID <input class="lc-worker-uids"></label> <button type="button" class="lc-folder">选择来财目录</button> <select class="lc-bat" aria-label="白名单 BAT"><option value="">选择白名单 BAT</option></select> <button type="button" class="lc-remove">移除</button>';
+            const q = name => row.querySelector('.lc-' + name);
+            q('worker-id').value = value.workerId || '';
+            q('worker-uids').value = (value.uids || []).join(' ');
+            row.dataset.directory = value.directory || '';
+            if (value.directory) q('folder').textContent = value.directory;
+            q('folder').onclick = () => window.electronAPI.selectLaicaiDirectory().then(folder => {
+                if (folder) { row.dataset.directory = folder; q('folder').textContent = folder; }
+            }).catch(lcError);
+            q('remove').onclick = () => row.remove();
+            window.electronAPI.listRemoteExecutables().then(({files}) => {
+                for (const file of files.filter(f => /\.bat$/i.test(f.name))) {
+                    q('bat').appendChild(new Option(file.relativePath, file.id));
+                }
+                q('bat').value = value.batId || '';
+            }).catch(lcError);
+            lcElement('workers').appendChild(row);
+        }
+        function lcBind() {
+            lcEpoch++;
+            lcLiveSince=Date.now();
+            lcState = JSON.parse(localStorage.getItem('laicai-seat-' + accountId) || 'null');
+            lcElement('workers').replaceChildren();
+            const options = lcState?.options || {};
+            lcElement('role').value = options.role || 'big';
+            lcElement('uid').value = options.uid || '';
+            lcElement('name').value = options.gameName || '';
+            lcElement('dragon').value = options.dragon || '来财';
+            for (const worker of options.workers || []) lcAddWorker(worker);
+            lcRoleFields();
+            lcShowQuarantines();
+            if (lcState?.room) lcState.snapshotId = lcSend('state-request', {}, {
+                clientId:lcClientId(),taskId:lcState.task?.taskId || lcState.terminal?.taskId
+            });
+        }
+        function lcRoomProgress(room) {
+            const p=room.laicaiProgress;
+            if (!p) return '';
+            const display=uid=>maskUid(String(uid));
+            const words=['已处理世界 '+(Number(p.processedWorlds)||0)+'/'+room.laicai.worldUids.length];
+            if (p.worldUid) words.push('当前 '+display(p.worldUid));
+            if (p.preparedUid) words.push('预备 '+display(p.preparedUid));
+            if (p.routeSeq>0) {
+                const local=p.localComplete ?? p.complete;
+                words.push('第 '+p.routeSeq+' 条 · 已确认完成 '+p.complete+'/'+p.total);
+                if (local>p.complete) words.push('个人已跑完、待队伍证据 '+(local-p.complete)+' 人');
+                if (p.total>local) words.push('尚在执行 '+(p.total-local)+' 人');
+            }
+            return words.join(' · ');
+        }
+        function lcShowRooms(rooms) {
+            lcRooms = Object.fromEntries(Object.entries(rooms).filter(([name, room]) =>
+                room.roomType === 'laicai' && userRooms.includes(name)));
+            const select = lcElement('room');
+            const before = select.value || lcState?.room;
+            select.replaceChildren();
+            for (const name of Object.keys(lcRooms)) select.appendChild(new Option(name, name));
+            if (lcRooms[before]) select.value = before;
+            lcElement('panel').hidden = !Object.keys(lcRooms).length && !lcState?.enabled && !lcLock() && !lcQuarantines().some(r=>r.accountId===accountId);
+        }
+        function lcWorkers() {
+            const workers = Array.from(lcElement('workers').children, row => ({
+                workerId:row.querySelector('.lc-worker-id').value.trim(),
+                uids:row.querySelector('.lc-worker-uids').value.trim().split(/[\s,，、]+/),
+                directory:row.dataset.directory, batId:row.querySelector('.lc-bat').value
+            }));
+            const uids = workers.flatMap(w => w.uids);
+            if (!workers.length || new Set(workers.map(w => w.workerId)).size !== workers.length ||
+                new Set(workers.map(w => w.directory.toLowerCase())).size !== workers.length ||
+                new Set(uids).size !== uids.length || workers.some(w => !/^[A-Za-z0-9_-]{1,128}$/.test(w.workerId) ||
+                !w.directory || !w.batId || w.uids.length > 3 || w.uids.some(uid => !/^\d{9,10}$/.test(uid)))) {
+                throw new Error('请检查多用户编号、独立目录、白名单 BAT 和每组 1–3 个唯一 UID');
+            }
+            return workers;
+        }
+        async function lcEnroll() {
+            if (lcLock() || lcState?.enabled || dragonLaunching || preparedRide || timerType === 'protection') {
+                throw new Error('本机已报名或有任务正在使用游戏会话');
+            }
+            const room = lcElement('room').value;
+            if (!lcRooms[room]) throw new Error('请选择有权限的来财房间');
+            const role = lcElement('role').value;
+            const options = { role };
+            const payload = { role, clientId:lcClientId() };
+            let directories;
+            if (role === 'host') {
+                options.workers = lcWorkers();
+                directories = options.workers.map(w => w.directory);
+                payload.workers = options.workers.map(({workerId,uids}) => ({workerId,uids}));
+            } else {
+                options.uid = lcElement('uid').value.trim();
+                options.gameName = lcElement('name').value.trim();
+                options.dragon = lcElement('dragon').value.trim();
+                const folder = getBgiFolderPath();
+                if (!folder || !/^\d{9,10}$/.test(options.uid) || !options.gameName || !options.dragon) {
+                    throw new Error('请配置 BetterGI、大号 UID、游戏昵称及一条龙名称');
+                }
+                options.directory = folder + '\\User\\JsScript\\来财';
+                directories = [options.directory];
+                Object.assign(payload, {uid:options.uid, gameName:options.gameName});
+            }
+            if (lcQuarantines().some(r=>directories.some(d=>d.toLowerCase()===r.directory.toLowerCase()))) {
+                throw new Error('所选执行端仍有未确认的退场或清场记录，请先在本机核对隔离状态');
+            }
+            if (!socket?.connected || !isLoggedIn) throw new Error('请先登录后报名');
+            const epoch = ++lcEpoch;
+            const versions = await Promise.all(directories.map(dir => window.electronAPI.laicaiVersion(dir)));
+            if (epoch !== lcEpoch || !socket?.connected || !isLoggedIn) return;
+            if (new Set(versions).size !== 1) throw new Error('各多用户安装的来财版本不同');
+            payload.laicaiVersion = versions[0];
+            lcState = { enabled:true, room, options, payload };
+            lcPersist();
+            lcState.readyId = lcSend('seat-ready', {}, payload);
+            lcPersist();
+            lcElement('status').textContent = '等待服务端确认报名';
+        }
+        function lcWithdraw() {
+            lcEpoch++;
+            if (!lcState) return;
+            lcState.enabled = false;
+            lcPersist();
+            lcSend('seat-withdraw', {}, {clientId:lcClientId()});
+            lcElement('status').textContent = '已关闭参与';
+        }
+        const lcScopeFields = ['taskId','worldUid','worldAttemptId','workerId','slotId','slotGeneration','seatId','rosterVersion','routeSeq'];
+        function lcScope(message) {
+            return Object.fromEntries(lcScopeFields.filter(k => message[k] !== undefined).map(k => [k,message[k]]));
+        }
+        function lcPacket(source, op, payload, replyTo) {
+            return {type:'laicai',version:1,op,roomName:source.roomName,...lcScope(source),messageId:crypto.randomUUID(),
+                ...(replyTo ? {replyTo} : {}),payload};
+        }
+        let lcControlOwner, lcSavedControls;
+        const lcControlSent=new Map();
+        function lcControls() {
+            if (lcControlOwner!==accountId || !lcSavedControls) {
+                lcControlOwner=accountId;
+                lcSavedControls=JSON.parse(localStorage.getItem('laicai-control-'+accountId) || '{}');
+                lcControlSent.clear();
+            }
+            return lcSavedControls;
+        }
+        function lcSaveControls() {
+            localStorage.setItem('laicai-control-'+accountId,JSON.stringify(lcControls()));
+        }
+        function lcTransmitControl(message) {
+            if (!socket?.connected || !isLoggedIn || lcState?.snapshotId && message.op!=='state-request') return;
+            lcControlSent.set(message.messageId,Date.now());
+            socket.emit('message',message);
+        }
+        function lcControl(message) {
+            lcControls()[message.messageId]=message;
+            lcSaveControls();
+            lcTransmitControl(message);
+            lcSchedule();
+        }
+        function lcEmit(message) {
+            if (message.op==='ack' && ['started','applied','rejected'].includes(message.payload.status)) {
+                lcControl({...message,payload:{...message.payload,clientId:lcClientId()}});
+                return;
+            }
+            if (socket?.connected && isLoggedIn && lcState?.room === message.roomName && !lcState.snapshotId) {
+                socket.emit('message',message);
+            }
+        }
+        function lcBridge() { return lcState.bridge ||= {commands:{},outbox:{},slots:{}}; }
+        function lcTarget(m) {
+            if (lcState.options.role === 'big') return lcState.options.directory;
+            return lcState.options.workers.find(w => w.workerId === m.workerId && w.uids.includes(m.worldUid))?.directory;
+        }
+        function lcIssue(m,directories) {
+            const bridge = lcBridge();
+            const old = bridge.commands[m.messageId];
+            if (old) {
+                if (old.ack) lcEmit(old.ack);
+                return old;
+            }
+            const command = {net:m,locals:directories.map(directory => ({
+                directory, message:lcPacket(m,m.op === 'route-release' ? 'run-route' : m.op,m.payload)
+            }))};
+            bridge.commands[m.messageId] = command;
+            return command;
+        }
+        function lcAck(command,status,reason) {
+            command.ack = lcPacket(command.net,'ack',{status,...(reason ? {reason} : {})},command.net.messageId);
+            lcPersist();
+            lcEmit(command.ack);
+        }
+        function lcFinish(command) {
+            const ack = lcPacket(command.net,'ack',{status:'applied'},command.net.messageId);
+            const unsafe=command.net.payload.unsafeWorlds || [];
+            for (const world of unsafe) {
+                if (lcState.options.role==='host') {
+                    const worker=lcState.options.workers.find(w=>w.workerId===world.workerId);
+                    if (worker) lcHoldDirectory(worker.directory,command.net,'小号世界 '+world.worldUid+' 的清场结果未确认');
+                } else if (lcState.bridge?.bigWorld?.id===world.worldAttemptId) {
+                    lcHoldDirectory(lcState.options.directory,command.net,'大号退出 '+world.worldUid+' 的结果未确认');
+                }
+            }
+            if (lcState.options.role==='host') {
+                for (const worker of lcState.options.workers) {
+                    if (lcState.bridge?.workers?.['w_'+worker.workerId]?.state==='isolated') {
+                        lcHoldDirectory(worker.directory,command.net,'该多用户进程的停止状态未确认');
+                    }
+                }
+            }
+            for (const entry of command.locals.filter(l=>l.status!=='applied')) {
+                lcHoldDirectory(entry.directory,command.net,'任务结束时未收到执行端的收尾确认');
+            }
+            lcState.terminal = {taskId:command.net.taskId,unsafeWorlds:unsafe,ack};
+            lcState.enabled = false;
+            delete lcState.task;
+            delete lcState.bridge;
+            lcPersist();
+            localStorage.removeItem('laicai-task-lock');
+            lcShowQuarantines();
+            lcElement('status').textContent = command.net.payload.reason || '任务结束';
+            lcEmit(ack);
+        }
+        function lcSetLock(task) {
+            localStorage.setItem('laicai-task-lock',JSON.stringify({taskId:task.taskId,accountId,role:task.role}));
+            lcState.task = task;
+            lcPersist();
+        }
+        function lcTaskStart(m) {
+            const lock = lcLock();
+            const active = lock?.taskId === m.taskId && lock.accountId === accountId;
+            const old=active && lcState.bridge?.commands[m.messageId];
+            if (old?.ack) { lcEmit(old.ack); lcSchedule(); return; }
+            if ((!active && (!lcState.enabled || lock || dragonLaunching || preparedRide || timerType === 'protection')) ||
+                m.payload.role !== lcState.options.role || m.payload.laicaiVersion !== lcState.payload.laicaiVersion) {
+                lcEmit(lcPacket(m,'ack',{status:'rejected',reason:'已关闭参与、版本不符或会话被占用'},m.messageId));
+                return;
+            }
+            lcSetLock({taskId:m.taskId,...m.payload});
+            const cmd = lcIssue(m,m.payload.role === 'big' ? [lcState.options.directory] : []);
+            lcElement('status').textContent = '已发车';
+            lcAck(cmd,'applied');
+            lcSchedule();
+        }
+        const lcStageSeconds = {starting:90,game:180,switching:180,verifying:30};
+        function lcWorkerData(bridge, id) {
+            bridge.workers ||= {};
+            return bridge.workers['w_'+id] ||= {done:[],state:'cold'};
+        }
+        function lcReportStage(cmd,stage,extra={}) {
+            const event = lcPacket(cmd.net,'worker-stage',{stage,...extra},cmd.net.messageId);
+            lcBridge().outbox[event.messageId] = event;
+            lcPersist();
+            lcEmit(event);
+        }
+        function lcHostFail(cmd,reason,reusable) {
+            if (cmd.failed) return;
+            cmd.failed = true;
+            cmd.retired = true;
+            cmd.slotReusable = reusable;
+            const worker = lcWorkerData(lcBridge(),cmd.net.workerId);
+            worker.state = reusable ? 'cold' : 'isolated';
+            const slot=lcBridge().slots[cmd.net.slotId];
+            if (slot?.worldAttemptId === cmd.net.worldAttemptId && reusable) slot.released=true;
+            lcReportStage(cmd,'failed',{reason,slotReusable:reusable});
+        }
+        function lcHostStage(cmd,stage) {
+            if (!Object.hasOwn(lcStageSeconds,stage) || cmd.failed || cmd.ready) return;
+            const stages=Object.keys(lcStageSeconds);
+            if (stages.indexOf(stage) <= stages.indexOf(cmd.stage)) return;
+            cmd.stage = stage;
+            cmd.deadline = Math.min(cmd.until,Date.now()+lcStageSeconds[stage]*1000);
+            lcPersist();
+        }
+        function lcHostLabel(bridge) {
+            const parts = Object.entries(bridge.slots).map(([id,s])=>{
+                const worker=lcWorkerData(bridge,s.workerId);
+                return '位置 '+id+' · '+s.workerId+' · '+s.worldUid+' · '+({
+                    cold:'已释放',isolated:'隔离',idle:'待命',ready:'已就绪',active:'接待中',preparing:'准备中'
+                }[worker.state] || worker.state) + (worker.state==='active' && s.detail ? ' · '+s.detail : '');
+            });
+            if (parts.length) lcElement('status').textContent = parts.join(' / ');
+        }
+        function lcTrackHost(m,bridge,directory) {
+            const slot = bridge.slots[m.slotId];
+            if (m.op === 'prepare-world') {
+                if (![1,2].includes(m.slotId) || !Number.isInteger(m.slotGeneration) || m.slotGeneration < 1 ||
+                    slot && (m.slotGeneration <= slot.slotGeneration || !slot.released)) return;
+                const worker = lcWorkerData(bridge,m.workerId);
+                if (!['idle','cold'].includes(worker.state)) return;
+                const cmd=lcIssue(m,[directory]);
+                cmd.until = Date.now()+360000;
+                lcHostStage(cmd,'starting');
+                cmd.warm = worker.state === 'idle';
+                worker.state = 'preparing';
+                // 同位置换到其他多用户时，先停掉上一位待命的执行端。
+                if (slot && slot.workerId !== m.workerId && lcWorkerData(bridge,slot.workerId).state === 'idle') {
+                    const before=bridge.commands[slot.prepareId];
+                    const previous=before.locals[0];
+                    const message=lcPacket(before.net,'retire-worker',{});
+                    cmd.retirePrevious={directory:previous.directory,message,workerId:slot.workerId};
+                }
+                bridge.slots[m.slotId]={...lcScope(m),prepareId:m.messageId,released:false};
+                lcReportStage(cmd,'starting');
+                return cmd;
+            }
+            if (!slot || slot.workerId!==m.workerId || slot.slotGeneration!==m.slotGeneration ||
+                slot.worldAttemptId!==m.worldAttemptId) return;
+            const prepare=bridge.commands[slot.prepareId];
+            if (prepare.failed && !['cancel-attempt','release-world'].includes(m.op)) return;
+            if (slot.released || m.rosterVersion && m.rosterVersion<(slot.rosterVersion || 0)) return;
+            if (m.rosterVersion) slot.rosterVersion=m.rosterVersion;
+            if (m.op==='open-admission') slot.detail='开放入场中';
+            if (m.op==='roster-update') {
+                slot.armId=m.messageId;
+                slot.detail='有效名单已调整，复核现场成员';
+            }
+            if (m.op==='admit-seat') { slot.armId=m.messageId; slot.detail='等待 '+m.payload.gameName+' 申请'; }
+            if (m.op==='check-clear') { delete slot.armId; slot.detail='核验世界已清空'; }
+            const cmd=lcIssue(m,[directory]);
+            const worker=lcWorkerData(bridge,m.workerId);
+            if (m.op==='release-world') {
+                const declared=lcState.options.workers.find(w=>w.workerId===m.workerId);
+                cmd.locals[0].message.payload={...m.payload,retire:declared.uids.every(uid=>
+                    uid===m.worldUid || worker.done.includes(uid) || !lcState.task.worldUids.includes(uid))};
+            }
+            if (m.op==='open-admission') worker.state='active';
+            if (m.op==='cancel-attempt') {
+                // 先撤回尚未执行的准备，再确认能否复用该槽位。
+                prepare.retired=true;
+                lcPersist();
+                cmd.cancelDeadline=Date.now()+30000;
+                if (prepare.slotReusable || !prepare.launch && !prepare.warm && !prepare.retirePrevious) {
+                    cmd.locals=[];
+                    worker.state='cold';
+                    slot.released=true;
+                    lcHostAck(cmd,true);
+                }
+            }
+            lcPersist();
+            return cmd;
+        }
+        function lcHostAck(cmd,reusable) {
+            cmd.ack = lcPacket(cmd.net,'ack',{status:'applied',slotReusable:reusable},cmd.net.messageId);
+            lcPersist();
+            lcEmit(cmd.ack);
+        }
+        async function lcPrepareHost(cmd,bridge,current) {
+            if (cmd.failed || cmd.ready || cmd.retired) return false;
+            if (!cmd.ownerBound) {
+                await window.electronAPI.bindLaicaiOwner(cmd.locals[0].directory,lcLocalOwner(cmd.net.taskId));
+                if (!current() || cmd.retired) return false;
+                cmd.ownerBound=true;
+                lcPersist();
+            }
+            if (Date.now()>=Math.min(cmd.until,cmd.deadline)) {
+                lcHostFail(cmd,'多用户在 '+cmd.stage+' 阶段超时',!cmd.launch && !cmd.warm && !cmd.retirePrevious);
+                return false;
+            }
+            const old=cmd.retirePrevious;
+            if (old && !old.finished) {
+                if (!old.published) {
+                    await window.electronAPI.publishLaicai(old.directory,old.message);
+                    if (!current()) return false;
+                    old.published=true;
+                    lcPersist();
+                }
+                return false;
+            }
+            if (!cmd.launch && !cmd.warm) {
+                if (cmd.retryAt && Date.now()<cmd.retryAt) return false;
+                const worker=lcState.options.workers.find(w=>w.workerId===cmd.net.workerId);
+                cmd.launch='requested';
+                lcPersist();
+                try {
+                    const result=await window.electronAPI.startLaicaiWorker(worker.batId);
+                    if (!current() || cmd.retired) return false;
+                    if (!result.started) {
+                        cmd.launch=null;
+                        if (result.retryable && !cmd.retryAt) {
+                            cmd.retryAt=Date.now()+2000;
+                            lcPersist();
+                        } else lcHostFail(cmd,result.reason,true);
+                        return false;
+                    }
+                    cmd.launch='spawned';
+                } catch (error) {
+                    if (current()) lcHostFail(cmd,error.message,false);
+                    return false;
+                }
+            }
+            if (cmd.stage==='starting') {
+                lcHostStage(cmd,'game');
+                lcReportStage(cmd,'game');
+            }
+            return true;
+        }
+
+        function lcTrackBig(m,bridge,directory) {
+            if (!['join-world','route-release','cancel-route','roster-update','leave-world'].includes(m.op) ||
+                !m.worldAttemptId || !/^\d{9,10}$/.test(m.worldUid)) return;
+            if (lcState.task.worldUids && !lcState.task.worldUids.includes(m.worldUid)) return;
+            const active=bridge.bigWorld;
+            const cleanup=['cancel-route','leave-world'].includes(m.op);
+            const removed = m.op==='roster-update' && m.payload.removed?.includes(lcState.task.seatId);
+            if (removed) {
+                const old=bridge.resume;
+                if (!old || old.attemptId!==m.worldAttemptId) bridge.resume={attemptId:m.worldAttemptId,
+                    needsLeave:active?.id===m.worldAttemptId || Object.values(bridge.commands).some(c=>
+                        c.net.worldAttemptId===m.worldAttemptId && c.net.op==='join-world' && c.locals.some(l=>l.published || l.seen)),
+                    leftApplied:Object.values(bridge.commands).some(c=>c.net.worldAttemptId===m.worldAttemptId && c.leftApplied)};
+            }
+            if (m.op==='cancel-route' && Number.isSafeInteger(m.routeSeq)) {
+                (bridge.canceledRoutes ||= {})[m.worldAttemptId+'_'+m.routeSeq]=true;
+            }
+            if ((bridge.closedWorlds || []).includes(m.worldAttemptId) || !active && ['roster-update','cancel-route'].includes(m.op)) {
+                if (cleanup || m.op==='roster-update') lcAck(lcIssue(m,[]),'applied');
+                return;
+            }
+            if (active && (active.id!==m.worldAttemptId || active.uid!==m.worldUid || !cleanup && m.rosterVersion<active.rosterVersion)) return;
+            if (!active && !['join-world','leave-world'].includes(m.op)) return;
+            if (bridge.resume?.attemptId===m.worldAttemptId && ['join-world','route-release'].includes(m.op)) return;
+            if (m.op==='route-release' && bridge.canceledRoutes?.[m.worldAttemptId+'_'+m.routeSeq]) return;
+            if (m.op==='join-world' && bridge.resume && bridge.resume.attemptId!==m.worldAttemptId) delete bridge.resume;
+            const world=active || (bridge.bigWorld={id:m.worldAttemptId,uid:m.worldUid});
+            world.rosterVersion=Math.max(world.rosterVersion || 0,m.rosterVersion || 0);
+            if (removed) {
+                world.detail='已移出本世界名单，等待退场';
+                for (const c of Object.values(bridge.commands)) {
+                    if (c.net.worldAttemptId===world.id && ['join-world','route-release'].includes(c.net.op) && !c.locals.some(l=>l.seen || l.published)) c.retired=true;
+                }
+            }
+            if (m.op==='join-world') {
+                world.detail='向目标 UID 申请入场';
+            } else if (m.op==='leave-world') {
+                world.leaving=true;
+                world.detail='正在退出世界';
+            } else if (world.leaving && m.op==='route-release') return;
+            if (m.op==='route-release') {
+                const last=world.route;
+                if (!Number.isSafeInteger(m.routeSeq) || m.routeSeq!==(last?.seq || 0)+1 ||
+                    last && (!['success','await-team'].includes(last.status) || last.isLast)) return;
+                const cmd=lcIssue(m,[directory]);
+                cmd.locals[0].message.payload={...m.payload,timeoutSeconds:lcState.task.timeoutSeconds};
+                world.route={seq:m.routeSeq,status:'pending',localId:cmd.locals[0].message.messageId};
+                world.detail='第 '+m.routeSeq+' 条路线已放行，等待执行';
+            } else if (m.op==='cancel-route') {
+                const route=world.route;
+                if (route?.seq!==m.routeSeq || !['pending','running','canceling'].includes(route.status)) {
+                    lcAck(lcIssue(m,[]),'applied');
+                    return;
+                }
+                const cmd=lcIssue(m,[directory]);
+                cmd.locals[0].message.payload={...m.payload,targetMessageId:route.localId};
+                route.status='canceling';
+                world.detail='正在取消第 '+m.routeSeq+' 条路线';
+            } else lcIssue(m,[directory]);
+            lcPersist();
+            if (world.detail) lcElement('status').textContent=world.uid+' · '+world.detail;
+        }
+        function lcAccept(m) {
+            if (m.op === 'task-start') {
+                if (lcState.terminal?.taskId !== m.taskId) lcTaskStart(m);
+                return;
+            }
+            if (lcState.terminal?.taskId === m.taskId && m.op === 'task-end') {
+                const lock = lcLock();
+                if (lock?.taskId === m.taskId && lock.accountId === accountId) localStorage.removeItem('laicai-task-lock');
+                const ack=lcState.terminal.ack;
+                lcEmit(ack.replyTo===m.messageId ? ack : lcPacket(m,'ack',{status:'applied'},m.messageId));
+                return;
+            }
+            if (!lcState.task || m.taskId !== lcState.task.taskId || !/^[a-zA-Z0-9_-]{1,128}$/.test(m.messageId)) return;
+            const bridge = lcBridge();
+            if (Object.hasOwn(bridge.commands,m.messageId)) {
+                if (bridge.commands[m.messageId].retired) return;
+                if (bridge.commands[m.messageId].ack) lcEmit(bridge.commands[m.messageId].ack);
+                lcSchedule();
+                return;
+            }
+            const big = lcState.options.role === 'big';
+            if (m.op === 'task-end') {
+                const directories = big ? [...new Set(Object.values(bridge.commands).filter(c=>c.net.op==='task-start')
+                    .flatMap(c=>c.locals.filter(l=>l.seen || l.published || ['requested','spawned'].includes(c.launch)).map(l=>l.directory)))] :
+                    lcState.options.workers.filter(w=>!['cold','isolated'].includes(lcWorkerData(bridge,w.workerId).state)).map(w=>w.directory);
+                for (const old of Object.values(bridge.commands)) {
+                    if (old.net.op!=='task-end') old.retired=true;
+                }
+                const cmd = lcIssue(m,directories);
+                cmd.endDeadline=Date.now()+Math.max(1000,(lcState.task.timeoutSeconds || 120)*1000);
+                bridge.ending=true;
+                lcPersist();
+                if (!directories.length) lcFinish(cmd);
+                else lcSchedule();
+                return;
+            }
+            if (bridge.ending) return;
+            if (!lcState.enabled && !['cancel-route','leave-world','task-end','cancel-attempt','check-clear','release-world','roster-update'].includes(m.op)) {
+                lcEmit(lcPacket(m,'ack',{status:'rejected',reason:'参与已关闭'},m.messageId));
+                return;
+            }
+            if (big && m.seatId && m.seatId !== lcState.task.seatId) return;
+            if (!['prepare-world','open-admission','admit-seat','join-world','route-release','leave-world','check-clear',
+                'cancel-route','release-world','cancel-attempt','roster-update'].includes(m.op)) return;
+            const directory = lcTarget(m);
+            if (!directory) return;
+            if (big) lcTrackBig(m,bridge,directory);
+            else lcTrackHost(m,bridge,directory);
+            lcSchedule();
+        }
+        let lcTimer = null, lcBusy = false, lcLastSent = 0;
+        function lcSchedule() {
+            if (lcTimer || !lcState || !lcState.task && !Object.keys(lcControls()).length) return;
+            lcTimer = setTimeout(async () => {
+                lcTimer = null;
+                try { await lcPump(); } catch (error) { lcError(error); }
+                lcSchedule();
+            },500);
+        }
+        async function lcLaunchBig(command, current) {
+            const dir = lcState.options.directory, dragon = lcState.options.dragon, bgi = getBgiFolderPath();
+            if (command.launch) return;
+            const installed = await window.electronAPI.laicaiVersion(dir);
+            if (!current()) return;
+            if (installed !== lcState.task.laicaiVersion) { command.launch = 'failed'; lcAck(command,'rejected','发车后脚本版本有变化'); return; }
+            await window.electronAPI.bindLaicaiOwner(dir,lcLocalOwner(command.net.taskId));
+            if (!current() || command.retired) return;
+            command.launch = 'requested';
+            lcPersist();
+            try {
+                if (!await closeBGI(command.net.taskId)) throw new Error('无法关闭旧 BetterGI 进程');
+                if (!current()) return;
+                await window.electronAPI.startProcess('BetterGI.exe',['startOneDragon',dragon],bgi);
+                if (current()) { command.launch = 'spawned'; lcPersist(); }
+            } catch(error) {
+                if(current()) { command.launch='failed'; lcAck(command,'rejected',error.message); }
+            }
+        }
+        function lcResumeReady(bridge) {
+            const r=bridge.resume;
+            if (!r?.ready || r.sent || r.needsLeave && !r.leftApplied || !lcState.enabled) return;
+            r.sent=true;
+            bridge.outbox[r.ready.messageId]=r.ready;
+            lcPersist();
+            lcEmit(r.ready);
+        }
+        function lcRouteDetail(route) {
+            const labels={success:route.isLast?'末条已完成，等待全队退场':'已完成，等待队友同步',
+                'await-team':'个人已跑完，等待同轮队伍击败证据',
+                failed:'失败，等待服务端处理',canceled:'已取消，等待服务端处理',empty:'路线包为空，等待退场'};
+            return '第 '+route.seq+' 条路线'+(labels[route.status] || '状态未知');
+        }
+        async function lcEvent(directory,event,bridge,current) {
+            if (!current()) return;
+            const waiting = Object.values(bridge.commands).find(c=>c.retirePrevious?.message.messageId === event.replyTo && c.retirePrevious.directory===directory);
+            if (waiting) {
+                const old = waiting.retirePrevious;
+                const same = event.taskId===old.message.taskId && event.worldAttemptId===old.message.worldAttemptId &&
+                    event.slotGeneration===old.message.slotGeneration && event.workerId===old.workerId;
+                if (same && event.op==='ack' && event.payload.status==='applied') {
+                    old.finished=true;
+                    lcWorkerData(bridge,old.workerId).state='cold';
+                    lcPersist();
+                    await window.electronAPI.consumeLaicai(directory,old.message.messageId,'in');
+                } else if (same && event.op==='ack' && event.payload.status==='rejected') {
+                    lcHostFail(waiting,'旧执行端未能退役',false);
+                }
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
+            const cmd = Object.values(bridge.commands).find(c => c.locals.some(l => l.directory === directory && l.message.messageId === event.replyTo));
+            const idle=cmd?.net.op==='leave-world' && !event.worldAttemptId && ['heartbeat','executor-ready'].includes(event.op) && event.payload?.single===true;
+            if (!cmd || event.taskId !== cmd.net.taskId || event.roomName !== cmd.net.roomName ||
+                !idle && lcScopeFields.some(k => cmd.net[k] !== undefined && cmd.net[k] !== event[k])) {
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
+            const local = cmd.locals.find(l => l.directory === directory && l.message.messageId === event.replyTo);
+            const heartbeat=event.op==='heartbeat';
+            if (heartbeat && (!isLoggedIn || !socket?.connected || lcState.snapshotId ||
+                !Number.isFinite(event.payload.observedAt) || event.payload.observedAt<Math.max(lcLiveSince,Date.now()-15000) ||
+                event.payload.observedAt>Date.now()+1000)) {
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
+            if (event.op === 'executor-ready' && (event.payload?.role !== lcState.options.role ||
+                event.payload?.laicaiVersion !== lcState.task.laicaiVersion)) {
+                lcAck(cmd,'rejected','执行端角色或版本不符');
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
+            local.seen = true;
+            const net = {...event,replyTo:cmd.net.messageId};
+            if (lcState.options.role==='big' && ['executor-ready','heartbeat'].includes(event.op) &&
+                event.payload.single===true && !event.worldAttemptId && bridge.resume && !bridge.resume.sent) {
+                const resume=bridge.resume;
+                if (cmd.net.worldAttemptId===resume.attemptId || !resume.needsLeave) {
+                    resume.ready ||= lcPacket({roomName:lcState.room,taskId:lcState.task.taskId},'executor-ready',
+                        {role:'big',laicaiVersion:lcState.task.laicaiVersion,single:true});
+                    lcResumeReady(bridge);
+                }
+                if (event.op==='executor-ready') {
+                    lcPersist();
+                    await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                    return;
+                }
+            }
+            if (idle && event.op==='executor-ready') {
+                // T-only 的重新就绪只能通过上面的退场/降员核对发送。
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
+            if (lcState.options.role==='big' && bridge.resume?.attemptId===cmd.net.worldAttemptId && event.op==='route-result' &&
+                ['success','await-team'].includes(event.payload.status)) {
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
+            if (lcState.options.role==='host' && cmd.net.workerId) {
+                const slot=bridge.slots[cmd.net.slotId];
+                if (cmd.retired && !heartbeat || slot?.worldAttemptId!==cmd.net.worldAttemptId || slot.slotGeneration!==cmd.net.slotGeneration || slot.released && !cmd.ack) {
+                    await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                    return;
+                }
+                if (event.op==='world-members' && cmd.net.messageId!==slot.armId) {
+                    await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                    return;
+                }
+                if (event.op==='admission-opened') slot.detail='名单已生效，等待逐席放行';
+                if (event.op==='seat-armed') slot.detail='已记录入场前基线，等待 '+cmd.net.payload.gameName;
+                if (event.op==='world-members') slot.detail=event.payload.ambiguous || !event.payload.stable ?
+                    '队伍识别待复核' : '已观测 '+event.payload.members.length+' 个队员席位，等待服务端确认';
+                if (event.op==='world-cleared') slot.detail='世界已清空，等待释放授权';
+                const worker=lcWorkerData(bridge,cmd.net.workerId);
+                if (event.op==='worker-stage') {
+                    if (event.payload.stage==='failed') {
+                        lcHostFail(cmd,event.payload.reason || '小号端准备失败',false);
+                        await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                        return;
+                    }
+                    lcHostStage(cmd,event.payload.stage);
+                }
+                if (event.op==='world-ready') { cmd.ready=true; worker.state='ready'; }
+                if (event.op==='ack' && event.payload.status==='applied') {
+                    if (cmd.net.op==='release-world') {
+                        if (!worker.done.includes(cmd.net.worldUid)) worker.done.push(cmd.net.worldUid);
+                        worker.state=local.message.payload.retire ? 'cold' : 'idle';
+                        slot.released=true;
+                    } else if (cmd.net.op==='cancel-attempt') {
+                        worker.state='cold';
+                        slot.released=true;
+                        net.payload={...event.payload,slotReusable:true};
+                    }
+                }
+            }
+            if (lcState.options.role==='big' && cmd.net.worldAttemptId) {
+                const world=bridge.bigWorld;
+                if (world?.id===cmd.net.worldAttemptId) {
+                    if (event.op==='join-result') world.detail = event.payload.status==='joined' ?
+                        '已进入 '+event.payload.position+'P，等待目标小号确认' : '入场失败，等待服务端处理';
+                    if (cmd.net.op==='route-release' && world.route?.localId===event.replyTo) {
+                        const route=world.route;
+                        if (event.op==='ack' && event.payload.status==='started' && route.status==='pending') {
+                            route.status='running';
+                            world.detail='第 '+route.seq+' 条路线执行中';
+                        }
+                        if (event.op==='route-result' && !(route.status==='success' && event.payload.status==='await-team')) {
+                            route.status=event.payload.status;
+                            route.isLast=event.payload.isLast===true;
+                            world.detail=lcRouteDetail(route);
+                        }
+                    }
+                    if (event.op==='seat-left' && event.payload.single===true) {
+                        world.detail='已退回单人，等待小号清场';
+                        (bridge.closedWorlds ||= []).push(world.id);
+                        delete bridge.bigWorld;
+                    }
+                    if (world.detail) lcElement('status').textContent=world.uid+' · '+world.detail;
+                }
+            }
+            if (event.op === 'ack') {
+                local.status = event.payload.status;
+                if (cmd.net.op !== 'task-end') {
+                    cmd.ack = net;
+                    lcPersist();
+                    lcEmit(net);
+                }
+            } else if (heartbeat) {
+                lcEmit(net);
+            } else {
+                bridge.outbox[event.messageId] = net;
+                lcPersist();
+                lcEmit(net);
+            }
+            lcPersist();
+            // 收件结果先随网络待发队列落盘，再释放本地事件。
+            await window.electronAPI.consumeLaicai(directory,local.message.messageId,'in');
+            if (!current()) return;
+            await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+            if (current() && cmd.net.op === 'task-end' && cmd.locals.every(l => l.status === 'applied')) lcFinish(cmd);
+        }
+        async function lcPump() {
+            if (lcBusy || !lcState) return;
+            for (const message of Object.values(lcControls())) {
+                if (Date.now()-(lcControlSent.get(message.messageId) || 0)>=5000) lcTransmitControl(message);
+            }
+            if (!lcState.task) return;
+            lcBusy = true;
+            const state = lcState, bridge = lcBridge(), taskId = state.task.taskId;
+            const current = () => lcState === state && state.task?.taskId === taskId;
+            try {
+                const commands = Object.values(bridge.commands);
+                const online = isLoggedIn && socket?.connected && !lcState.snapshotId;
+                for (const cmd of commands) {
+                    if (!current()) return;
+                    if (cmd.net.op==='task-end' && Date.now()>=cmd.endDeadline) {
+                        lcFinish(cmd);
+                        return;
+                    }
+                    if (state.options.role==='host' && cmd.net.op==='prepare-world' && !cmd.ready && !cmd.failed &&
+                        !cmd.retired && Date.now()>=Math.min(cmd.until,cmd.deadline)) {
+                        lcHostFail(cmd,'多用户在 '+cmd.stage+' 阶段超时',!cmd.launch && !cmd.warm && !cmd.retirePrevious);
+                    }
+                    if (cmd.retired) {
+                        for (const local of cmd.locals) {
+                            if (!local.withdrawn) {
+                                try { await window.electronAPI.consumeLaicai(local.directory,local.message.messageId,'in'); }
+                                catch (error) {
+                                    if (state.options.role !== 'host') throw error;
+                                    continue;
+                                }
+                                if (!current()) return;
+                                local.withdrawn = true;
+                                lcPersist();
+                            }
+                        }
+                        continue;
+                    }
+                    if (!online) continue;
+                    if (state.options.role==='host' && cmd.net.op==='prepare-world') {
+                        try { if (!await lcPrepareHost(cmd,bridge,current)) continue; }
+                        catch (error) { if (current()) lcHostFail(cmd,error.message,false); continue; }
+                    }
+                    if (cmd.net.op==='cancel-attempt' && cmd.cancelDeadline<=Date.now() && !cmd.ack?.payload?.slotReusable) {
+                        if (!cmd.retired) {
+                            cmd.retired=true;
+                            lcHostAck(cmd,false);
+                        }
+                        continue;
+                    }
+                    if (cmd.net.op === 'task-start' && state.options.role === 'big') await lcLaunchBig(cmd,current);
+                    if (!current()) return;
+                    if (cmd.retired || cmd.launch === 'failed') continue;
+                    for (const local of cmd.locals) {
+                        if (local.seen || local.published) continue;
+                        try { await window.electronAPI.publishLaicai(local.directory,local.message); }
+                        catch (error) {
+                            if (state.options.role!=='host') throw error;
+                            if (cmd.net.op==='prepare-world') lcHostFail(cmd,error.message,false);
+                            continue;
+                        }
+                        if (!current()) return;
+                        local.published = true;
+                        lcPersist();
+                    }
+                }
+                const directories = [...new Set(commands.flatMap(c => [
+                    ...c.locals.filter(l=>(!c.retired || !l.withdrawn) && (!c.net.workerId ||
+                        !['cold','isolated'].includes(lcWorkerData(bridge,c.net.workerId).state) ||
+                        c.net.op==='cancel-attempt' && !c.retired && c.ack?.payload?.status!=='applied')).map(l=>l.directory),
+                    ...(c.retirePrevious && !c.retirePrevious.finished ? [c.retirePrevious.directory] : [])
+                ]))];
+                if (state.options.role==='host') lcHostLabel(bridge);
+                for (const directory of directories) {
+                    let events;
+                    try { events = await window.electronAPI.laicaiEvents(directory); }
+                    catch (error) {
+                        if (state.options.role !== 'host') throw error;
+                        // 某一 Windows 用户的目录不可访问时，仍继续轮询另一位置。
+                        lcElement('status').textContent = '小号通信目录读取失败：'+error.message;
+                        continue;
+                    }
+                    for (const event of events) {
+                        if (!current()) return;
+                        try { await lcEvent(directory,event,bridge,current); }
+                        catch (error) {
+                            if (state.options.role!=='host') throw error;
+                            lcElement('status').textContent = '小号事件回收失败：'+error.message;
+                            break;
+                        }
+                    }
+                }
+                if (current() && online && Date.now()-lcLastSent >= 5000) {
+                    lcLastSent = Date.now();
+                    for (const m of Object.values(bridge.outbox)) {
+                        if (m.op==='heartbeat') delete bridge.outbox[m.messageId];
+                        else lcEmit(m);
+                    }
+                    lcSend('heartbeat',{taskId},{role:state.options.role,laicaiVersion:state.task.laicaiVersion,source:'client',stage:state.task.phase || 'active'});
+                }
+            } finally { lcBusy = false; }
+        }
+
+        function lcReceive(m) {
+            if (m.version !== 1 || !lcState) return;
+            const control=lcControls()[m.replyTo];
+            if (control && control.roomName===m.roomName && (m.op==='ack' || m.op==='state-snapshot' && control.op==='state-request')) {
+                if (m.op==='ack' && m.payload.status==='rejected' && m.payload.retryable===true) return;
+                if (m.op==='state-snapshot' || m.payload.status==='rejected' || m.payload.status==='applied' && control.op!=='state-request') {
+                    delete lcControls()[m.replyTo];
+                    lcControlSent.delete(m.replyTo);
+                    lcSaveControls();
+                }
+                if (m.op==='ack' && m.payload.status==='rejected' && control.op==='state-request' && m.replyTo===lcState.snapshotId) {
+                    lcElement('status').textContent=m.payload.reason || '服务端拒绝恢复来财任务，请核对账号和房间';
+                }
+            }
+            if (m.roomName !== lcState.room) return;
+            const lock = lcLock();
+            if (m.op === 'ack' && m.replyTo === lcState.readyId && lcState.enabled && !lcState.task) {
+                if (m.payload.status==='rejected' && m.payload.retryable===true) return;
+                if (m.payload.status === 'rejected') lcState.enabled = false;
+                lcPersist();
+                lcElement('status').textContent = m.payload.reason || '已就绪，等待满员';
+            }
+            if (m.op === 'ack' && lcState.bridge?.outbox[m.replyTo]) {
+                if (!['applied','rejected'].includes(m.payload.status) || m.payload.status==='rejected' && m.payload.retryable===true) return;
+                const original=lcState.bridge.outbox[m.replyTo];
+                const resume=lcState.bridge.resume;
+                if (m.payload.status==='rejected' && original.op==='executor-ready' && resume?.ready?.messageId===m.replyTo) {
+                    // 旧世界尚未释放。由下一次新鲜的单人空闲心跳重新确认。
+                    resume.sent=false;
+                    delete resume.ready;
+                }
+                if (original.op==='seat-left' && m.payload.status==='applied') {
+                    const source=lcState.bridge.commands[original.replyTo];
+                    if (source) source.leftApplied=true;
+                    if (lcState.bridge.resume?.attemptId===original.worldAttemptId) lcState.bridge.resume.leftApplied=true;
+                    lcResumeReady(lcState.bridge);
+                }
+                delete lcState.bridge.outbox[m.replyTo];
+                lcPersist();
+                if (m.payload.status === 'rejected') lcElement('status').textContent = m.payload.reason;
+                return;
+            }
+            if (m.op === 'state-snapshot' && m.replyTo === lcState.snapshotId) {
+                delete lcState.snapshotId;
+                const task = m.payload.task;
+                if (task === null) {
+                    if (lock?.accountId === accountId && lcState.task?.taskId===lock.taskId) {
+                        const terminal = m.payload.terminal;
+                        const known=terminal?.taskId===lock.taskId;
+                        // 网络端结束后仍先回收本机输入、通知执行端停单，再解除本机占用。
+                        const end=lcPacket({roomName:m.roomName,taskId:lock.taskId},'task-end',
+                            known ? terminal : {reason:'服务端已无活动任务，本机需核对收尾'});
+                        const existing=Object.values(lcBridge().commands).find(c=>c.net.op==='task-end');
+                        if (!existing) lcAccept(end);
+                        lcSchedule();
+                        lcPersist();
+                        return;
+                    }
+                    if (lock?.accountId === accountId && lcState.terminal?.taskId===lock.taskId) {
+                        localStorage.removeItem('laicai-task-lock');
+                    }
+                    if (lcState.enabled) lcState.readyId = lcSend('seat-ready', {}, lcState.payload);
+                    else lcSend('seat-withdraw', {}, {clientId:lcClientId()});
+                } else if ((!lock || lock.accountId === accountId && lock.taskId === task.taskId) && task.role === lcState.options.role) {
+                    if (!lcState.terminal || lcState.terminal.taskId !== task.taskId) {
+                        lcSetLock(task);
+                        const world=lcBridge().bigWorld;
+                        if (world?.route) {
+                            const round=task.worlds?.find(w=>w.worldAttemptId===world.id && w.routeSeq===world.route.seq);
+                            const own=round?.completed?.find(r=>r.seatId===task.seatId);
+                            const origin=own && lcBridge().commands[own.commandId];
+                            if (origin?.locals[0]?.message.messageId===world.route.localId &&
+                                ['success','await-team'].includes(own?.status)) {
+                                world.route.status=own.status;
+                                world.route.isLast=own.isLast===true;
+                                world.detail=lcRouteDetail(world.route);
+                                lcElement('status').textContent=world.uid+' · '+world.detail;
+                            }
+                        }
+                        const pending = new Set((task.pending || []).map(item => item.messageId));
+                        for (const cmd of Object.values(lcBridge().commands)) {
+                            // 服务端移除 task-start 待办后，大号仍需完成已接受的一次启动。
+                            const binding = cmd.net.op === 'task-start' && task.phase !== 'ended';
+                            const slot=lcBridge().slots[cmd.net.slotId];
+                            const observed=slot?.armId===cmd.net.messageId && cmd.locals.some(l=>l.seen) &&
+                                task.worlds?.some(w=>w.worldAttemptId===cmd.net.worldAttemptId && w.slotGeneration===cmd.net.slotGeneration &&
+                                    w.rosterVersion===cmd.net.rosterVersion && (w.phase==='joining' || w.waitingForRemoval));
+                            if (!binding && !observed && !pending.has(cmd.net.messageId)) cmd.retired = true;
+                        }
+                        lcPersist();
+                    }
+                    for (const pending of task.pending || []) lcAccept(pending);
+                    lcSchedule();
+                }
+                lcPersist();
+                return;
+            }
+            if (m.taskId && m.op !== 'ack' && !lcState.snapshotId) lcAccept(m);
+        }
+
         function getBgiFolderPath() {
             const element = document.getElementById('bgi-folder-path');
             const value = element?.textContent?.trim() || '';
@@ -1378,6 +2374,7 @@
                     isLoggedIn = true;
                     isLoggingIn = false;
                     bindCommandAccount(data.accountId);
+                    lcBind();
                     
                     supportsReportAck = data.supportsReportAck === true;
                     retryQueue = readReportQueue();
@@ -1420,7 +2417,9 @@
                         }
                         addLog(logMessage, 'info');
 
-                        if (data.type === 'report-ack') {
+                        if (data.type === 'laicai') {
+                            if (socket === loginSocket && isLoggedIn) lcReceive(data);
+                        } else if (data.type === 'report-ack') {
                             handleReportAck(data);
                         } else if (data.type === 'points-ranking') {
                             console.log('收到积分排行榜数据:', data.data);
@@ -2833,6 +3832,7 @@
         
         // 更新房间显示
         function updateRoomsDisplay(rooms) {
+            lcShowRooms(rooms);
             const container = document.getElementById('pools-container');
             
             // 不从服务端状态同步onlineUsers数组，保持只显示当前连接的上线
@@ -2891,7 +3891,10 @@
                 
                 // 根据房间模式决定是否显示发车人数
                 let roomPropertiesHTML = `<span>${modeText}</span>`;
-                if (roomInfo.mode !== 'none') {
+                if (roomInfo.roomType === 'laicai') {
+                    roomPropertiesHTML = '来财 · ' + Number(roomInfo.laicai.bigCount) + ' 个大号 + 主用户';
+                    if (roomInfo.laicaiProgress) roomPropertiesHTML += '<span>'+escapeText(lcRoomProgress(roomInfo))+'</span>';
+                } else if (roomInfo.mode !== 'none') {
                     roomPropertiesHTML += `<span>${Number(roomInfo.count)}人发车</span>`;
                 }
                 roomPropertiesHTML += `<span style="color: ${permissionColor};">${permissionText}</span>`;
@@ -2920,11 +3923,10 @@
                         
                         // 显示房主图标：用👑表示房主，无标记表示队员
                         const hostIcon = user.notHost ? '' : ' 👑';
-                        
-                        // 处理UID显示，只显示前3位和后3位，中间用*号代替
                         const maskedUid = maskUid(user.uid);
-                        
-                        item.textContent = `${user.username} (UID: ${maskedUid})${hostIcon}`;
+                        item.textContent = roomInfo.roomType === 'laicai'
+                            ? [user.role === 'host' ? '主用户' : '大号', user.username, maskedUid].filter(Boolean).join(' · ')
+                            : `${user.username} (UID: ${maskedUid})${hostIcon}`;
                         usersDiv.appendChild(item);
                     });
                 }
@@ -3052,7 +4054,12 @@
         }
         
         // 关闭BGI
-        function closeBGI() {
+        function closeBGI(laicaiTaskId) {
+            const lock=lcGameLock();
+            if (lock && !(lock.accountId===accountId && lock.taskId===laicaiTaskId)) {
+                addLog('来财任务正在使用本机 BetterGI','warning');
+                return false;
+            }
             addLog('正在关闭BGI...', 'info');
             if (window.electronAPI && window.electronAPI.closeProcess) {
                 return Promise.resolve(window.electronAPI.closeProcess('BetterGI.exe'))
@@ -3069,6 +4076,7 @@
         
         // 关闭原神
         function closeGenshin(force) {
+            if (lcGameLock()) { addLog('来财任务正在使用本机游戏','warning'); return false; }
             // 未传参数时使用桌面端设置；传入 true/false 时使用调用方的明确选择。
             const closeOption = document.getElementById('close-genshin-checkbox');
             const shouldCloseGenshin = force === undefined
@@ -3289,6 +4297,7 @@
         
         // 添加一条龙任务
         function addDragonTask(configName, isRideTask = false, options = {}) {
+            if (lcGameLock()) { addLog('来财任务正在占用游戏会话', 'warning'); return false; }
             if (preparedRide && !preparedRide.launchResult) {
                 addLog('本机正在准备联机任务', 'warning');
                 return false;
@@ -3372,11 +4381,13 @@
 
         // 实际执行一条龙启动
         async function executeDragonLaunch(configName, closeGame, ride) {
+            if (lcGameLock()) throw new Error('来财任务正在占用游戏会话');
             const bgiFolder = getBgiFolderPath();
             if (!bgiFolder) throw new Error('请先选择 BetterGI 文件夹');
             if (!await closeBGI()) throw new Error('无法关闭旧 BetterGI 进程');
             if (closeGame && !await closeGenshin(true)) throw new Error('无法关闭旧原神进程');
             if (ride && preparedRide !== ride) throw new Error('发车已取消');
+            if (lcGameLock()) throw new Error('来财任务正在占用游戏会话');
             const pid = await window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder);
             addLog('一条龙启动成功，进程 ID：' + pid, 'success');
         }
@@ -3814,6 +4825,8 @@
 
         // 退出登录
         function logout() {
+            lcWithdraw();
+            lcState = null;
             loginGeneration++;
             pendingFileControls.clear();
             commandAccountSince = Infinity;
@@ -4312,7 +5325,7 @@
             }
             const settings = matchedSchedule?.action?.config;
             if (!settings?.configName || !settings.jsFolder || settings.jsFolder === '未选择文件夹' ||
-                !getBgiFolderPath() || preparedRide || timerType === 'protection' || dragonLaunching) {
+                !getBgiFolderPath() || lcGameLock() || preparedRide || timerType === 'protection' || dragonLaunching) {
                 sendMessageToServer({ ...reply, ready: false });
                 return;
             }

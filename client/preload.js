@@ -21,6 +21,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   executeRemoteCommand: (command, cwd) => ipcRenderer.invoke('execute-remote-command', { command, cwd }),
   resetRemoteCommandSession: () => ipcRenderer.invoke('reset-remote-command-session'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectLaicaiDirectory: () => ipcRenderer.invoke('laicai-select-directory'),
+  startLaicaiWorker: id => ipcRenderer.invoke('laicai-start-worker',id),
+  publishLaicai: (directory,message) => ipcRenderer.invoke('laicai-publish',{directory,message}),
+  bindLaicaiOwner: (directory,owner) => ipcRenderer.invoke('laicai-bind-owner',{directory,owner}),
+  holdLaicaiOwner: (directory,owner) => {
+    const result=ipcRenderer.sendSync('laicai-hold-owner',{directory,owner});
+    if (!result?.ok) throw new Error(result?.reason || '未能保存本机任务隔离归属');
+  },
+  clearLaicaiTaskInput: (directory,owner) => ipcRenderer.invoke('laicai-clear-task-input',{directory,owner}),
+  laicaiEvents: directory => ipcRenderer.invoke('laicai-events',directory),
+  consumeLaicai: (directory,id,side) => ipcRenderer.invoke('laicai-consume',{directory,id,side}),
+  laicaiVersion: folder => ipcRenderer.invoke('laicai-version', folder),
   selectFile: () => ipcRenderer.invoke('select-file'),
   startProcess: (command, args, folder) => {
     if (command !== 'BetterGI.exe' || args?.[0] !== 'startOneDragon') return Promise.reject(new Error('无效的一条龙任务'));
