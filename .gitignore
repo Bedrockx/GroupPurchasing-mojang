@@ -2,6 +2,7 @@
 *.zip
 
 # 构建产物
+/packaging/out/
 client/dist/
 client/mojang/
 client/mojang-1.6.0/

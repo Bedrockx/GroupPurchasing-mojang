@@ -43,6 +43,7 @@ let CDInfo = [];
 let failcount = 0;
 let autoSalvageCount = 0;
 let furinaState = "unknown";
+const gainReportId = `gain-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 let commands = []; // 命令数组（全局变量）
 
 let targetItems;
@@ -102,12 +103,13 @@ let lastsettimeTime = 0;
 
     //运行前按自定义配置清理狗粮
     if (settings.decomposeMode === "分解（经验瓶）") {
-        await processArtifacts(21);
+        if (!Number.isFinite(await processArtifacts(21))) artifactExperienceDiff = null;
     } else {
-        artifactExperienceDiff -= await processArtifacts(21);
+        const startingExp = await processArtifacts(21);
+        artifactExperienceDiff = Number.isFinite(startingExp) ? -startingExp : null;
     }
 
-    moraDiff -= await mora();
+    const startingMora = await mora();
 
     //执行普通路线，直到预定激活开始时间
     log.info("开始执行普通路线");
@@ -136,12 +138,16 @@ let lastsettimeTime = 0;
     }
 
     //运行后按自定义配置清理狗粮
-    artifactExperienceDiff += await processArtifacts(21);
-    moraDiff += await mora();
+    const endingExp = await processArtifacts(21);
+    const endingMora = await mora();
+    artifactExperienceDiff = Number.isFinite(artifactExperienceDiff) && Number.isFinite(endingExp)
+        ? Math.max(0, artifactExperienceDiff + endingExp) : null;
+    moraDiff = Number.isFinite(startingMora) && Number.isFinite(endingMora) ? Math.max(0, endingMora - startingMora) : null;
     log.info(`狗粮路线获取摩拉: ${moraDiff}`);
     log.info(`狗粮路线获取狗粮经验: ${artifactExperienceDiff}`);
     // ========== 主流程末尾：替换原来的“修改records”区块 ==========
     const todayKey = `日期:${record.lastRunDate}，运行收尾路线${record.lastRunEndingRoute}`;
+    const summary = `${todayKey}，狗粮经验${artifactExperienceDiff ?? '未识别'}，摩拉${moraDiff ?? '未识别'}`;
     let merged = false;
 
     // 先扫描数组，找同一天同收尾路线
@@ -149,13 +155,13 @@ let lastsettimeTime = 0;
         const line = record.records[i];
         if (line && line.startsWith(todayKey)) {
             // 解析原记录的经验、摩拉
-            const match = line.match(/狗粮经验(-?\d+)，摩拉(-?\d+)/);
+            const match = line.match(/狗粮经验(-?\d+|未识别)，摩拉(-?\d+|未识别)/);
             if (match) {
-                const oldExp = Number(match[1]);
-                const oldMora = Number(match[2]);
-                // 累加并取正
-                const newExp = Math.max(0, oldExp + artifactExperienceDiff);
-                const newMora = Math.max(0, oldMora + moraDiff);
+                const addGain = (old, gain) => old === '未识别'
+                    ? (gain ?? '未识别')
+                    : Math.max(0, Number(old) + (gain ?? 0));
+                const newExp = addGain(match[1], artifactExperienceDiff);
+                const newMora = addGain(match[2], moraDiff);
                 record.records[i] = `${todayKey}，狗粮经验${newExp}，摩拉${newMora}`;
                 merged = true;
                 log.info(`检测到同日记录，已合并更新：经验 ${newExp}，摩拉 ${newMora}`);
@@ -169,12 +175,12 @@ let lastsettimeTime = 0;
         for (let i = record.records.length - 1; i > 0; i--) {
             record.records[i] = record.records[i - 1];
         }
-        record.records[0] = `${todayKey}，狗粮经验${Math.max(0, artifactExperienceDiff)}，摩拉${Math.max(0, moraDiff)}`;
+        record.records[0] = summary;
     }
 
     // 通知与写盘保持不变
     if (settings.notify) {
-        notification.Send(`${todayKey}，狗粮经验${Math.max(0, artifactExperienceDiff)}，摩拉${Math.max(0, moraDiff)}`);
+        notification.Send(summary);
     }
     await writeRecord(accountName);
 
@@ -203,7 +209,7 @@ async function generateCommandFile() {
         }
 
         // 如果是收尾额外A且配置了autoOnline，添加上线命令
-        if (state.runningEndingAndExtraRoute === "收尾额外A" && settings.autoOnline) {
+        if (onlyActivate && state.runningEndingAndExtraRoute === "收尾额外A" && settings.autoOnline) {
             const autoOnlineParts = settings.autoOnline.split('-');
             if (autoOnlineParts.length >= 3) {
                 const username = autoOnlineParts[0].trim();
@@ -226,16 +232,18 @@ async function generateCommandFile() {
             }
         }
 
-        // 添加收益报告命令
-        commands.push({
-            "command": "report-gain",
-            "params": {
-                "gameAccount": gameAccount,
-                "expGain": Math.max(0, artifactExperienceDiff),
-                "moraGain": Math.max(0, moraDiff)
-            }
-        });
-        log.info(`添加收益报告命令: gameAccount=${gameAccount}, expGain=${Math.max(0, artifactExperienceDiff)}, moraGain=${Math.max(0, moraDiff)}`);
+        if (Number.isFinite(artifactExperienceDiff) || Number.isFinite(moraDiff)) {
+            commands.push({
+                command: 'report-gain',
+                params: {
+                    reportId: gainReportId,
+                    gameAccount,
+                    ...(Number.isFinite(artifactExperienceDiff) ? { expGain: artifactExperienceDiff } : {}),
+                    ...(Number.isFinite(moraDiff) ? { moraGain: moraDiff } : {})
+                }
+            });
+        }
+        if (!commands.length) return;
 
         // 根据命令数组生成命令对象
         const commandData = {
@@ -317,7 +325,8 @@ async function readRecord(accountName) {
     if (fileExists) {
         log.info(`记录文件 ${recordFilePath} 存在`);
     } else {
-        log.warn(`无记录文件，将使用默认数据`);
+        log.warn(`无记录文件，首次激活使用收尾额外B`);
+        state.aimActivateTime = null;
         return;
     }
 
@@ -458,7 +467,7 @@ async function writeRecord(accountName) {
 async function processArtifacts(times = 1) {
     await genshin.returnMainUi();
     await sleep(500);
-    let result = 0;
+    let result = null;
     try {
         if (settings.decomposeMode === "销毁（摩拉）") {
             result = await destroyArtifacts(times);
@@ -482,15 +491,15 @@ async function processArtifacts(times = 1) {
         await sleep(500);
         if (!await findAndClick(decomposeRo)) {
             await genshin.returnMainUi();
-            return 0;
+            return null;
         }
         await sleep(1000);
 
         // 识别已储存经验（1570-880-1650-930）
         let digits = await numberTemplateMatch("assets/已储存经验数字", 1573, 885, 74, 36);
 
-        let initialValue = 0;
-        if (digits >= 0) {
+        let initialValue = null;
+        if (Number.isFinite(digits) && digits >= 0) {
             initialValue = digits;
             log.info(`已储存经验识别成功: ${initialValue}`);
         } else {
@@ -503,7 +512,7 @@ async function processArtifacts(times = 1) {
         if (settings.keep4Star) {
             if (!await findAndClick(quickChooseRo)) {
                 await genshin.returnMainUi();
-                return 0;
+                return null;
             }
             moveMouseTo(960, 540);
             await sleep(1000);
@@ -511,7 +520,7 @@ async function processArtifacts(times = 1) {
             // 点击“确认选择”按钮
             if (!await findAndClick(confirmRo)) {
                 await genshin.returnMainUi();
-                return 0;
+                return null;
             }
             await sleep(1000);
 
@@ -529,13 +538,13 @@ async function processArtifacts(times = 1) {
             await sleep(500);
             if (!await findAndClick(decomposeRo)) {
                 await genshin.returnMainUi();
-                return 0;
+                return null;
             }
             await sleep(500);
         }
         if (!await findAndClick(quickChooseRo)) {
             await genshin.returnMainUi();
-            return 0;
+            return null;
         }
         moveMouseTo(960, 540);
         await sleep(1000);
@@ -547,7 +556,7 @@ async function processArtifacts(times = 1) {
         // 点击“确认选择”按钮
         if (!await findAndClick(confirmRo)) {
             await genshin.returnMainUi();
-            return 0;
+            return null;
         }
         await sleep(2000);
 
@@ -567,8 +576,8 @@ async function processArtifacts(times = 1) {
 
         let digits2 = await numberTemplateMatch("assets/分解可获得经验数字", 1469, 899, 180, 37, 0.95, 0.85, 5, 1);
 
-        let newValue = 0;
-        if (digits2 >= 0) {
+        let newValue = null;
+        if (Number.isFinite(digits2) && digits2 >= 0) {
             newValue = digits2
             log.info(`当前总经验识别成功: ${newValue}`);
         } else {
@@ -582,14 +591,14 @@ async function processArtifacts(times = 1) {
             // 点击分解按钮
             if (!await findAndClick(doDecomposeRo)) {
                 await genshin.returnMainUi();
-                return 0;
+                return null;
             }
             await sleep(500);
 
             // 4. "进行分解"按钮// 点击进行分解按钮
             if (!await findAndClick(doDecompose2Ro)) {
                 await genshin.returnMainUi();
-                return 0;
+                return null;
             }
             await sleep(1000);
 
@@ -601,20 +610,22 @@ async function processArtifacts(times = 1) {
             log.info(`用户未选择分解，不执行分解`);
         }
 
-        // 7. 计算分解获得经验=总经验-上次剩余
-        let resinExperience = Math.max(newValue - initialValue, 0);
+        if (initialValue === null || newValue === null) {
+            await genshin.returnMainUi();
+            return null;
+        }
+        // 选择后的总经验包含原有存量，低于存量说明这次读数矛盾。
+        if (newValue < initialValue) {
+            log.warn('分解总经验低于已储存经验，本次经验读数无效');
+            return null;
+        }
+        const resinExperience = newValue - initialValue;
         log.info(`分解可获得经验: ${resinExperience}`);
         let fourStarNum = firstNumber - firstNumber2;
         if (settings.keep4Star) {
             log.info(`保留的四星数量: ${fourStarNum}`);
         }
-        let resultExperience = resinExperience;
-        if (resultExperience === 0) {
-            resultExperience = initialValue;
-        }
-        let result = resultExperience;
-        await genshin.returnMainUi();
-        return result;
+        return resinExperience;
     }
 
     async function destroyArtifacts(times = 1) {
@@ -682,16 +693,21 @@ async function processArtifacts(times = 1) {
 
 async function mora() {
 
-    let result = 0;
+    let result = null;
     let tryTimes = 0;
-    while (result === 0 && tryTimes < 3) {
+    while (result === null && tryTimes < 3) {
         await genshin.returnMainUi();
         await sleep(100);
         log.info("开始尝试识别摩拉");
         keyPress("B");
         await sleep(1500);
         let type = "养成道具";
-        await findAndClick([`assets/RecognitionObject/背包界面/${type}1.png`, `assets/RecognitionObject/背包界面/${type}2.png`])
+        const bagOpened = await findAndClick([`assets/RecognitionObject/背包界面/${type}1.png`, `assets/RecognitionObject/背包界面/${type}2.png`]);
+        if (!bagOpened) {
+            tryTimes++;
+            await genshin.returnMainUi();
+            continue;
+        }
 
         let moraRes = 0;
         await sleep(1000);
@@ -716,7 +732,7 @@ async function mora() {
 
         moraRes = await numberTemplateMatch("assets/背包摩拉数字", moraX, moraY, 300, 40, 0.95, 0.85, 10);
 
-        if (moraRes >= 0) {
+        if (Number.isFinite(moraRes) && moraRes >= 0) {
             log.info(`成功识别到摩拉数值: ${moraRes}`);
             result = moraRes;
         } else {
@@ -856,7 +872,7 @@ async function runActivatePath() {
     if (!state.activatedToday) {
         log.info("今日未执行过激活路线");
         //判断收尾路线并更新record
-        if (new Date() >= state.aimActivateTime || record.lastRunEndingRoute === "收尾额外B") {
+        if ((state.aimActivateTime !== null && new Date() >= state.aimActivateTime) || record.lastRunEndingRoute === "收尾额外B") {
             state.runningEndingAndExtraRoute = "收尾额外A";
         } else {
             state.runningEndingAndExtraRoute = "收尾额外B";
@@ -964,17 +980,16 @@ async function runPaths(folderFilePath, PartyName, doStop, furinaRequirement = "
     for (let i = 0; i < Paths.length; i++) {
         let skiprecord = false;
         if (state.cancel) return;
-        if (new Date() >= state.aimActivateTime && doStop) {
+        if (doStop && state.aimActivateTime !== null && new Date() >= state.aimActivateTime) {
             log.info("已经到达预定时间");
             break;
-        } else if ((new Date() >= (state.aimActivateTime - minIntervalTime * 60 * 1000)) && doStop) {
+        } else if (doStop && state.aimActivateTime !== null && new Date() >= state.aimActivateTime - minIntervalTime * 60 * 1000) {
             log.info(`即将到达预定时间，等待${state.aimActivateTime - new Date()}毫秒`);
             await sleep(state.aimActivateTime - new Date())
             break;
         }
 
         const Path = Paths[i];
-        let success = true;
         // 如果 CDInfo 数组中已存在该文件名，则跳过
         if (CDInfo.includes(Path.fullPath)) {
             log.info(`路线${Path.fullPath}今日已运行，跳过`);
@@ -1003,7 +1018,8 @@ async function runPaths(folderFilePath, PartyName, doStop, furinaRequirement = "
         if (settings.autoSalvage && autoSalvageCount >= 4) {
             autoSalvageCount = 0;
             if (settings.decomposeMode === "分解（经验瓶）") {
-                artifactExperienceDiff += await processArtifacts(1);
+                const exp = await processArtifacts(1);
+                artifactExperienceDiff = Number.isFinite(artifactExperienceDiff) && Number.isFinite(exp) ? artifactExperienceDiff + exp : null;
             } else {
                 await processArtifacts(1);
             }
@@ -1021,9 +1037,9 @@ async function runPaths(folderFilePath, PartyName, doStop, furinaRequirement = "
             if (error.message === "A task was canceled.") {
                 log.warn("任务取消");
                 state.cancel = true;
+                return;
             }
-            success = false;
-            break;
+            throw error;
         }
         if (pathInfo.ok) {
             await genshin.returnMainUi();
@@ -1069,7 +1085,7 @@ async function runPaths(folderFilePath, PartyName, doStop, furinaRequirement = "
         }
     }
 
-    if (doStop && new Date() < state.aimActivateTime) {
+    if (doStop && state.aimActivateTime !== null && new Date() < state.aimActivateTime) {
         const maxWaitMs = settings.maxWaitingTime * 60 * 1000;
         const needWaitMs = state.aimActivateTime - new Date();
         if (needWaitMs <= maxWaitMs && needWaitMs > 0) {
@@ -1220,11 +1236,14 @@ async function runPath(fullPath, targetItemPath = null) {
 
     /* ---------- 主任务 ---------- */
     const pathingTask = (async () => {
-        log.info(`开始执行路线: ${fullPath}`);
-        await fakeLog(fullPath, false, true, 0);
-        await pathingScript.runFile(fullPath);
-        await fakeLog(fullPath, false, false, 0);
-        state.running = false;
+        try {
+            log.info(`开始执行路线: ${fullPath}`);
+            await fakeLog(fullPath, false, true, 0);
+            await pathingScript.runFile(fullPath);
+            await fakeLog(fullPath, false, false, 0);
+        } finally {
+            state.running = false;
+        }
     })();
 
     /* ---------- 伴随任务 ---------- */
@@ -1252,7 +1271,9 @@ async function runPath(fullPath, targetItemPath = null) {
     })();
 
     /* ---------- 并发等待 ---------- */
-    await Promise.allSettled([pathingTask, pickupTask, errorProcessTask]);
+    const results = await Promise.allSettled([pathingTask, pickupTask, errorProcessTask]);
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
 }
 
 //加载拾取物图片

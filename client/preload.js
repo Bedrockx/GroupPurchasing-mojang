@@ -1,169 +1,50 @@
-const { ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
-// 直接暴露API给渲染进程（因为contextIsolation: false）
-window.electronAPI = {
-  // 窗口控制
-  minimizeWindow: () => {
-    ipcRenderer.send('minimize-window');
-  },
-  // 获取应用数据路径
-  getAppDataPath: () => {
-    return ipcRenderer.sendSync('get-app-data-path');
-  },
-  // 获取应用程序路径（exe所在的目录）
-  getAppPath: () => {
-    return ipcRenderer.sendSync('get-app-path');
-  },
-  captureDesktop: (options = {}) => ipcRenderer.invoke('capture-desktop', options),
+// 手工输入的可执行文件与对话框选择同样有效。只有本机输入事件可登记该路径。
+window.addEventListener('change', event => {
+  if (event.isTrusted && event.target?.id === 'execute-file-path' && event.target.value.trim()) {
+    ipcRenderer.send('typed-schedule-executable', event.target.value.trim());
+  }
+}, true);
+
+// 渲染层只能调用客户端实际使用的操作；请求与响应由 invoke 一一对应。
+contextBridge.exposeInMainWorld('electronAPI', {
+  minimizeWindow: () => ipcRenderer.send('minimize-window'),
+  getAppPath: () => ipcRenderer.sendSync('get-app-path'),
+  captureDesktop: options => ipcRenderer.invoke('capture-desktop', options),
   listLogFiles: (kind, bgiFolder) => ipcRenderer.invoke('list-log-files', { kind, bgiFolder }),
   readLogTail: (kind, bgiFolder, filePath, bytes) => ipcRenderer.invoke('read-log-tail', { kind, bgiFolder, filePath, bytes }),
   listRemoteExecutables: () => ipcRenderer.invoke('list-remote-executables'),
   addRemoteWhitelistFolder: () => ipcRenderer.invoke('add-remote-whitelist-folder'),
-  removeRemoteWhitelistFolder: (folderPath) => ipcRenderer.invoke('remove-remote-whitelist-folder', folderPath),
-  runRemoteExecutable: (id) => ipcRenderer.invoke('run-remote-executable', { id }),
+  removeRemoteWhitelistFolder: folder => ipcRenderer.invoke('remove-remote-whitelist-folder', folder),
+  runRemoteExecutable: id => ipcRenderer.invoke('run-remote-executable', { id }),
   executeRemoteCommand: (command, cwd) => ipcRenderer.invoke('execute-remote-command', { command, cwd }),
   resetRemoteCommandSession: () => ipcRenderer.invoke('reset-remote-command-session'),
-  // 文件操作
-  readFile: (filePath, callback) => {
-    ipcRenderer.once('file-content', (event, content) => callback(null, content));
-    ipcRenderer.once('file-error', (event, error) => callback(error, null));
-    ipcRenderer.send('read-file', filePath);
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFile: () => ipcRenderer.invoke('select-file'),
+  startProcess: (command, args, folder) => {
+    if (command !== 'BetterGI.exe' || args?.[0] !== 'startOneDragon') return Promise.reject(new Error('无效的一条龙任务'));
+    return ipcRenderer.invoke('start-dragon', { name: args[1], folder });
   },
-  deleteFile: (filePath, callback) => {
-    ipcRenderer.once('delete-success', (event, success) => callback(null, success));
-    ipcRenderer.once('delete-error', (event, error) => callback(error, null));
-    ipcRenderer.send('delete-file', filePath);
-  },
-  // 选择文件夹
-  selectFolder: () => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('folder-selected', (event, folderPath) => resolve(folderPath));
-      ipcRenderer.once('folder-error', (event, error) => reject(error));
-      ipcRenderer.send('select-folder');
-    });
-  },
-  // 选择文件
-  selectFile: () => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('file-selected', (event, filePath) => resolve(filePath));
-      ipcRenderer.once('file-error', (event, error) => reject(error));
-      ipcRenderer.send('select-file');
-    });
-  },
-  // 进程操作
-  startProcess: (command, args, cwd) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('process-started', (event, pid) => resolve(pid));
-      ipcRenderer.once('process-error', (event, error) => reject(error));
-      ipcRenderer.send('start-process', { command, args, cwd });
-    });
-  },
-  killProcess: (pid) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('process-killed', (event, success) => resolve(success));
-      ipcRenderer.once('process-error', (event, error) => reject(error));
-      ipcRenderer.send('kill-process', pid);
-    });
-  },
-  // 命令执行
-  executeCommand: (command, cwd) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('command-result', (event, result) => resolve(result));
-      ipcRenderer.once('command-error', (event, error) => reject(error));
-      ipcRenderer.send('execute-command', { command, cwd });
-    });
-  },
-  // 进程状态检查
-  checkProcess: (processName) => {
-    return new Promise((resolve) => {
-      ipcRenderer.once('process-status', (event, isRunning) => resolve(isRunning));
-      ipcRenderer.send('check-process', processName);
-    });
-  },
-  // 关闭进程
-  closeProcess: (processName) => {
-    return new Promise((resolve) => {
-      ipcRenderer.once('process-closed', (event, success) => resolve(success));
-      ipcRenderer.send('close-process', processName);
-    });
-  },
-  // 日志功能
-  writeLog: (level, message) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('log-success', (event, success) => resolve(success));
-      ipcRenderer.once('log-error', (event, error) => reject(error));
-      ipcRenderer.send('write-log', { level, message });
-    });
-  },
-  // 写入文件
-  writeFile: (filePath, content, callback) => {
-    const requestId = Date.now() + Math.random();
-    const successChannel = `write-file-success-${requestId}`;
-    const errorChannel = `write-file-error-${requestId}`;
-    
-    ipcRenderer.once(successChannel, (event, success) => callback(null, success));
-    ipcRenderer.once(errorChannel, (event, error) => callback(error, null));
-    ipcRenderer.send('write-file', { filePath, content, requestId });
-  },
-  // 获取文件内容
-  getFileContent: (filePath) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('file-content-result', (event, result) => {
-        if (result.success) {
-          resolve(result.content);
-        } else {
-          reject(result.error);
-        }
-      });
-      ipcRenderer.send('get-file-content', { filePath });
-    });
-  },
-  // 读取图片文件（二进制）
-  readImageFile: (filePath) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('image-file-result', (event, result) => {
-        if (result.success) {
-          resolve(result);
-        } else {
-          reject(result.error);
-        }
-      });
-      ipcRenderer.send('read-image-file', { filePath });
-    });
-  },
-  readImageMetadata: (filePath) => ipcRenderer.invoke('read-image-metadata', filePath),
-  listImageMetadata: (directoryPath) => ipcRenderer.invoke('list-image-metadata', directoryPath),
-  // 保存图片文件（二进制）
-  saveImageFile: (filePath, base64) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('save-image-result', (event, result) => {
-        if (result.success) {
-          resolve(result);
-        } else {
-          reject(result.error);
-        }
-      });
-      ipcRenderer.send('save-image-file', { filePath, base64 });
-    });
-  },
-  // 执行文件
-  executeFile: (filePath) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('execute-file-result', (event, success) => resolve(success));
-      ipcRenderer.send('execute-file', filePath);
-    });
-  },
-  // 获取客户端代码哈希（混入随机key，防篡改校验）
-  getCodeHash: (key) => {
-    return new Promise((resolve, reject) => {
-      ipcRenderer.once('client-code-hash', (event, result) => {
-        if (result.success) {
-          resolve(result.hash);
-        } else {
-          reject(result.error);
-        }
-      });
-      ipcRenderer.send('get-client-code-hash', { key: key || '' });
-    });
+  closeProcess: name => ipcRenderer.invoke('close-process', name),
+  writeLog: (level, message) => ipcRenderer.invoke('write-log', { level, message }),
+  readFile: (file, callback) => ipcRenderer.invoke('read-file', file).then(data => callback(null, data), error => callback(error.message)),
+  getFileContent: file => ipcRenderer.invoke('read-file', file),
+  readCommand: file => ipcRenderer.invoke('read-command', file),
+  consumeCommand: (file, id) => ipcRenderer.invoke('consume-command', { file, id }),
+  writeFile: (filePath, content, callback) => ipcRenderer.invoke('write-file', { filePath, content })
+    .then(result => callback(null, result), error => callback(error.message)),
+  readImageFile: file => ipcRenderer.invoke('read-image-file', file),
+  readImageMetadata: file => ipcRenderer.invoke('read-image-metadata', file),
+  listImageMetadata: dir => ipcRenderer.invoke('list-image-metadata', dir),
+  saveImageFile: (filePath, base64) => ipcRenderer.invoke('save-image-file', { filePath, base64 }),
+  executeFile: file => ipcRenderer.invoke('execute-file', file),
+  getCodeHash: key => ipcRenderer.invoke('get-client-code-hash', { key }),
+  installUpdate: request => ipcRenderer.invoke('install-update', request),
+  cancelUpdate: id => ipcRenderer.invoke('cancel-update', id),
+  onUpdateProgress: handler => {
+    const listener = (_event, data) => handler(data);
+    ipcRenderer.on('update-progress', listener);
+    return () => ipcRenderer.removeListener('update-progress', listener);
   }
-};
+});
