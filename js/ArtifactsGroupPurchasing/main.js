@@ -901,17 +901,18 @@ async function runGroupPurchasing(runExtra) {
         for (const { fullPath } of files) {
             await runPath(fullPath, 1);
         }
+        let pos;
         try {
-            const pos = await genshin.getPositionFromMap();
-            const dist = Math.hypot(pos.x - 2297.3, pos.y + 823.8);
-            if (dist && dist < 100) {
-                log.warn("仍然在七天神像附近，尝试重跑至多一次");
-                for (const { fullPath } of files) {
-                    await runPath(fullPath, 1);
-                }
-            }
+            pos = await genshin.getPositionFromMap();
         } catch (error) {
-
+            if (error.message === "A task was canceled.") throw error;
+            log.warn("未能识别当前位置，跳过占位路线复检");
+        }
+        if (pos && Math.hypot(pos.x - 2297.3, pos.y + 823.8) < 100) {
+            log.warn("仍然在七天神像附近，尝试重跑至多一次");
+            for (const { fullPath } of files) {
+                await runPath(fullPath, 1);
+            }
         }
         log.info(`${folderName} 的全部路线已完成`);
 

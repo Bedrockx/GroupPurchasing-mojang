@@ -142,3 +142,26 @@ test('凌晨四点跨日、重复回执与只当队员偏好共同决定是否�
     await ctx.handleOnlineRecordAndReonline(false);
     assert.equal(calls.at(-1), '收尾');
 });
+
+test('占位路线重跑失败或取消时，主流程传播原异常并停止等待和成功记账', async () => {
+    for (const failure of [new Error('路线执行失败'), new Error('A task was canceled.')]) {
+        const { ctx, run, writes } = loadScript(group);
+        ctx.settings.runExtra = false;
+        ctx.readOnlineRecord = ctx.switchPartyIfNeeded = ctx.loadTargetItems = noop;
+        ctx.getPlayerSign = () => 2;
+        ctx.readFolder = () => [{ fullPath: '占位路线.json' }];
+        ctx.genshin.getPositionFromMap = () => ({ x: 2298, y: -824 });
+        let runs = 0;
+        ctx.runPath = async () => {
+            if (++runs === 2) throw failure;
+        };
+        ctx.isMainUI = () => assert.fail('不应进入占位等待');
+        ctx.handleOnlineRecordAndReonline = () => assert.fail('不应记录成功或再次上线');
+        const logs = [];
+        ctx.log.info = message => logs.push(message);
+        await assert.rejects(run('runMain()'), error => error === failure);
+        assert.equal(runs, 2);
+        assert.equal(logs.some(message => message.includes('全部路线已完成')), false);
+        assert.equal(writes.size, 0);
+    }
+});
