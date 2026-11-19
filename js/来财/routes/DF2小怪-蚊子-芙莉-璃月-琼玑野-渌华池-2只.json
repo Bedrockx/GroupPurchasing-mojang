@@ -1,0 +1,31 @@
+{
+  "info": {
+    "authors": [
+      {
+        "links": "",
+        "name": "烏兎"
+      }
+    ],
+    "bgi_version": "0.45.0",
+    "description": "  路线信息：该路线预计用时24秒，包含以下怪物：2只雷萤、1只炽热骗骗花。",
+    "enable_monster_loot_split": false,
+    "last_modified_time": 1788164699146,
+    "map_match_method": "TemplateMatch",
+    "map_name": "Teyvat",
+    "name": "DF2小怪-蚊子-芙莉-璃月-琼玑野-渌华池-2只",
+    "tags": [],
+    "type": "collect",
+    "version": "1.0"
+  },
+  "positions": [
+    {
+      "action": "combat_script",
+      "action_params": ";e,wait(0.1),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2);keypress(e),wait(0.05),keydown(e),wait(0.05),attack(0.82),keyup(e),wait(0.6),keypress(1),wait(0.2),e,attack(2.7);",
+      "id": 1,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 855.8763,
+      "y": 176.2633
+    }
+  ]
+}

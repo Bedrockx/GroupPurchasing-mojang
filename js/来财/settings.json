@@ -1,0 +1,16 @@
+[
+  {
+    "name": "role",
+    "type": "select",
+    "label": "本游戏会话的角色（big 大号，host 小号）",
+    "options": ["big", "host"],
+    "default": "big"
+  },
+  {
+    "name": "routePack",
+    "type": "select",
+    "label": "大号执行的路线包（同场大号选择相同路线包）",
+    "options": ["传奇三线", "前两条传奇", "传奇与小怪"],
+    "default": "传奇三线"
+  }
+]

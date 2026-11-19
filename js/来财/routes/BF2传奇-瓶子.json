@@ -1,0 +1,86 @@
+{
+  "info": {
+    "authors": [
+      {
+        "links": "",
+        "name": "烏兎"
+      }
+    ],
+    "bgi_version": "0.45.0",
+    "description": "路线信息：该路线预计用时40秒，包含以下怪物：3只精英传奇倍率五。",
+    "enable_monster_loot_split": true,
+    "last_modified_time": 1788016794871,
+    "map_match_method": "TemplateMatch",
+    "map_name": "Teyvat",
+    "name": "BF2传奇-瓶子",
+    "tags": [],
+    "type": "collect",
+    "version": "1.0"
+  },
+  "positions": [
+    {
+      "action": "",
+      "action_params": "",
+      "id": 1,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 3015.8955,
+      "y": 3735.7383
+    },
+    {
+      "action": "combat_script",
+      "action_params": "attack(0.1)",
+      "id": 2,
+      "move_mode": "fly",
+      "type": "path",
+      "x": 3003.0156,
+      "y": 3743.7031
+    },
+    {
+      "action": "",
+      "action_params": "",
+      "id": 3,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 2969.5215,
+      "y": 3755.543
+    },
+    {
+      "action": "",
+      "action_params": "",
+      "id": 4,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 2920.9307,
+      "y": 3762.2561
+    },
+    {
+      "action": "combat_script",
+      "action_params": ";e,e,wait(0.1),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2);keypress(e),wait(0.05),keydown(e),wait(0.05),attack(0.82),keyup(e),wait(0.8),keypress(1)",
+      "id": 5,
+      "locked": false,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 2898.1633,
+      "y": 3783.851
+    },
+    {
+      "action": "fight",
+      "action_params": "",
+      "id": 6,
+      "move_mode": "dash",
+      "point_ext_params": {
+        "description": "",
+        "misidentification": {
+          "arrival_time": 0,
+          "handling_mode": "",
+          "type": []
+        },
+        "monster_tag": "elite"
+      },
+      "type": "orientation",
+      "x": 2898.1633,
+      "y": 3783.851
+    }
+  ]
+}
