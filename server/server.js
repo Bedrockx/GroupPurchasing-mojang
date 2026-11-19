@@ -439,6 +439,7 @@ const laicaiTasks = new Map();
 const laicaiSeen = new Map();
 const laicaiWaiting = new Map();
 const laicaiRegistrationAcks = new Map();
+const LAICAI_FROZEN_REASON = '账号已冻结，请在解冻后重新报名';
 const USER_ACCOUNTS_FILE = path.join(DATA_DIR, 'user_accounts.json');
 const VERSIONS_FILE = path.join(DATA_DIR, 'versions.json');
 const ADMIN_ACCOUNTS_FILE = path.join(DATA_DIR, 'adminAccounts.json');
@@ -2275,6 +2276,20 @@ async function handleToggleFreezeUser(data, socket) {
 
 // 冻结后下线该账户在各房间的所有 UID。
 function offlineFrozenAccount(accountId) {
+  // 冻结只撤销尚未发车的来财报名，已发车任务保留原席位以完成退场、清场和恢复。
+  let waitingChanged = false;
+  for (const [roomName, seats] of laicaiWaiting) {
+    const removed = seats.filter(seat => seat.accountId === accountId);
+    if (!removed.length) continue;
+    laicaiWaiting.set(roomName, seats.filter(seat => seat.accountId !== accountId));
+    waitingChanged = true;
+    for (const seat of removed) {
+      laicaiRegistrationAcks.get(seat.socketId)?.set(seat.registrationId, LAICAI_FROZEN_REASON);
+      io.sockets.sockets.get(seat.socketId)?.emit('message', laicaiMsg(roomName, 'ack',
+        {status:'rejected', reason:LAICAI_FROZEN_REASON}, {replyTo:seat.registrationId}));
+    }
+  }
+  if (waitingChanged) sendRoomsStatusToAll();
   for (const [uid, pending] of RideManager.pendingOnlineRequests) {
     if ((getConnectionBySocketId(pending.socket?.id)?.accountId || pending.data.operatorAccountId) === accountId) {
       RideManager.pendingOnlineRequests.delete(uid);
@@ -3757,7 +3772,7 @@ function laicaiRegister(socket, accountId, room, m) {
   if (!id(p.clientId)) throw Error('客户端标识无效');
   const waiting = (laicaiWaiting.get(room.name) || []).filter(s =>
     io.sockets.sockets.get(s.socketId)?.connected && getConnectionBySocketId(s.socketId)?.accountId === s.accountId &&
-    userAccounts[s.accountId]?.rooms?.includes(room.name));
+    userAccounts[s.accountId]?.rooms?.includes(room.name) && !userAccounts[s.accountId].isFrozen);
   const same = s => s.clientId === p.clientId && s.accountId === accountId;
   if (m.op === 'seat-withdraw') {
     laicaiWaiting.set(room.name, waiting.filter(s => !(same(s) && s.socketId === socket.id)));
@@ -3769,7 +3784,7 @@ function laicaiRegister(socket, accountId, room, m) {
   if (others.some(s => s.socketId === socket.id) || waiting.some(s => same(s) && s.socketId !== socket.id)) throw Error('客户端席位已绑定');
   if (!['big','host'].includes(p.role) || typeof p.laicaiVersion !== 'string' || !p.laicaiVersion.trim() ||
       others.some(s => s.laicaiVersion !== p.laicaiVersion)) throw Error('角色或来财版本不匹配');
-  const seat = {seatId:waiting.find(same)?.seatId || crypto.randomUUID(), role:p.role, accountId,
+  const seat = {seatId:waiting.find(same)?.seatId || crypto.randomUUID(), registrationId:m.messageId, role:p.role, accountId,
     clientId:p.clientId, socketId:socket.id, laicaiVersion:p.laicaiVersion};
   if (p.role === 'big') {
     if (typeof p.uid !== 'string' || !/^\d{9,10}$/.test(p.uid) || typeof p.gameName !== 'string' || !p.gameName.trim() ||
@@ -3872,11 +3887,16 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
     return;
   }
   if (m.op === 'seat-ready' || m.op === 'seat-withdraw') {
-    let ids = laicaiRegistrationAcks.get(socket.id);
-    if (!ids) laicaiRegistrationAcks.set(socket.id, ids = new Set());
-    if (!ids.has(m.messageId)) {
+    let receipts = laicaiRegistrationAcks.get(socket.id);
+    if (!receipts) laicaiRegistrationAcks.set(socket.id, receipts = new Map());
+    if (m.op === 'seat-ready' && userAccounts[identity.accountId].isFrozen) {
+      receipts.set(m.messageId, LAICAI_FROZEN_REASON);
+    }
+    const reason = receipts.get(m.messageId);
+    if (reason) return ack('rejected', reason);
+    if (!receipts.has(m.messageId)) {
       laicaiRegister(socket, identity.accountId, room, m);
-      ids.add(m.messageId);
+      receipts.set(m.messageId, null);
       sendRoomsStatusToAll();
     }
     return ack('applied');

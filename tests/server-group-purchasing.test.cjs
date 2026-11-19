@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { boot, temporaryData, seats } = require('./helpers/server-fixture.cjs');
+const { createRoom } = require('./helpers/laicai-room.cjs');
 
 async function prepare(app, id, ackUids) {
   for (const { uid } of seats) {
@@ -145,6 +146,93 @@ function lcRoomSetup(app, config = {}) {
   const laicai = {bigCount:1, worldUids:[uid1], allowMissing:true, timeoutSeconds:120, ...config};
   app.get('rooms').push({name:lcRoom, mode:'random', count:laicai.bigCount+1, roomType:'laicai', laicai});
 }
+
+async function freezeAccount(app, accountId, isFrozen) {
+  app.get('adminConnections').set('冻管', {adminInfo:{username:'冻管'}, connections:[{socketId:'freeze-admin'}]});
+  let reply;
+  await app.get('handleReceivedMessage')({id:'freeze-admin', emit:(_, m) => { reply = m; }},
+    {type:'toggle-freeze-user', accountId, isFrozen});
+  assert.equal(reply.type, 'freeze-user-success');
+}
+
+test('冻结移除同账号的所有等待席，重传旧报名或解冻均不能直接发车', async t => {
+  const app = await boot(temporaryData(t));
+  lcRoomSetup(app, {bigCount:2});
+  const big = lcReady('big','pc_B');
+  const other = lcReady('big','pc_C',{uid:'100000002'});
+  const first = await lcSend(app, 'B', 'seat-ready', big);
+  const second = await lcSend(app, 'C', 'seat-ready', other);
+  await freezeAccount(app, 'B', true); // B、C 是同一账号的两个连接。
+  const view = () => app.get('laicaiRoomsView')(app.get('rooms').find(r => r.name === lcRoom));
+  assert.equal(view().users.length, 0);
+  for (const receipt of [first, second]) {
+    assert.ok(app.messages.some(r => r.data.replyTo === receipt.replyTo && r.data.payload?.status === 'rejected'));
+  }
+  assert.equal((await lcSend(app, 'B', 'seat-ready', big, {messageId:first.replyTo})).payload.status, 'rejected');
+  const frozenReply = await lcSend(app, 'C', 'seat-ready', other);
+  assert.equal(frozenReply.payload.status, 'rejected');
+  assert.equal((await lcSend(app, 'B', 'seat-withdraw', {clientId:'pc_B'})).payload.status, 'applied');
+  await freezeAccount(app, 'B', false);
+  await lcSend(app, 'D', 'seat-ready', lcReady('host','pc_D'));
+  for (const [socket, registration, replyTo] of [['B', big, first.replyTo], ['C', other, frozenReply.replyTo]]) {
+    assert.equal((await lcSend(app, socket, 'seat-ready', registration, {messageId:replyTo})).payload.status, 'rejected');
+  }
+  assert.equal(app.get('laicaiTasks').size, 0);
+  await lcSend(app, 'B', 'seat-ready', big);
+  await lcSend(app, 'C', 'seat-ready', other);
+  assert.equal(app.get('laicaiTasks').size, 1);
+});
+
+test('来财满员检查重新核验等待席的冻结状态，冻结的主用户也不能报名', async t => {
+  const app = await boot(temporaryData(t));
+  lcRoomSetup(app);
+  await lcSend(app, 'D', 'seat-ready', lcReady('host','pc_D'));
+  app.get('userAccounts').D.isFrozen = true; // 模拟等待表仍残留已冻结席位。
+  await lcSend(app, 'A', 'seat-ready', lcReady('big','pc_A'));
+  assert.equal(app.get('laicaiTasks').size, 0);
+  assert.equal((await lcSend(app, 'D', 'seat-ready', lcReady('host','pc_D'))).payload.status, 'rejected');
+  assert.deepEqual(Array.from(app.get('laicaiWaiting').get(lcRoom), s => s.accountId), ['A']);
+});
+
+test('团购炸车自动冻结会撤销该账号在另一个来财房的报名', async t => {
+  const app = await boot(temporaryData(t));
+  const name = '来财联机';
+  const laicai = {bigCount:1, worldUids:[uid1], allowMissing:false, timeoutSeconds:120};
+  app.get('rooms').push({name, mode:'random', count:2, roomType:'laicai', laicai});
+  app.get('userAccounts').B.rooms.push(name);
+  await lcSend(app, 'B', 'seat-ready', lcReady('big','pc_B'), {roomName:name});
+  for (let i = 0; i < 2; i++) {
+    const rideId = await app.openRide();
+    await prepare(app, rideId, []);
+    app.report('B', rideId);
+    app.get('processCrashReports')(rideId);
+  }
+  assert.equal(app.get('userAccounts').B.isFrozen, true);
+  assert.equal(app.get('laicaiWaiting').get(name)?.length || 0, 0);
+});
+
+test('已经发车的来财账号被冻结后仍能恢复原任务、回报退场和清场', async t => {
+  const r = await createRoom(t, [{workerId:'w',uids:[uid1]}], {bigCount:1});
+  const start = r.sent('task-start');
+  for (const item of start) await r.reply(item, 'ack', {status:'applied'});
+  await r.reply(start.find(s => s.uid === 'A'), 'executor-ready', {role:'big', laicaiVersion:'1.0.0'});
+  await r.reply(r.sent('prepare-world')[0], 'world-ready', {observedUid:uid1, exactReads:2});
+  await r.reply(r.sent('open-admission')[0], 'admission-opened', {});
+  const arm = r.sent('admit-seat')[0];
+  await r.reply(arm, 'seat-armed', {members:[]});
+  await r.reply(r.sent('join-world')[0], 'join-result', {status:'joined', fromSingle:true, position:2});
+  await r.reply(arm, 'world-members', {stable:true, ambiguous:false, members:[{seatId:arm.data.seatId, position:2}]});
+  await r.reply(r.sent('route-release')[0], 'route-result', {status:'success', evidence:'reward', isLast:true});
+
+  await freezeAccount(r.app, 'A', true);
+  await freezeAccount(r.app, 'D', true);
+  const state = await lcSend(r.app, 'A', 'state-request', {clientId:'pc_A'});
+  assert.equal(state.payload.task.taskId, arm.data.taskId);
+  await r.reply(r.sent('leave-world')[0], 'seat-left', {single:true});
+  await r.reply(r.sent('check-clear')[0], 'world-cleared', {stable:true, memberCount:0});
+  await r.reply(r.sent('release-world')[0], 'ack', {status:'applied'});
+  assert.equal(r.sent('task-end')[0].data.payload.worldResults[0].status, 'completed');
+});
 
 test('来财认证报名与撤销，兼容旧房并只在角色全部就绪时启动一次', async t => {
   const dir = temporaryData(t);
