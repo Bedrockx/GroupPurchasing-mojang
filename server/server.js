@@ -3259,8 +3259,13 @@ function laicaiRoster(task) {
   return task.seats.filter(s => s.role === 'big').map(({seatId, uid, gameName}) => ({seatId, uid, gameName}));
 }
 
-function laicaiSnapshot(task, seat) {
+const lcCleanupOps = new Set(['cancel-route','leave-world','cancel-attempt','check-clear','release-world','task-end']);
+
+function laicaiSnapshot(task, seat, cleanupOnly = false) {
   if (!task || !seat) return null;
+  const pending = task.pending.filter(p => p.seatId === seat.seatId && (!cleanupOnly || lcCleanupOps.has(p.message.op))).map(p => p.message);
+  if (cleanupOnly) return {taskId:task.taskId,role:seat.role,seatId:seat.seatId,laicaiVersion:seat.laicaiVersion,
+    phase:task.phase,timeoutSeconds:task.config.timeoutSeconds,cleanupOnly:true,pending};
   return {taskId:task.taskId, phase:task.phase, role:seat.role, seatId:seat.seatId,
     laicaiVersion:seat.laicaiVersion, roster:laicaiRoster(task), ...task.config,
     worlds:task.worlds.map(w => ({worldUid:w.worldUid, worldAttemptId:w.worldAttemptId, slotId:w.slotId,
@@ -3270,7 +3275,7 @@ function laicaiSnapshot(task, seat) {
         const command=task.pending.find(i=>i.seatId===seatId && i.message.op==='route-release' && i.message.worldAttemptId===w.worldAttemptId);
         return {seatId,status:w.completed.some(r=>r.seatId===seatId)?'waiting':command?.ack || w.phase,deadline:command?.deadline};
       })})),
-    results:task.results, pending:task.pending.filter(p => p.seatId === seat.seatId).map(p => p.message)};
+    results:task.results, pending};
 }
 
 function lcQueue(task, seat, op, world, extra = {}, payload = {}) {
@@ -3595,7 +3600,10 @@ function lcPublish(task, draft) {
   for (const item of draft.pending) {
     if (!before.has(item.message.messageId)) {
       const target = draft.seats.find(s => s.seatId === item.seatId);
-      io.sockets.sockets.get(target.socketId)?.emit('message',item.message);
+      if (getConnectionBySocketId(target.socketId)?.accountId === target.accountId &&
+          (userAccounts[target.accountId]?.rooms?.includes(task.roomName) || lcCleanupOps.has(item.message.op))) {
+        io.sockets.sockets.get(target.socketId)?.emit('message',item.message);
+      }
     }
   }
 }
@@ -3961,8 +3969,11 @@ function lcPriorArchive(identity, m) {
     throw new LaicaiStorageError(error);
   }
   if (record.roomName!==m.roomName) return null;
-  const seat=record.seats?.find(s=>s.accountId===identity.accountId && s.clientId===m.payload.clientId);
-  return seat ? {record, seat} : null;
+  const seat=record.seats?.find(s=>s.accountId===identity.accountId && s.clientId===m.payload.clientId &&
+    (m.op!=='state-request' || m.payload.seatId===undefined || s.seatId===m.payload.seatId));
+  if (!seat) return null;
+  const commandId=record.finalCommands?.find(r=>r.seatId===seat.seatId)?.commandId;
+  return {record,seat,terminal:{taskId:record.taskId,...record.terminal,...(commandId && {commandId})}};
 }
 
 function handleLaicaiMessage(socket, identity, m) {
@@ -3974,7 +3985,7 @@ function handleLaicaiMessage(socket, identity, m) {
 
 function lcHandleAuthenticated(socket, identity, m, ack) {
   const archive=lcPriorArchive(identity,m);
-  const terminal=archive ? {taskId:archive.record.taskId,...archive.record.terminal} : null;
+  const terminal=archive?.terminal || null;
   if (archive && lcReliableAck(m)) {
     const mine=r=>r.seatId===archive.seat.seatId;
     const saved=archive.record.controlReceipts?.some(r=>mine(r) && r.messageId===m.messageId && r.replyTo===m.replyTo && r.ackStatus===m.payload.status);
@@ -3986,9 +3997,13 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
     socket.emit('message',laicaiMsg(m.roomName,'state-snapshot',{task:null,terminal},{replyTo:m.messageId}));
     return;
   }
-  if (!identity || identity.isAdmin || !userAccounts[identity.accountId]?.rooms?.includes(m.roomName)) {
-    return ack('rejected','账号未获得该来财房的权限');
-  }
+  if (!identity || identity.isAdmin) return ack('rejected','账号未获得该来财房的权限');
+  const hasRoom = userAccounts[identity.accountId]?.rooms?.includes(m.roomName);
+  const original = laicaiTasks.get(m.roomName);
+  if (!hasRoom && (!original || (m.op==='state-request' ? m.payload?.taskId : m.taskId)!==original.taskId ||
+      !original.seats.some(s=>s.accountId===identity.accountId && (m.op==='state-request'
+        ? s.clientId===m.payload.clientId && (m.payload.seatId===undefined || s.seatId===m.payload.seatId)
+        : s.socketId===socket.id)))) return ack('rejected','账号未获得该来财房的权限');
   if (!room) return ack('rejected','来财房间不存在');
   if (laicaiTasks.has(room.name)) lcPrepareTick(laicaiTasks.get(room.name));
   let task = laicaiTasks.get(room.name);
@@ -4008,14 +4023,23 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
     }
     if (seat) {
       seat.socketId = socket.id;
-      delete seat.offlineSince;
-      laicaiSeen.set(task.taskId+':'+seat.seatId+':client',Date.now());
+      if (hasRoom) {
+        delete seat.offlineSince;
+        laicaiSeen.set(task.taskId+':'+seat.seatId+':client',Date.now());
+      }
     }
     const recent=!terminal && !task && lcPriorArchive(identity,m);
-    socket.emit('message', laicaiMsg(room.name, 'state-snapshot', {task:laicaiSnapshot(task,seat),
-      terminal:terminal || (recent ? {taskId:recent.record.taskId,...recent.record.terminal} : null)}, {replyTo:m.messageId}));
-    if (seat) for (const item of task.pending.filter(o => o.seatId === seat.seatId)) socket.emit('message',item.message);
+    const snapshot=laicaiSnapshot(task,seat,!hasRoom);
+    socket.emit('message', laicaiMsg(room.name, 'state-snapshot', {task:snapshot,
+      terminal:terminal || recent?.terminal || null}, {replyTo:m.messageId}));
+    for (const command of snapshot?.pending || []) socket.emit('message',command);
     return;
+  }
+  const cleanupAck = m.op==='ack' && seat && task?.pending.some(i=>i.seatId===seat.seatId &&
+    i.message.messageId===m.replyTo && lcCleanupOps.has(i.message.op));
+  if (!hasRoom && !['seat-left','world-cleared'].includes(m.op) && !cleanupAck &&
+      !(m.op==='ack' && task?.receipts.some(r=>r.cleanup && r.seatId===seat?.seatId && r.messageId===m.messageId))) {
+    return ack('rejected','房间权限已撤销，仅允许原席位收尾');
   }
   if (m.op === 'seat-ready' || m.op === 'seat-withdraw') {
     let receipts = laicaiRegistrationAcks.get(socket.id);
@@ -4072,6 +4096,7 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
   const draft = JSON.parse(JSON.stringify(task));
   lcRuntime(draft,draft.seats.find(s => s.seatId === seat.seatId),m);
   if (m.op !== 'ack' || lcReliableAck(m)) draft.receipts.push({seatId:seat.seatId,messageId:m.messageId,op:m.op,
+    ...(cleanupAck && {cleanup:true}),
     ...(lcReliableAck(m) && {replyTo:m.replyTo,ackStatus:m.payload.status})});
   lcPublish(task,draft);
   if (m.op !== 'ack' || lcReliableAck(m)) ack('applied');

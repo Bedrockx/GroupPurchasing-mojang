@@ -490,6 +490,66 @@ test('终态时执行端无回应会持久隔离并解除整场占用，未经�
     assert.equal(f.lookup('lc-quarantines').children.length,1);
 });
 
+test('撤权快照拒绝后保留锁、重查终态，只把归属本席的原收尾指令交给执行端',async()=>{
+    const {f,scope,published,events}=await runningBig();
+    f.run('lcBind()');
+    const request=f.sent.at(-1);
+    f.msg('ack',{replyTo:request.messageId,payload:{status:'rejected',reason:'账号未获得该来财房的权限'}});
+    assert.equal(f.run('lcState.snapshotId'),undefined);
+    assert.equal(f.run('lcLock().taskId'),'t');
+    f.msg('route-release',{...scope,messageId:'late',routeSeq:1});
+    await f.run('lcPump()');
+    assert(!published.some(m=>m.op==='run-route'));
+    f.run('lcState.snapshotRetryAt=Date.now()-1');
+    await f.run('lcPump()');
+    const current=f.sent.at(-1);
+    assert.equal(current.op,'state-request');
+    assert.equal(current.payload.seatId,'s');
+    f.msg('state-snapshot',{replyTo:current.messageId,payload:{task:null,terminal:{
+        taskId:'t',commandId:'original-end',status:'terminated',reason:'已结束',unsafeWorlds:[]}}});
+    await f.run('lcPump()');
+    const end=published.find(m=>m.op==='task-end');
+    assert.ok(end);
+    assert.equal(f.run('lcLock().taskId'),'t');
+    events.push({...end,op:'ack',messageId:'ended',replyTo:end.messageId,payload:{status:'applied'}});
+    await f.run('lcPump()');
+    assert.equal(f.run('lcLock()'),null);
+    assert(f.sent.some(m=>m.replyTo==='original-end' && m.payload.status==='applied'));
+});
+
+test('快照恢复前先到的原任务终态进入收尾，晚快照不能恢复运行',async()=>{
+    const {f,task,scope,published}=await runningBig();
+    f.run('lcBind()');
+    const request=f.sent.at(-1);
+    f.msg('task-end',{roomName:'其他房',taskId:'t',payload:{}});
+    f.msg('task-end',{taskId:'另一个任务',payload:{}});
+    assert.equal(f.run('lcState.snapshotId'),request.messageId);
+    f.msg('task-end',{taskId:'t',messageId:'real-end',payload:{reason:'清场未确认',unsafeWorlds:[scope]}});
+    f.msg('state-snapshot',{replyTo:request.messageId,payload:{task:{...task,phase:'route',pending:[]}}});
+    await f.run('lcPump()');
+    assert.ok(published.some(m=>m.op==='task-end'));
+    assert.equal(f.run('lcLock().taskId'),'t');
+    f.run("lcBridge().commands['real-end'].endDeadline=Date.now()-1");
+    await f.run('lcPump()');
+    assert.equal(f.run('lcLock()'),null);
+    assert.equal(f.run('lcQuarantines().length'),1);
+});
+
+test('受限活动快照撤销本机未发路线，只下发本席退场',async()=>{
+    const {f,scope,task,published}=await runningBig();
+    f.msg('route-release',{...scope,messageId:'r',routeSeq:1});
+    f.run('lcBind()');
+    const request=f.sent.at(-1);
+    const leave={...scope,roomName:'房',op:'leave-world',messageId:'leave'};
+    f.msg('state-snapshot',{replyTo:request.messageId,payload:{task:{...task,phase:'leaving',cleanupOnly:true,pending:[leave]}}});
+    f.msg('route-release',{...scope,messageId:'replay',routeSeq:1});
+    await f.run('lcPump()');
+    assert.equal(f.run('lcBridge().commands.r.retired'),true);
+    assert.equal(published.filter(m=>m.op==='run-route').length,0);
+    assert.equal(published.filter(m=>m.op==='leave-world').length,1);
+    assert.equal(f.run('lcLock().taskId'),'t');
+});
+
 test('客户端恢复联网后丢弃历史执行端心跳，不回放为当前存活',async()=>{
     const {f,events,published}=await runningBig();
     const join=published.at(-1);

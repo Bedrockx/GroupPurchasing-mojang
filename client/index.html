@@ -1215,9 +1215,12 @@
             for (const worker of options.workers || []) lcAddWorker(worker);
             lcRoleFields();
             lcShowQuarantines();
-            if (lcState?.room) lcState.snapshotId = lcSend('state-request', {}, {
-                clientId:lcClientId(),taskId:lcState.task?.taskId || lcState.terminal?.taskId
-            });
+            if (lcState?.room) lcRequestState();
+        }
+        function lcRequestState() {
+            delete lcState.snapshotRetryAt;
+            const known=lcState.task || lcState.terminal;
+            lcSend('state-request', {}, {clientId:lcClientId(),taskId:known?.taskId,seatId:known?.seatId});
         }
         function lcRoomProgress(room) {
             const p=room.laicaiProgress;
@@ -1393,7 +1396,7 @@
             for (const entry of command.locals.filter(l=>l.status!=='applied')) {
                 lcHoldDirectory(entry.directory,command.net,'任务结束时未收到执行端的收尾确认');
             }
-            lcState.terminal = {taskId:command.net.taskId,unsafeWorlds:unsafe,ack};
+            lcState.terminal = {taskId:command.net.taskId,seatId:lcState.task.seatId,unsafeWorlds:unsafe,ack};
             lcState.enabled = false;
             delete lcState.task;
             delete lcState.bridge;
@@ -1407,6 +1410,18 @@
             localStorage.setItem('laicai-task-lock',JSON.stringify({taskId:task.taskId,accountId,role:task.role}));
             lcState.task = task;
             lcPersist();
+        }
+        const lcCleanupOps = new Set(['cancel-route','leave-world','cancel-attempt','check-clear','release-world','task-end']);
+        function lcRestrictCleanup() {
+            lcState.enabled=false;
+            lcState.task.cleanupOnly=true;
+            const bridge=lcBridge();
+            for (const cmd of Object.values(bridge.commands)) {
+                if (!lcCleanupOps.has(cmd.net.op)) cmd.retired=true;
+            }
+            for (const event of Object.values(bridge.outbox)) {
+                if (!['seat-left','world-cleared'].includes(event.op)) delete bridge.outbox[event.messageId];
+            }
         }
         function lcTaskStart(m) {
             const lock = lcLock();
@@ -1658,6 +1673,7 @@
             if (world.detail) lcElement('status').textContent=world.uid+' · '+world.detail;
         }
         function lcAccept(m) {
+            if (lcState.task?.cleanupOnly && !lcCleanupOps.has(m.op)) return;
             if (m.op === 'task-start') {
                 if (lcState.terminal?.taskId !== m.taskId) lcTaskStart(m);
                 return;
@@ -1728,7 +1744,7 @@
             lcPersist();
             try {
                 if (!await closeBGI(command.net.taskId)) throw new Error('无法关闭旧 BetterGI 进程');
-                if (!current()) return;
+                if (!current() || command.retired) return;
                 await window.electronAPI.startProcess('BetterGI.exe',['startOneDragon',dragon],bgi);
                 if (current()) { command.launch = 'spawned'; lcPersist(); }
             } catch(error) {
@@ -1775,6 +1791,10 @@
                 return;
             }
             const local = cmd.locals.find(l => l.directory === directory && l.message.messageId === event.replyTo);
+            if (lcState.task.cleanupOnly && (!lcCleanupOps.has(cmd.net.op) || !['ack','seat-left','world-cleared'].includes(event.op))) {
+                await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
+                return;
+            }
             const heartbeat=event.op==='heartbeat';
             if (heartbeat && (!isLoggedIn || !socket?.connected || lcState.snapshotId ||
                 !Number.isFinite(event.payload.observedAt) || event.payload.observedAt<Math.max(lcLiveSince,Date.now()-15000) ||
@@ -1899,6 +1919,7 @@
         }
         async function lcPump() {
             if (lcBusy || !lcState) return;
+            if (lcState.snapshotRetryAt<=Date.now() && lcState.task && !lcState.bridge?.ending && socket?.connected && isLoggedIn) lcRequestState();
             for (const message of Object.values(lcControls())) {
                 if (Date.now()-(lcControlSent.get(message.messageId) || 0)>=5000) lcTransmitControl(message);
             }
@@ -1994,13 +2015,15 @@
                         if (m.op==='heartbeat') delete bridge.outbox[m.messageId];
                         else lcEmit(m);
                     }
-                    lcSend('heartbeat',{taskId},{role:state.options.role,laicaiVersion:state.task.laicaiVersion,source:'client',stage:state.task.phase || 'active'});
+                    if (!state.task.cleanupOnly) lcSend('heartbeat',{taskId},{role:state.options.role,laicaiVersion:state.task.laicaiVersion,source:'client',stage:state.task.phase || 'active'});
                 }
             } finally { lcBusy = false; }
         }
 
         function lcReceive(m) {
             if (m.version !== 1 || !lcState) return;
+            const lock=lcLock();
+            const ownsTask=lock?.accountId===accountId && lcState.task?.taskId===lock.taskId;
             const control=lcControls()[m.replyTo];
             if (control && control.roomName===m.roomName && (m.op==='ack' || m.op==='state-snapshot' && control.op==='state-request')) {
                 if (m.op==='ack' && m.payload.status==='rejected' && m.payload.retryable===true) return;
@@ -2010,11 +2033,24 @@
                     lcSaveControls();
                 }
                 if (m.op==='ack' && m.payload.status==='rejected' && control.op==='state-request' && m.replyTo===lcState.snapshotId) {
+                    delete lcState.snapshotId;
+                    if (ownsTask) {
+                        lcRestrictCleanup();
+                        lcState.snapshotRetryAt=Date.now()+5000;
+                    } else lcState.enabled=false;
+                    lcPersist();
                     lcElement('status').textContent=m.payload.reason || '服务端拒绝恢复来财任务，请核对账号和房间';
                 }
             }
             if (m.roomName !== lcState.room) return;
-            const lock = lcLock();
+            if (m.op==='task-end' && ownsTask && m.taskId===lock.taskId && lcState.snapshotId) {
+                delete lcControls()[lcState.snapshotId];
+                lcControlSent.delete(lcState.snapshotId);
+                lcSaveControls();
+                delete lcState.snapshotId;
+                delete lcState.snapshotRetryAt;
+                lcPersist();
+            }
             if (m.op === 'ack' && m.replyTo === lcState.readyId && lcState.enabled && !lcState.task) {
                 if (m.payload.status==='rejected' && m.payload.retryable===true) return;
                 if (m.payload.status === 'rejected') lcState.enabled = false;
@@ -2044,6 +2080,7 @@
             if (m.op === 'state-snapshot' && m.replyTo === lcState.snapshotId) {
                 delete lcState.snapshotId;
                 const task = m.payload.task;
+                if (ownsTask && lcState.bridge?.ending) { lcPersist(); lcSchedule(); return; }
                 if (task === null) {
                     if (lock?.accountId === accountId && lcState.task?.taskId===lock.taskId) {
                         const terminal = m.payload.terminal;
@@ -2051,6 +2088,7 @@
                         // 网络端结束后仍先回收本机输入、通知执行端停单，再解除本机占用。
                         const end=lcPacket({roomName:m.roomName,taskId:lock.taskId},'task-end',
                             known ? terminal : {reason:'服务端已无活动任务，本机需核对收尾'});
+                        if (known && /^[a-zA-Z0-9_-]{1,128}$/.test(terminal.commandId || '')) end.messageId=terminal.commandId;
                         const existing=Object.values(lcBridge().commands).find(c=>c.net.op==='task-end');
                         if (!existing) lcAccept(end);
                         lcSchedule();
@@ -2063,8 +2101,10 @@
                     if (lcState.enabled) lcState.readyId = lcSend('seat-ready', {}, lcState.payload);
                     else lcSend('seat-withdraw', {}, {clientId:lcClientId()});
                 } else if ((!lock || lock.accountId === accountId && lock.taskId === task.taskId) && task.role === lcState.options.role) {
+                    if (task.cleanupOnly && (!ownsTask || task.seatId!==lcState.task.seatId)) { lcPersist(); return; }
                     if (!lcState.terminal || lcState.terminal.taskId !== task.taskId) {
                         lcSetLock(task);
+                        if (task.cleanupOnly) lcRestrictCleanup();
                         const world=lcBridge().bigWorld;
                         if (world?.route) {
                             const round=task.worlds?.find(w=>w.worldAttemptId===world.id && w.routeSeq===world.route.seq);
