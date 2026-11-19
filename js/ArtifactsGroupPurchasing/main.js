@@ -1,5 +1,7 @@
 const runExtra = settings.runExtra || false;
+const runExtraSnezhnaya = settings.runExtraSnezhnaya || false;
 const useAllTargetImages = settings.useAllTargetImages === true || settings.useAllTargetImages === "true";
+const energySavingPlaceholder = settings.energySavingPlaceholder === true || settings.energySavingPlaceholder === "true";
 const leaveTeamRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/RecognitionObject/leaveTeam.png"));
 const scrollRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/拾取滚轮.png"), 1017, 496, 1093 - 581, 581 - 496);
 const kick2pRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/RecognitionObject/kickButton.png"), 1520, 277, 230, 120);
@@ -49,7 +51,7 @@ let skipLog = false;
     await switchPartyIfNeeded(settings.partyName);
     targetItems = await loadTargetItems();
     if (settings.groupMode === "手动进入后运行") {
-        if (settings.runExtra) {
+        if (settings.runExtra || settings.runExtraSnezhnaya) {
             expGain = await processArtifacts();
             moraGain = await mora();
         } else {
@@ -207,8 +209,9 @@ let skipLog = false;
             await runGroupPurchasing(false);
             settings.forceGroupNumber = 0;//解除强制指定
         }
-        //如果勾选了额外，且本次自动运行当过房主成功进人，在结束后再执行一次额外路线
-        if (settings.runExtra && doRunExtra) {
+        //如果勾选了额外路线（联机收尾额外 或 至冬额外），且本次自动运行当过房主成功进人，在结束后再执行一次额外路线
+        //runExtra 形参只控制「前执行」分支；「至冬」分支读的是模块级 runExtraSnezhnaya
+        if ((settings.runExtra || settings.runExtraSnezhnaya) && doRunExtra) {
             await runGroupPurchasing(runExtra);
         }
 
@@ -398,13 +401,30 @@ async function runGroupPurchasing(runExtra) {
         await goToTarget(groupNumBer);
         let start = new Date();
         while (new Date() - start < 90 * 60 * 1000) {
-            // 界面稳定时才判定是否已退出世界
-            if (await isMainUI() && await getPlayerSign() === 0) {
-                break;
-            }
-            if (await waitForMainUI(false, 10 * 60 * 1000)) {
-                await waitForMainUI(true);
-                await genshin.returnMainUi();
+            if (energySavingPlaceholder) {
+                // ===== 节能占位模式：低频探测，书被关只提示不重开 =====
+                await sleep(15000);
+                // 书打开时 isMainUI() 恒为 false，变 true 说明书已关闭
+                if (await isMainUI()) {
+                    const sign = await getPlayerSign();
+                    if (sign === 0) {
+                        log.info("已回到单人世界，结束占位");
+                        break;
+                    }
+                    log.info("发现F1《冒险之证》被关闭，请手动打开");
+                    log.info(`当前识别为${sign}P`);
+                }
+            } else {
+                // ===== 原版逻辑 =====
+                // 界面稳定时才判定是否已退出世界
+                if (await isMainUI() && await getPlayerSign() === 0) {
+                    break;
+                }
+                if (await waitForMainUI(false, 10 * 60 * 1000)) {
+                    await waitForMainUI(true);
+                    log.info("未处于单人界面，继续等待")
+                    await genshin.returnMainUi();
+                }
             }
         }
         if (new Date() - start >= 90 * 60 * 1000) {
@@ -424,8 +444,13 @@ async function runGroupPurchasing(runExtra) {
     } else if (groupNumBer === 0) {
         if (runExtra) {
             log.info("请确保联机收尾已结束，将开始运行额外路线");
-            await runExtraPath();
-        } else {
+            await runExtraPath("前执行");
+        }
+        if (runExtraSnezhnaya) {
+            log.info("请确保联机收尾已结束，将开始运行至冬额外路线");
+            await runExtraPath("至冬");
+        }
+        if (!runExtra && !runExtraSnezhnaya) {
             log.warn("处于单人模式，不执行任何路线");
         }
     } else {
@@ -748,9 +773,9 @@ async function runGroupPurchasing(runExtra) {
     /**
      * 执行额外路线
      */
-    async function runExtraPath() {
+    async function runExtraPath(folderName = "前执行") {
 
-        const folderPath = `assets/ArtifactsPath/额外/前执行`;
+        const folderPath = `assets/ArtifactsPath/额外/${folderName}`;
         const files = await readFolder(folderPath, ".json");
 
         if (files.length === 0) {
@@ -817,6 +842,13 @@ async function runGroupPurchasing(runExtra) {
 
         }
         log.info(`${folderName} 的全部路线已完成`);
+
+        // 节能占位模式：按 F1 打开《冒险之证》以降帧
+        if (energySavingPlaceholder) {
+            await keyPress("F1");
+            await sleep(1000);
+            log.info(`已开书，进入节能占位模式`);
+        }
     }
 }
 /**

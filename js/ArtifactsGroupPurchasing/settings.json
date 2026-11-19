@@ -2,7 +2,12 @@
   {
     "name": "runExtra",
     "type": "checkbox",
-    "label": "运行额外路线，运行完联机收尾后单人运行时勾选\n勾选后处于单人世界时将运行额外路线\n如果选择自动进入模式，则会在任务完成后运行额外路线"
+    "label": "运行额外路线，联机收尾后单人运行时勾选\n勾选后将运行额外路线与「至冬罐罐」相互独立\n选择自动进入模式时联机完成后立即执行额外路线"
+  },
+  {
+    "name": "runExtraSnezhnaya",
+    "type": "checkbox",
+    "label": "运行至冬罐罐路线（附加路线，勾选后才会执行）\n与「额外路线」相互独立，可单独开关\n请在额外狗粮配置组中勾选"
   },
   {
     "name": "runDebug",
@@ -35,6 +40,12 @@
     "name": "afterOneDragon",
     "type": "input-text",
     "label": "联机后一条龙名称，正常结束后且不再重新上线时启动该一条龙\n需要配合mojang使用"
+  },
+  {
+    "name": "energySavingPlaceholder",
+    "type": "checkbox",
+    "label": "#############################################\n节能占位模式\n占位时通过打开《冒险之证》降低原神和BGI的性能消耗\n不勾选则保持原版行为",
+    "default": false
   },
   {
     "name": "groupMode",
