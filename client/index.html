@@ -1051,11 +1051,10 @@
     </div>
 
     <!-- 引入Socket.io客户端 -->
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="./node_modules/socket.io/client-dist/socket.io.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '2.1.4';
+        const VERSION = '2.2.0';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -1064,7 +1063,7 @@
         let onlineUsers = []; // 存储已上线用户
         let schedules = []; // 存储调度任务
         let currentEditScheduleId = null; // 当前编辑的调度任务ID
-        let processedRides = []; // 存储已处理的发车ID
+        let preparedRide = null; // 当前客户端一次只能为一个 BetterGI 进程准备座位
         let currentRideIdentifier = ''; // 存储当前发车标识
         let fileWatcherState = {
             isRunning: false,
@@ -1072,8 +1071,6 @@
             cooldownEndTime: 0,
             checkInterval: null
         };
-        let savedAccount = ''; // 保存登录账号，用于重连时自动登录
-        let savedPassword = ''; // 保存登录密码，用于重连时自动登录
         let connectionId = '连接'; // 连接ID，默认为"连接"
         let socketId = ''; // 存储当前socket ID
         let currentDownloadController = null; // 当前下载控制器，用于终止下载
@@ -1169,11 +1166,30 @@
         }
         
         // 重试队列管理
-        const MAX_RETRY_COUNT = 10;
         const RETRY_INTERVAL = 60000; // 1分钟
         let retryQueue = new Map(); // 存储待重试的消息 {messageId: {message, retryCount, timestamp}}
         let retryTimer = null; // 统一的重试定时器
-        let messageIdCounter = 0; // 消息ID计数器
+        const desktopStartedAt = Date.now();
+        // 与服务端同一轮发车的 5 分钟冷却窗口一致。
+        const FILE_CONTROL_TTL = 5 * 60 * 1000;
+        const pendingFileControls = new Map();
+        const consumingSnapshots = new Set();
+        const consumedSnapshotByPath = new Map();
+        let commandAccountSince = 0;
+        let supportsReportAck = false;
+        function readReportQueue() {
+            try { return new Map(JSON.parse(localStorage.getItem('pendingReports:' + accountId) || '[]')); }
+            catch (error) { addLog('读取待确认报告失败：' + error.message, 'error'); return new Map(); }
+        }
+        function persistReportQueue() {
+            localStorage.setItem('pendingReports:' + accountId, JSON.stringify(Array.from(retryQueue)));
+        }
+        function handleReportAck(data) {
+            if (!retryQueue.has(data.reportId) || (!data.success && data.retryable)) return;
+            retryQueue.delete(data.reportId);
+            persistReportQueue();
+            if (!data.success) addLog('报告被拒绝：' + (data.message || data.reportId), 'error');
+        }
         
         // 显示版本号
         function displayVersion() {
@@ -1195,6 +1211,7 @@
         
         // 已上线用户信息，用于断线重连
         let reconnectOnlineUsers = [];
+        let loginGeneration = 0;
         
         // 连接状态管理
         let connectionAttempts = 0;
@@ -1204,7 +1221,7 @@
         // 启动连接机制（包含登录）
         function startConnection() {
             // 防止重复连接
-            if (isLoggingIn || (socket && socket.connected)) {
+            if (isLoggingIn || (socket?.connected && isLoggedIn)) {
                 return;
             }
             
@@ -1235,16 +1252,19 @@
                 transports: ['websocket', 'polling']
             });
             
+            socket = loginSocket;
+            const account = document.getElementById('login-account').value.trim();
+            const password = document.getElementById('login-password').value.trim();
             loginSocket.on('connect', function() {
                 addLog('socket连接成功', 'info');
                 connectionAttempts = 0;
                 
                 // 发送登录请求
-                const account = savedAccount || document.getElementById('login-account').value.trim();
-                const password = savedPassword || document.getElementById('login-password').value.trim();
                 
                 if (!account || !password) {
                     addLog('账号密码为空，无法登录', 'error');
+                    reconnectDisabled = true;
+                    loginSocket.disconnect();
                     isLoggingIn = false;
                     return;
                 }
@@ -1277,7 +1297,7 @@
                 // 检查是否禁用重连
                 if (!reconnectDisabled) {
                     addLog(`连接失败，5秒后尝试重新连接...`, 'warning');
-                    setTimeout(startConnection, 5000);
+                    setTimeout(() => { if (socket === loginSocket && !reconnectDisabled) startConnection(); }, 5000);
                 } else {
                     addLog('重连已被禁用，停止尝试', 'warning');
                 }
@@ -1286,6 +1306,8 @@
             loginSocket.on('disconnect', function(reason) {
                 addLog(`socket断开连接: ${reason}`, 'warning');
                 rejectRemoteChunkAcks('服务端连接已断开');
+                resetPreparedRide();
+                document.getElementById('remote-config-status').textContent = '连接断开';
                 isLoggedIn = false;
                 isLoggingIn = false;
                 
@@ -1295,6 +1317,7 @@
                             username: user.username,
                             uid: user.uid,
                             room: user.room,
+                            memberOnly: user.memberOnly,
                             notHost: user.notHost || false
                         }));
                         addLog(`已保存 ${reconnectOnlineUsers.length} 个已上线用户信息，用于重连后恢复`, 'info');
@@ -1302,7 +1325,7 @@
                 
                 // 尝试重新连接
                 if (!reconnectDisabled) {
-                    setTimeout(startConnection, 5000);
+                    setTimeout(() => { if (socket === loginSocket && !reconnectDisabled) startConnection(); }, 5000);
                 } else {
                     addLog('重连已被禁用，停止尝试', 'warning');
                 }
@@ -1312,8 +1335,6 @@
                 if (data.type === 'login-key') {
                     // 收到密钥，计算哈希密码
                     const key = data.key;
-                    const account = savedAccount || document.getElementById('login-account').value.trim();
-                    const password = savedPassword || document.getElementById('login-password').value.trim();
                     
                     // 获取客户端代码哈希（混入随机key，防篡改校验）
                     let codeHash = '';
@@ -1326,8 +1347,9 @@
                         addLog(`计算代码哈希失败: ${e.message}`, 'warning');
                     }
                     
-                    const hashedPassword = CryptoJS.SHA256(password + key).toString();
+                    const hashedPassword = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password + key))), byte => byte.toString(16).padStart(2, '0')).join('');
                     
+                    if (socket !== loginSocket || !loginSocket.connected) return;
                     // 发送第二次登录请求
                     loginSocket.emit('message', {
                         type: 'login',
@@ -1345,6 +1367,7 @@
                         errorDiv.style.display = 'block';
                     }
                     isLoggingIn = false;
+                    reconnectDisabled = true;
                     try {
                         loginSocket.disconnect();
                     } catch (error) {
@@ -1353,23 +1376,12 @@
                 } else if (data.type === 'login-success') {
                     isLoggedIn = true;
                     isLoggingIn = false;
-                    accountId = data.accountId;
+                    bindCommandAccount(data.accountId);
                     
-                    // 保存账号密码
-                    const account = document.getElementById('login-account').value.trim();
-                    const password = document.getElementById('login-password').value.trim();
-                    const autoLogin = document.getElementById('auto-login').checked;
-                    
-                    if (autoLogin) {
-                        savedAccount = account;
-                        savedPassword = password;
-                        saveConfig();
-                        addLog('已开启自动登录', 'info');
-                    }
-                    
-                    // 保存socket连接
-                    socket = loginSocket;
-                    
+                    supportsReportAck = data.supportsReportAck === true;
+                    retryQueue = readReportQueue();
+                    saveConfig();
+
                     // 更新连接管理信息
                     socketId = socket.id;
                     connectionId = data.connectionId;
@@ -1407,7 +1419,9 @@
                         }
                         addLog(logMessage, 'info');
 
-                        if (data.type === 'points-ranking') {
+                        if (data.type === 'report-ack') {
+                            handleReportAck(data);
+                        } else if (data.type === 'points-ranking') {
                             console.log('收到积分排行榜数据:', data.data);
                             addLog('收到积分排行榜数据', 'info');
                             updatePointsRanking(data.data);
@@ -1545,7 +1559,7 @@
                         } else if (data.type === 'mobile-control-command') {
                             console.log('收到移动端控制命令:', data);
                             addLog(`收到移动端控制命令: ${data.command}`, 'info');
-                            handleMobileControlCommand(data.command, data.params, data.requestId);
+                            handleMobileControlCommand(data.command, data.params, data.requestId ?? data.data?.requestId ?? data.params?.requestId);
                         } else if (data.type === 'mobile-online-command') {
                             console.log('收到移动端上线命令:', data);
                             addLog(`收到移动端上线命令`, 'info');
@@ -1660,32 +1674,8 @@
                     // 进入主界面流程
                     enterMainApp();
 
-                    // 监听socket断开事件
-                    socket.on('disconnect', function(reason) {
-                        addLog(`socket断开连接: ${reason}`, 'warning');
-                        isLoggedIn = false;
-                        isLoggingIn = false;
-                        document.getElementById('remote-config-status').textContent = '连接断开';
-                        
-                        // 保存当前已上线用户信息
-                if (onlineUsers.length > 0) {
-                        reconnectOnlineUsers = onlineUsers.filter(user => user.isCurrentSocket).map(user => ({
-                            username: user.username,
-                            uid: user.uid,
-                            room: user.room,
-                            notHost: user.notHost || false
-                        }));
-                        addLog(`已保存 ${reconnectOnlineUsers.length} 个已上线用户信息，用于重连后恢复`, 'info');
-                    }
-                        
-                        // 尝试重新连接
-                        if (!reconnectDisabled) {
-                            setTimeout(startConnection, 5000);
-                        } else {
-                            addLog('自动重连已禁用，不再尝试重连', 'info');
-                        }
-                    });
-                    
+                    processRetryQueue();
+
                     // 监听socket错误事件
                     socket.on('connect_error', function(error) {
                         addLog(`socket连接错误: ${error.message}`, 'error');
@@ -1713,6 +1703,7 @@
                     uid: user.uid,
                     room: user.room,
                     username: user.username,
+                    memberOnly: user.memberOnly,
                     notHost: user.notHost,
                     operatorAccountId: accountId
                 });
@@ -1728,13 +1719,19 @@
         
         // 向服务端发送消息，包含重试机制和队列管理
         function sendMessageToServer(message) {
-            // 检查连接状态
-            if (!socket || !isLoggedIn) {
-                addLog('发送消息失败，服务端未连接，加入重试队列', 'warning');
-                addToRetryQueue(message);
-                return;
+            const isReport = message.type === 'report-gain' || message.type === 'report-crash';
+            if (isReport && !accountId) return false;
+            if (isReport && accountId) {
+                message.reportId ||= crypto.randomUUID();
+                rememberReport(message);
+                sendQueuedReport(message.reportId);
+                startRetryTimer();
+                return true;
             }
-            
+            if (!socket?.connected || !isLoggedIn) {
+                addLog('连接不可用，跳过本次操作：' + message.type, 'warning');
+                return false;
+            }
             try {
                 socket.emit('message', message);
                 let logMessage = '向服务端发送信息: ' + message.type;
@@ -1752,9 +1749,10 @@
                     logMessage = '向服务端发送信息: 发车准备 - ' + (message.ready ? '就绪' : '未就绪');
                 }
                 addLog(logMessage, 'info');
+                return true;
             } catch (error) {
-                addLog(`发送消息失败: ${error.message}，加入重试队列`, 'warning');
-                addToRetryQueue(message);
+                addLog('发送消息失败：' + error.message, 'warning');
+                return false;
             }
         }
 
@@ -1811,131 +1809,48 @@
             return `${new TextDecoder().decode(encoded.slice(0, maxBytes - 32))}\n...[输出已截断]`;
         }
         
-        // 添加消息到重试队列
-        function addToRetryQueue(message) {
-            // 生成消息ID（基于消息内容）
-            const messageKey = JSON.stringify(message);
-            
-            // 检查是否已存在相同的消息
-            if (retryQueue.has(messageKey)) {
-                addLog('消息已在重试队列中，跳过', 'info');
-                return;
+        function rememberReport(message) {
+            if (!retryQueue.has(message.reportId)) retryQueue.set(message.reportId, { message, timestamp: Date.now(), retryCount: 0 });
+            // 即使之前的写盘失败，下一次消费时仍须先确保持久化成功。
+            persistReportQueue();
+        }
+
+        function commandReport(type, params, fallbackId) {
+            const reportId = params.reportId || fallbackId;
+            const rideIdentifier = params.rideIdentifier || currentRideIdentifier;
+            if (type === 'report-crash') return { type, reportId, rideIdentifier, crashInfo: params };
+            if (type === 'report-gain' && params.gameAccount) {
+                return { type, reportId, rideIdentifier, gameAccount: params.gameAccount,
+                    expGain: params.expGain, moraGain: params.moraGain, accountId };
             }
-            
-            // 添加到队列
-            retryQueue.set(messageKey, {
-                message: message,
-                retryCount: 0,
-                timestamp: Date.now()
-            });
-            
-            addLog(`消息已加入重试队列，当前队列大小: ${retryQueue.size}`, 'info');
-            
-            // 启动重试定时器
+            return null;
+        }
+
+        function sendQueuedReport(id) {
+            const item = retryQueue.get(id);
+            if (!item || !socket?.connected || !isLoggedIn) return;
+            try {
+                socket.emit('message', item.message);
+                item.retryCount++;
+                // 旧服务端没有幂等回执，成功发送一次后结束。
+                if (!supportsReportAck) { retryQueue.delete(id); persistReportQueue(); }
+            } catch (error) { addLog('报告发送失败：' + error.message, 'warning'); }
+        }
+
+        function startRetryTimer() {
+            if (retryTimer || (!retryQueue.size && !pendingFileControls.size)) return;
+            retryTimer = setTimeout(() => {
+                retryTimer = null;
+                processRetryQueue();
+            }, RETRY_INTERVAL);
+        }
+
+        function processRetryQueue() {
+            for (const id of retryQueue.keys()) sendQueuedReport(id);
+            drainFileControls();
             startRetryTimer();
         }
-        
-        // 启动重试定时器
-        function startRetryTimer() {
-            if (retryTimer) {
-                return; // 定时器已在运行
-            }
-            
-            retryTimer = setTimeout(() => {
-                processRetryQueue();
-                retryTimer = null;
-            }, RETRY_INTERVAL);
-            
-            addLog(`重试定时器已启动，${RETRY_INTERVAL / 1000}秒后处理队列`, 'info');
-        }
-        
-        // 处理重试队列
-        function processRetryQueue() {
-            if (retryQueue.size === 0) {
-                addLog('重试队列为空，无需处理', 'info');
-                return;
-            }
-            
-            addLog(`开始处理重试队列，共 ${retryQueue.size} 条消息`, 'info');
-            
-            // 检查连接状态
-            if (!socket || !isLoggedIn) {
-                addLog('服务端仍未连接，继续等待', 'warning');
-                // 继续重试
-                startRetryTimer();
-                return;
-            }
-            
-            // 处理队列中的所有消息
-            const entries = Array.from(retryQueue.entries());
-            let successCount = 0;
-            let failCount = 0;
-            let maxRetryReachedCount = 0;
-            
-            entries.forEach(([messageKey, item]) => {
-                // 检查重试次数
-                if (item.retryCount >= MAX_RETRY_COUNT) {
-                    addLog(`消息达到最大重试次数，从队列移除: ${item.message.type}`, 'error');
-                    retryQueue.delete(messageKey);
-                    maxRetryReachedCount++;
-                    return;
-                }
-                
-                // 尝试发送消息
-                try {
-                    socket.emit('message', item.message);
-                    addLog(`重试发送成功: ${item.message.type} (第${item.retryCount + 1}次)`, 'success');
-                    retryQueue.delete(messageKey);
-                    successCount++;
-                } catch (error) {
-                    item.retryCount++;
-                    item.timestamp = Date.now();
-                    addLog(`重试发送失败: ${error.message} (${item.retryCount}/${MAX_RETRY_COUNT})`, 'warning');
-                    failCount++;
-                }
-            });
-            
-            addLog(`重试处理完成 - 成功: ${successCount}, 失败: ${failCount}, 超过最大重试: ${maxRetryReachedCount}`, 'info');
-            
-            // 如果还有失败的消息，继续重试
-            if (retryQueue.size > 0) {
-                startRetryTimer();
-            }
-        }
-        
-        // 取消指定消息的重试
-        function cancelRetry(message) {
-            const messageKey = JSON.stringify(message);
-            if (retryQueue.delete(messageKey)) {
-                addLog(`已取消消息重试: ${message.type}`, 'info');
-                return true;
-            }
-            return false;
-        }
-        
-        // 清空重试队列
-        function clearRetryQueue() {
-            const count = retryQueue.size;
-            retryQueue.clear();
-            if (retryTimer) {
-                clearTimeout(retryTimer);
-                retryTimer = null;
-            }
-            addLog(`已清空重试队列，共 ${count} 条消息`, 'info');
-        }
-        
-        // 获取重试队列状态
-        function getRetryQueueStatus() {
-            return {
-                size: retryQueue.size,
-                items: Array.from(retryQueue.values()).map(item => ({
-                    type: item.message.type,
-                    retryCount: item.retryCount,
-                    timestamp: new Date(item.timestamp).toLocaleString()
-                }))
-            };
-        }
-        
+
         // 本地存储路径
         let appPath = '';
         
@@ -2027,7 +1942,7 @@
         };
         
         // 执行文件指令
-        async function executeFileCommand(command) {
+        async function executeFileCommand(command, reportsSaved = false) {
             try {
                 // 提取指令类型和参数，忽略mojiang-command标识
                 const { 'mojiang-command': _ } = command;
@@ -2049,148 +1964,8 @@
                     
                     addLog(`执行第 ${index} 条指令: ${cmdType}`, 'info');
                     
-                    switch (cmdType) {
-                        case 'online': {
-                            // 上线指令
-                            const { username, uid, room, notHost } = params;
-                            
-                            if (!username || !uid || !room) {
-                                addLog(`第 ${index} 条指令参数不完整`, 'error');
-                                break;
-                            }
-                            
-                            // 执行上线操作
-                            addLog(`执行上线指令: ${username} (${uid}) 到房间 ${room}`, 'info');
-                            
-                            // 发送上线请求
-                            sendMessageToServer({
-                                type: 'user-online',
-                                username: username,
-                                uid: uid,
-                                room: room,
-                                notHost: notHost || false,
-                                operatorAccountId: accountId
-                            });
-                            break;
-                        }
-                        
-                        case 'start-dragon': {
-                            // 启动一条龙指令
-                            const { dragonName } = params;
-                            
-                            if (!dragonName) {
-                                addLog(`第 ${index} 条指令参数不完整`, 'error');
-                                break;
-                            }
-                            
-                            // 执行启动一条龙操作
-                            addLog(`执行启动一条龙指令: ${dragonName}`, 'info');
-                            
-                            // 调用启动一条龙函数
-                            document.getElementById('dragon-name').value = dragonName;
-                            startOneDragon();
-                            break;
-                        }
-                        
-                        case 'send-message': {
-                            // 向服务端发送消息指令
-                            const { content } = params;
-                            
-                            if (!content) {
-                                addLog(`第 ${index} 条指令参数不完整`, 'error');
-                                break;
-                            }
-                            
-                            // 执行发送消息操作
-                            addLog(`执行发送消息指令: ${content}`, 'info');
-                            
-                            // 发送消息到服务端
-                            sendMessageToServer({
-                                type: 'custom-message',
-                                content: content
-                            });
-                            break;
-                        }
-                        
-                        case 'report-crash': {
-                            // 报告炸车信息指令
-                            addLog(`执行报告炸车信息指令`, 'info');
-                            
-                            // 发送炸车信息到服务端
-                            sendMessageToServer({
-                                type: 'report-crash',
-                                crashInfo: params,
-                                rideIdentifier: params.rideIdentifier || currentRideIdentifier
-                            });
-                            
-                            // 发送后清空发车标识
-                            currentRideIdentifier = '';
-                            break;
-                        }
-                        
-                        case 'report-gain': {
-                            // 报告收益信息指令
-                            const { gameAccount, expGain, moraGain } = params;
-                            
-                            if (!gameAccount) {
-                                addLog(`第 ${index} 条指令参数不完整`, 'error');
-                                break;
-                            }
-                            
-                            // 执行报告收益操作
-                            addLog(`执行报告收益指令: ${gameAccount} - 经验: ${expGain}, 摩拉: ${moraGain}`, 'info');
-                            
-                            // 发送收益信息到服务端
-                            sendMessageToServer({
-                                type: 'report-gain',
-                                accountId: accountId,
-                                gameAccount: gameAccount,
-                                expGain: expGain || 0,
-                                moraGain: moraGain || 0,
-                                rideIdentifier: currentRideIdentifier
-                            });
-                            break;
-                        }
-                        
-                        case 'close-process': {
-                            // 关闭进程指令
-                            const { process } = params;
-                            
-                            if (!process) {
-                                addLog(`第 ${index} 条指令参数不完整`, 'error');
-                                break;
-                            }
-                            
-                            // 执行关闭进程操作
-                            addLog(`执行关闭进程指令: ${process}`, 'info');
-                            
-                            // 根据进程类型执行不同的关闭操作
-                            switch (process) {
-                                case 'BGI':
-                                    closeBGI();
-                                    break;
-                                case '原神':
-                                    closeGenshin();
-                                    break;
-                                case 'mojang':
-                                    addLog('正在关闭莫酱妙妙屋...', 'info');
-                                    if (window.electronAPI && window.electronAPI.closeApplication) {
-                                        window.electronAPI.closeApplication();
-                                    } else {
-                                        addLog('关闭莫酱妙妙屋功能仅在Electron环境中可用', 'warning');
-                                    }
-                                    break;
-                                default:
-                                    addLog(`未知进程类型: ${process}`, 'error');
-                                    break;
-                            }
-                            break;
-                        }
-                        
-                        default:
-                            addLog(`未知指令类型: ${cmdType}`, 'error');
-                    }
-                    
+                    dispatchFileCommand(cmdType, params, reportsSaved, index);
+
                     // 增加索引，准备检查下一条指令
                     index++;
                     
@@ -2203,6 +1978,118 @@
             }
         }
         
+        function dispatchFileCommand(cmdType, params, reportsSaved, index) {
+            switch (cmdType) {
+                case 'online': {
+                    // 上线指令
+                    const { username, uid, room, notHost } = params;
+
+                    if (!username || !uid || !room) {
+                        addLog(`第 ${index} 条指令参数不完整`, 'error');
+                        break;
+                    }
+
+                    // 执行上线操作
+                    addLog(`执行上线指令: ${username} (${uid}) 到房间 ${room}`, 'info');
+
+                    // 重连恢复列表中的同一座位由这条新命令接管。
+                    reconnectOnlineUsers = reconnectOnlineUsers.filter(user => String(user.uid) !== String(uid));
+                    return sendMessageToServer({
+                        type: 'user-online',
+                        username: username,
+                        uid: uid,
+                        room: room,
+                        memberOnly: typeof params.memberOnly === 'boolean' ? params.memberOnly : undefined,
+                        notHost: notHost || false,
+                        operatorAccountId: accountId
+                    });
+                }
+
+                case 'start-dragon': {
+                    // 启动一条龙指令
+                    const { dragonName } = params;
+
+                    if (!dragonName) {
+                        addLog(`第 ${index} 条指令参数不完整`, 'error');
+                        break;
+                    }
+
+                    // 执行启动一条龙操作
+                    addLog(`执行启动一条龙指令: ${dragonName}`, 'info');
+
+                    // 调用启动一条龙函数
+                    document.getElementById('dragon-name').value = dragonName;
+                    startOneDragon();
+                    break;
+                }
+
+                case 'send-message': {
+                    // 向服务端发送消息指令
+                    const { content } = params;
+
+                    if (!content) {
+                        addLog(`第 ${index} 条指令参数不完整`, 'error');
+                        break;
+                    }
+
+                    // 执行发送消息操作
+                    addLog(`执行发送消息指令: ${content}`, 'info');
+
+                    // 发送消息到服务端
+                    return sendMessageToServer({
+                        type: 'custom-message',
+                        content: content
+                    });
+                }
+
+                case 'report-crash':
+                case 'report-gain': {
+                    if (!reportsSaved) {
+                        const report = commandReport(cmdType, params, crypto.randomUUID());
+                        if (report) sendMessageToServer(report);
+                    }
+                    break;
+                }
+                case 'close-process': {
+                    // 关闭进程指令
+                    const { process } = params;
+
+                    if (!process) {
+                        addLog(`第 ${index} 条指令参数不完整`, 'error');
+                        break;
+                    }
+
+                    // 执行关闭进程操作
+                    addLog(`执行关闭进程指令: ${process}`, 'info');
+
+                    // 根据进程类型执行不同的关闭操作
+                    switch (process) {
+                        case 'BGI':
+                            closeBGI();
+                            break;
+                        case '原神':
+                            closeGenshin();
+                            break;
+                        case 'mojang':
+                            addLog('正在关闭莫酱妙妙屋...', 'info');
+                            if (window.electronAPI && window.electronAPI.closeApplication) {
+                                window.electronAPI.closeApplication();
+                            } else {
+                                addLog('关闭莫酱妙妙屋功能仅在Electron环境中可用', 'warning');
+                            }
+                            break;
+                        default:
+                            addLog(`未知进程类型: ${process}`, 'error');
+                            break;
+                    }
+                    break;
+                }
+
+                default:
+                    addLog(`未知指令类型: ${cmdType}`, 'error');
+            }
+        }
+
         // 执行调度任务
         function executeSchedule(schedule) {
             addLog(`开始执行调度任务: ${schedule.name}`, 'info');
@@ -2319,33 +2206,89 @@
             fileWatcherState.lastContents.clear();
         }
         
-        // 应用启动时清空所有文件指令类型的指令文件
-        function clearFileCommandFiles() {
-            // 找到所有文件指令类型的调度任务
-            const fileCommandSchedules = schedules.filter(s => 
-                s.trigger.type === 'file-command'
-            );
-            
-            if (fileCommandSchedules.length === 0) {
-                return;
+        function bindCommandAccount(nextAccount) {
+            if ((accountId && accountId !== nextAccount) || commandAccountSince === Infinity) {
+                loginGeneration++;
+                pendingFileControls.clear();
+                currentRideIdentifier = '';
+                reconnectOnlineUsers = [];
+                commandAccountSince = Date.now();
             }
-            
-            addLog('应用启动，开始清空文件指令文件...', 'info');
-            
-            fileCommandSchedules.forEach(schedule => {
-                const filePath = schedule.trigger.config.filePath;
-                if (filePath) {
-                    window.electronAPI.writeFile(filePath, '{}', (err) => {
-                        if (err) {
-                            addLog(`清空文件指令失败: ${filePath} - ${err}`, 'error');
-                        } else {
-                            addLog(`已清空文件指令: ${filePath}`, 'info');
-                        }
-                    });
-                }
-            });
+            accountId = nextAccount;
         }
-        
+
+        function drainFileControls() {
+            for (const [id, entry] of pendingFileControls) {
+                const activeRideId = preparedRide?.rideId || currentRideIdentifier;
+                if (entry.owner !== accountId || entry.generation !== loginGeneration ||
+                    entry.ride !== activeRideId || Date.now() >= entry.expires) {
+                    pendingFileControls.delete(id);
+                    addLog('已放弃失效的文件调度动作', 'warning');
+                    continue;
+                }
+                if (!isLoggedIn || !socket?.connected) continue;
+                if (Date.now() < entry.nextAt) continue;
+                const action = entry.actions[entry.next];
+                try {
+                    if (dispatchFileCommand(action.type, action.params, true, entry.next + 1) === false) continue;
+                } catch (error) {
+                    pendingFileControls.delete(id);
+                    addLog('文件调度执行失败：' + error.message, 'error');
+                    continue;
+                }
+                entry.next++;
+                if (entry.next === entry.actions.length) pendingFileControls.delete(id);
+                else {
+                    // 保留原来的动作间隔，每一步都重新核对账号、车次和连接。
+                    entry.nextAt = Date.now() + 500;
+                    setTimeout(drainFileControls, 500);
+                }
+            }
+        }
+
+        async function consumeFileCommand(filePath, snapshot) {
+            if (!accountId || consumingSnapshots.has(snapshot.id) || consumedSnapshotByPath.get(filePath) === snapshot.id) return false;
+            consumingSnapshots.add(snapshot.id);
+            try {
+                const consumed = await handleCommandSnapshot(filePath, snapshot);
+                if (consumed) consumedSnapshotByPath.set(filePath, snapshot.id);
+                return consumed;
+            } finally {
+                consumingSnapshots.delete(snapshot.id);
+            }
+        }
+
+        async function handleCommandSnapshot(filePath, snapshot) {
+            if (snapshot.modified < commandAccountSince) return window.electronAPI.consumeCommand(filePath, snapshot.id);
+            const command = JSON.parse(snapshot.content);
+            if (command['mojiang-command'] !== true) return false;
+            const ids = [];
+            const owner = accountId;
+            const generation = loginGeneration;
+            const observedRide = preparedRide?.rideId || currentRideIdentifier;
+            const actions = [];
+            let rideId = '';
+            for (let suffix = ''; command['command' + suffix]; suffix += '*') {
+                const params = command['params' + suffix] || {};
+                const report = commandReport(command['command' + suffix], params, snapshot.id + '-' + suffix.length);
+                if (report) { rememberReport(report); ids.push(report.reportId); }
+                else if (!['report-gain', 'report-crash'].includes(command['command' + suffix])) {
+                    actions.push({ type: command['command' + suffix], params });
+                }
+                if (params.rideIdentifier) rideId = params.rideIdentifier;
+            }
+            // 通过文件快照确认读取的指令仍是当前这一份；清空前报告已写入本地待确认队列。
+            if (!await window.electronAPI.consumeCommand(filePath, snapshot.id) || owner !== accountId || generation !== loginGeneration) return false;
+            if (actions.length && snapshot.modified >= desktopStartedAt) {
+                pendingFileControls.set(snapshot.id, { actions, next: 0, nextAt: 0, owner, generation,
+                    ride: rideId || observedRide, expires: snapshot.modified + FILE_CONTROL_TTL });
+            }
+            for (const id of ids) sendQueuedReport(id);
+            startRetryTimer();
+            drainFileControls();
+            return true;
+        }
+
         // 检查文件调度任务
         async function checkFileSchedules() {
             if (!fileWatcherState.isRunning) return;
@@ -2377,6 +2320,12 @@
                 
                 try {
                     // 获取文件当前内容（实际读取文件）
+                    if (schedule.trigger.type === 'file-command') {
+                        if (!accountId) continue;
+                        const snapshot = await window.electronAPI.readCommand(filePath);
+                        if (snapshot && await consumeFileCommand(filePath, snapshot)) { triggered = true; break; }
+                        continue;
+                    }
                     const currentContent = await window.electronAPI.getFileContent(filePath);
                     
                     if (schedule.trigger.type === 'file-watch') {
@@ -2408,59 +2357,6 @@
                             triggered = true;
                             break; // 触发一个后跳过剩余所有
                         }
-                    } else if (schedule.trigger.type === 'file-command') {
-                                // 文件指令类型
-                                if (currentContent.trim()) {
-                                    try {
-                                        // 检查是否包含mojiang指令标识
-                                        if (!currentContent.includes('"mojiang-command": true')) {
-                                            // 不包含标识，静默跳过
-                                            continue;
-                                        }
-                                        
-                                        // 解析JSON指令
-                                        const command = JSON.parse(currentContent);
-                                        
-                                        // 先清空文件（写入空JSON对象），避免重复执行
-                                        let cleared = false;
-                                        try {
-                                            await new Promise((resolve, reject) => {
-                                                window.electronAPI.writeFile(filePath, '{}', (err) => {
-                                                    if (err) {
-                                                        addLog(`清空指令文件失败: ${err}`, 'error');
-                                                        reject(err);
-                                                    } else {
-                                                        resolve();
-                                                    }
-                                                });
-                                            });
-                                            
-                                            // 重新读取文件，确认清空成功
-                                            const verifyContent = await window.electronAPI.getFileContent(filePath);
-                                            if (verifyContent && verifyContent.trim() === '{}') {
-                                                cleared = true;
-                                            } else {
-                                                addLog(`清空指令文件后校验失败，期望'{}'但实际内容: ${verifyContent || '(空)'}`, 'warning');
-                                            }
-                                        } catch (clearError) {
-                                            addLog(`清空指令文件出错: ${clearError}`, 'warning');
-                                        }
-                                        
-                                        if (!cleared) {
-                                            addLog(`指令文件清空失败，跳过该文件`, 'warning');
-                                            continue; // 跳过当前文件，继续检查其他调度
-                                        }
-                                        
-                                        // 清空成功，执行指令
-                                        addLog(`调度任务 "${schedule.name}" 触发: 执行文件指令`, 'success');
-                                        await executeFileCommand(command);
-                                        triggered = true;
-                                        break; // 触发一个后跳过剩余所有
-                                    } catch (parseError) {
-                                        // 解析失败视为不存在命令，继续检查下一个调度
-                                        continue;
-                                    }
-                                }
                     }
                 } catch (error) {
                     // 文件读取失败时不输出日志（按用户要求）
@@ -2613,11 +2509,13 @@
                             try {
                                 const parsedConfig = JSON.parse(data);
                                 config = parsedConfig; // 保存到全局变量
-                                if (config.autoLogin) {
+                                if (!isLoggedIn && config.autoLogin?.account && config.autoLogin?.password) {
                                     document.getElementById('login-account').value = config.autoLogin.account || '';
                                     document.getElementById('login-password').value = config.autoLogin.password || '';
                                     document.getElementById('auto-login').checked = true;
+                                    const generation = loginGeneration;
                                     setTimeout(() => {
+                                        if (generation !== loginGeneration) return;
                                         const loginButton = document.querySelector('.button[onclick="startConnection()"]');
                                         if (loginButton) {
                                             loginButton.click();
@@ -2664,8 +2562,6 @@
                                     }
                                     updateScheduleList();
                                     
-                                    // 应用启动时，清空所有文件指令类型的指令文件
-                                    clearFileCommandFiles();
                                     
                                     // 启动文件监听
                                     setTimeout(() => {
@@ -2716,10 +2612,10 @@
 
                 // 更新全局config对象
                 config = {
-                    autoLogin: {
+                    autoLogin: document.getElementById('auto-login').checked ? {
                         account: document.getElementById('login-account').value,
                         password: document.getElementById('login-password').value
-                    },
+                    } : null,
                     bgiFolder: getBgiFolderPath(),
                     dragonName: document.getElementById('dragon-name').value,
                     closeGenshin: document.getElementById('close-genshin-checkbox').checked,
@@ -2880,6 +2776,12 @@
         }
         
         // 更新已上线列表
+        function escapeText(value) {
+            const node = document.createElement('span');
+            node.textContent = String(value ?? '');
+            return node.innerHTML;
+        }
+
         function updateOnlineList() {
             const listContainer = document.getElementById('online-list');
             
@@ -2903,9 +2805,10 @@
                         const maskedUid = maskUid(user.uid);
                         
                         item.innerHTML = `
-                            <span>${user.username} (UID: ${maskedUid}) - ${user.room}${hostIcon}</span>
-                            <span class="subuser-delete" onclick="goOffline('${user.uid}', '${user.room}')">下线</span>
+                            <span>${escapeText(user.username)} (UID: ${escapeText(maskedUid)}) - ${escapeText(user.room)}${hostIcon}</span>
+                            <span class="subuser-delete" data-action="offline">下线</span>
                         `;
+                    item.querySelector('[data-action="offline"]').onclick = () => goOffline(user.uid, user.room);
                     listContainer.appendChild(item);
                 }
             });
@@ -2986,7 +2889,7 @@
                 // 根据房间模式决定是否显示发车人数
                 let roomPropertiesHTML = `<span>${modeText}</span>`;
                 if (roomInfo.mode !== 'none') {
-                    roomPropertiesHTML += `<span>${roomInfo.count}人发车</span>`;
+                    roomPropertiesHTML += `<span>${Number(roomInfo.count)}人发车</span>`;
                 }
                 roomPropertiesHTML += `<span style="color: ${permissionColor};">${permissionText}</span>`;
                 
@@ -3250,7 +3153,9 @@
                     const schedulesList = {
                         type: 'schedules-list',
                         data: {
-                            schedules: schedules
+                            schedules: schedules,
+                            sourceConnectionId: connectionId,
+                            requestId
                         },
                         targetSocketId: params.targetSocketId // 添加目标socketId
                     };
@@ -3353,6 +3258,8 @@
                     if (params.gameAccount !== undefined && params.expGain !== undefined && params.moraGain !== undefined) {
                         const gainMessage = {
                             type: 'report-gain',
+                            reportId: params.reportId || requestId,
+                            rideIdentifier: params.rideIdentifier,
                             accountId: accountId,
                             gameAccount: params.gameAccount,
                             expGain: params.expGain,
@@ -3370,6 +3277,7 @@
         }
 
         // 一条龙任务管理机制
+        let dragonLaunching = false;
         let pendingDragonTask = null; // 待执行的一条龙任务（单任务位）
         let dragonTimer = null; // 当前运行的计时器
         let timerType = null; // 计时器类型: null(无) | 'cooldown'(30秒冷却) | 'protection'(2分钟保护)
@@ -3378,11 +3286,15 @@
         
         // 添加一条龙任务
         function addDragonTask(configName, isRideTask = false, options = {}) {
+            if (preparedRide && !preparedRide.launchResult) {
+                addLog('本机正在准备联机任务', 'warning');
+                return false;
+            }
             const closeGame = options.closeGame !== undefined
                 ? Boolean(options.closeGame)
                 : Boolean(document.getElementById('close-genshin-checkbox')?.checked);
             // 如果存在计时器，根据计时器类型处理
-            if (dragonTimer) {
+            if (dragonTimer || dragonLaunching) {
                 if (timerType === 'protection') {
                     // 保护期内忽略所有任务
                     addLog(`保护期内，忽略一条龙任务: ${configName}`, 'warning');
@@ -3411,12 +3323,12 @@
             };
             
             addLog(`一条龙任务已加入队列: ${configName}`, 'info');
-            executeDragonWithTimer(task);
+            executeDragonWithTimer(task).catch(error => addLog('启动失败：' + error.message, 'error'));
             return true;
         }
         
         // 执行一条龙并启动计时器
-        function executeDragonWithTimer(task) {
+        async function executeDragonWithTimer(task) {
             const { configName, isRideTask, closeGame } = task;
             timerType = isRideTask ? 'protection' : 'cooldown';
             const timerMs = isRideTask ? RIDE_PROTECTION_MS : NORMAL_COOLDOWN_MS;
@@ -3426,7 +3338,16 @@
             }
             
             // 执行一条龙启动
-            executeDragonLaunch(configName, closeGame);
+            dragonLaunching = true;
+            try {
+                await executeDragonLaunch(configName, closeGame, task.ride);
+            } catch (error) {
+                timerType = null;
+                dragonTimer = null;
+                throw error;
+            } finally {
+                dragonLaunching = false;
+            }
             
             // 启动计时器
             addLog(`一条龙已启动，进入${timerMs / 1000}秒${isRideTask ? '保护' : '冷却'}`, 'info');
@@ -3441,36 +3362,20 @@
                     const pending = pendingDragonTask;
                     pendingDragonTask = null;
                     addLog(`检测到待执行任务: ${pending.configName}，继续处理`, 'info');
-                    executeDragonWithTimer(pending);
+                    executeDragonWithTimer(pending).catch(error => addLog('启动失败：' + error.message, 'error'));
                 }
             }, timerMs);
         }
 
         // 实际执行一条龙启动
-        function executeDragonLaunch(configName, closeGame) {
+        async function executeDragonLaunch(configName, closeGame, ride) {
             const bgiFolder = getBgiFolderPath();
-            if (!bgiFolder) {
-                showAlertModal('提示', '请先选择BetterGI文件夹');
-                addLog('请先选择BGI文件夹', 'error');
-                return false;
-            }
-            
-            // BGI一定要关，不需要用户选择
-            closeBGI();
-            
-            // 按任务记录的选项决定是否关闭原神，避免使用桌面端复选框覆盖移动端选择
-            closeGenshin(Boolean(closeGame));
-            
-            if (window.electronAPI && window.electronAPI.startProcess) {
-                window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder).then(pid => {
-                    addLog(`一条龙 "${configName}" 启动成功，进程ID: ` + pid, 'success');
-                }).catch(error => {
-                    addLog('启动失败: ' + error, 'error');
-                });
-            } else {
-                addLog('无法启动，Electron API不可用', 'error');
-            }
-            return Boolean(window.electronAPI && window.electronAPI.startProcess);
+            if (!bgiFolder) throw new Error('请先选择 BetterGI 文件夹');
+            if (!await closeBGI()) throw new Error('无法关闭旧 BetterGI 进程');
+            if (closeGame && !await closeGenshin(true)) throw new Error('无法关闭旧原神进程');
+            if (ride && preparedRide !== ride) throw new Error('发车已取消');
+            const pid = await window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder);
+            addLog('一条龙启动成功，进程 ID：' + pid, 'success');
         }
 
         // 启动联机等待一条龙（用户手动触发）
@@ -3664,8 +3569,8 @@
                 rankItem.className = 'points-ranking-item' + (isSelf ? ' self' : '');
                 rankItem.innerHTML = `
                     <span class="points-ranking-rank">${index + 1}</span>
-                    <span class="points-ranking-account">${item.accountId}${isSelf ? ' （自己）' : ''}</span>
-                    <span class="points-ranking-points">${item.points}</span>
+                    <span class="points-ranking-account">${escapeText(item.accountId)}${isSelf ? ' （自己）' : ''}</span>
+                    <span class="points-ranking-points">${Number(item.points)}</span>
                 `;
                 container.appendChild(rankItem);
             });
@@ -3774,13 +3679,13 @@
                     <tr style="${rowStyle}">
                         <td style="width: 50px; padding: 8px; text-align: center; border-bottom: 1px solid #e0e0e0; font-weight: bold; color: #1976D2;">${index + 1}</td>
                         <td style="flex: 1; padding: 8px; text-align: left; border-bottom: 1px solid #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            ${item.displayName}
+                            ${escapeText(item.displayName)}
                         </td>
                         <td style="width: 100px; padding: 8px; text-align: right; border-bottom: 1px solid #e0e0e0;">
-                            ${item.expGain.toLocaleString()}
+                            ${Number(item.expGain).toLocaleString()}
                         </td>
                         <td style="width: 100px; padding: 8px; text-align: right; border-bottom: 1px solid #e0e0e0;">
-                            ${item.moraGain.toLocaleString()}
+                            ${Number(item.moraGain).toLocaleString()}
                         </td>
                     </tr>
                 `;
@@ -3889,15 +3794,15 @@
                 recordDiv.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <strong>${record.roomName || '未知房间'}</strong>
+                            <strong>${escapeText(record.roomName || '未知房间')}</strong>
                             ${isHost ? '<span style="color: #f44336; margin-left: 8px;">[房主]</span>' : '<span style="color: #2f8bd1; margin-left: 8px;">[队员]</span>'}
                         </div>
                         <span style="color: #666; font-size: 12px;">${startTime}</span>
                     </div>
                     <div style="margin-top: 8px; font-size: 13px; color: #666;">
-                        <div>房主: ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${maskUID(host.uid)})` : '无'}</div>
-                        <div>队员: ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${maskUID(m.uid)})`).join(', ') : '无'}</div>
-                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : record.status}</div>
+                        <div>房主: ${host ? `${escapeText(host.accountId || '未知')}-${escapeText(host.username)} (UID: ${escapeText(maskUID(host.uid))})` : '无'}</div>
+                        <div>队员: ${members.length > 0 ? members.map(m => `${escapeText(m.accountId || '未知')}-${escapeText(m.username)} (UID: ${escapeText(maskUID(m.uid))})`).join(', ') : '无'}</div>
+                        <div>状态: ${record.status === 'completed' ? '已完成' : record.status === 'crashed' ? '已炸车' : record.status === 'cancelled' ? '已取消' : record.status === 'waiting_for_ready' ? '等待中' : escapeText(record.status)}</div>
                     </div>
                 `;
                 container.appendChild(recordDiv);
@@ -3906,6 +3811,9 @@
 
         // 退出登录
         function logout() {
+            loginGeneration++;
+            pendingFileControls.clear();
+            commandAccountSince = Infinity;
             // 先禁用自动重连
             reconnectDisabled = true;
             
@@ -3920,15 +3828,15 @@
             document.getElementById('remote-config-status').textContent = '未连接';
             document.getElementById('remote-connection-id').value = '-';
             
-            // 清空配置中的账号密码
-            if (config) {
-                config.autoLogin = {
-                    account: '',
-                    password: ''
-                };
-                saveConfig();
-            }
-            
+            reconnectOnlineUsers = [];
+            resetPreparedRide();
+            currentRideIdentifier = '';
+            retryQueue = new Map();
+            clearTimeout(retryTimer);
+            retryTimer = null;
+            supportsReportAck = false;
+            if (socket) { socket.off(); socket = null; }
+            isLoggingIn = false;
             // 显示登录界面
             document.getElementById('main-container').classList.add('hidden');
             document.getElementById('login-container').classList.remove('hidden');
@@ -3938,6 +3846,7 @@
             document.getElementById('login-password').value = '';
             document.getElementById('auto-login').checked = false;
             
+            saveConfig();
             addLog('已退出登录', 'info');
         }
         
@@ -4379,66 +4288,36 @@
             addLog(`收到发车消息1，准备处理...`, 'info');
             console.log('发车消息1详情:', data);
             
-            // 保存发车标识
-            currentRideIdentifier = rideIdentifier || '';
-            
-            // 找到符合名称和uid的发车配置
             const { host, members } = rideInfo;
             const allRiders = [host, ...members];
-            
-            // 找到当前用户的信息
-            let currentRider = null;
-            let matchedSchedule = null;
-            
-            // 遍历所有骑手，找到匹配的发车配置
+            const seat = data.seatUid == null ? null : String(data.seatUid);
+            let currentRider;
+            let matchedSchedule;
             for (const rider of allRiders) {
-                console.log('检查骑手:', rider);
-                // 查找匹配的发车配置（只匹配名称和uid，不检查房间）
-                const schedule = schedules.find(s => {
-                    return s.trigger.type === 'trigger-ride' &&
-                           s.trigger.config.username === rider.username &&
-                           s.trigger.config.uid === rider.uid;
-                });
-                
-                if (schedule) {
-                    currentRider = rider;
-                    matchedSchedule = schedule;
-                    addLog(`找到匹配的发车配置: ${schedule.name}`, 'info');
-                    break;
-                }
+                if (seat !== null && String(rider.uid) !== seat) continue;
+                const schedule = schedules.find(s => s.trigger.type === 'trigger-ride' &&
+                    s.action?.type === 'start-online-dragon' && s.trigger.config.username === rider.username &&
+                    String(s.trigger.config.uid) === String(rider.uid));
+                if (schedule) { currentRider = rider; matchedSchedule = schedule; break; }
             }
-            
-            if (!currentRider || !matchedSchedule) {
-                addLog('未找到对应的发车配置', 'warning');
-                // 发送回复1为收到但不就绪
-                    sendMessageToServer({
-                        type: 'ride-ready',
-                        rideId: rideId,
-                        ready: false,
-                        username: currentRider.username,
-                        gameName: currentRider.username,
-                        uid: currentRider.uid
-                    });
-                addLog('向服务端发送信息: 发车准备状态 - false', 'info');
+            const uid = currentRider?.uid ?? data.seatUid;
+            const reply = { type: 'ride-ready', rideId, uid, supportsLaunchAck: true,
+                username: currentRider?.username, gameName: currentRider?.username };
+            if (preparedRide?.rideId === rideId && String(preparedRide.uid) === String(uid)) {
+                if (preparedRide.readyReply) sendMessageToServer(preparedRide.readyReply);
                 return;
             }
-            
-            // 检查是否选择了联机js文件夹
-            if (!matchedSchedule.action.config.jsFolder || matchedSchedule.action.config.jsFolder === '未选择文件夹') {
-                addLog('发车配置中未选择联机js文件夹', 'warning');
-                // 发送回复1为收到但不就绪
-                    sendMessageToServer({
-                        type: 'ride-ready',
-                        rideId: rideId,
-                        ready: false,
-                        username: currentRider.username,
-                        gameName: currentRider.username,
-                        uid: currentRider.uid
-                    });
-                addLog('向服务端发送信息: 发车准备状态 - false', 'info');
+            const settings = matchedSchedule?.action?.config;
+            if (!settings?.configName || !settings.jsFolder || settings.jsFolder === '未选择文件夹' ||
+                !getBgiFolderPath() || preparedRide || timerType === 'protection' || dragonLaunching) {
+                sendMessageToServer({ ...reply, ready: false });
                 return;
             }
-            
+            const ride = { rideId, uid, jsFolder: settings.jsFolder, configName: settings.configName,
+                images: Promise.resolve(), readyReply: null, launching: false };
+            preparedRide = ride;
+            ride.timeout = setTimeout(() => { if (preparedRide === ride) resetPreparedRide(); }, 120000);
+            try {
             // 判断是否是队员（不是房主）
             const isMember = rideInfo.host.username !== currentRider.username || rideInfo.host.uid !== currentRider.uid;
             
@@ -4451,7 +4330,7 @@
                 
                 // 构建图片路径：exe同级路径/namePng/游戏名称.png
                 const imageDir = `${appPath}/namePng`;
-                const imagePath = `${imageDir}/${gameName}.png`;
+                const imagePath = safeImageName(gameName + '.png') ? imageDir + '/' + gameName + '.png' : '';
                 
                 addLog(`队员查找图片: ${imagePath}`, 'info');
                 
@@ -4522,7 +4401,8 @@
                 user.uid === currentRider.uid && 
                 user.room === rideInfo.room
             );
-            const notHostValue = currentUser ? currentUser.notHost : false;
+            const notHostValue = currentRider.notHost ?? currentUser?.notHost ?? false;
+            const memberOnly = currentRider.memberOnly ?? currentUser?.memberOnly ?? notHostValue;
             
             // 生成匹配信息内容（JSON格式）
             const matchInfoContent = JSON.stringify({
@@ -4532,73 +4412,39 @@
                     gameName: currentRider.username,
                     uid: currentRider.uid,
                     targetRoom: rideInfo.room,
+                    memberOnly,
                     notHost: notHostValue,
                     rideIdentifier: rideId
                 }
             }, null, 2);
             
-            // 写入文件
-            if (window.electronAPI && window.electronAPI.writeFile) {
-                addLog(`准备写入匹配信息到: ${matchInfoPath}`, 'info');
-                window.electronAPI.writeFile(matchInfoPath, matchInfoContent, (error, success) => {
-                    if (error) {
-                        addLog(`写入匹配信息失败: ${error}`, 'error');
-                        // 发送回复1为收到但不就绪
-                        sendMessageToServer({
-                            type: 'ride-ready',
-                            rideId: rideId,
-                            ready: false,
-                            username: currentRider.username,
-                            gameName: currentRider.username,
-                            uid: currentRider.uid
-                        });
-                        addLog('向服务端发送信息: 发车准备状态 - false', 'info');
-                    } else {
-                        addLog('匹配信息写入成功', 'success');
-                        // 发送回复1为收到且就绪
-                        sendMessageToServer({
-                            type: 'ride-ready',
-                            rideId: rideId,
-                            ready: true,
-                            username: currentRider.username,
-                            gameName: currentRider.username,
-                            uid: currentRider.uid,
-                            ...(isMember ? { imageMeta: rideImageMeta } : { imageManifest: rideImageManifest })
-                        });
-                        addLog('向服务端发送信息: 发车准备状态 - true', 'info');
-                        
-                        // 设置30秒超时，检查是否收到回复2
-                        setTimeout(() => {
-                            // 检查是否已经处理过该发车
-                            if (!processedRides.includes(rideId)) {
-                                addLog('超过30秒未收到回复2，退出调度', 'warning');
-                                // 标记为已处理，避免重复处理
-                                processedRides.push(rideId);
-                            }
-                        }, 30000);
-                    }
-                });
-            } else {
-                addLog('无法写入匹配信息文件', 'error');
-                // 发送回复1为收到但不就绪
-                    sendMessageToServer({
-                        type: 'ride-ready',
-                        rideId: rideId,
-                        ready: false,
-                        username: currentRider.username,
-                        gameName: currentRider.username,
-                        uid: currentRider.uid
-                    });
-                addLog('向服务端发送信息: 发车准备状态 - false', 'info');
+            await new Promise((resolve, reject) => {
+                window.electronAPI.writeFile(matchInfoPath, matchInfoContent, error => error ? reject(new Error(error)) : resolve());
+            });
+            if (preparedRide !== ride) return;
+            ride.readyReply = { ...reply, ready: true,
+                ...(isMember ? { imageMeta: rideImageMeta } : { imageManifest: rideImageManifest }) };
+            sendMessageToServer(ride.readyReply);
+            } catch (error) {
+                if (preparedRide !== ride) return;
+                resetPreparedRide();
+                addLog('准备发车失败：' + error.message, 'error');
+                sendMessageToServer({ ...reply, ready: false });
             }
+        }
+
+        function resetPreparedRide() {
+            if (preparedRide) clearTimeout(preparedRide.timeout);
+            preparedRide = null;
         }
 
         // 服务端在哈希不一致或无法协商时请求图片正文
         async function handleRideImageRequest(data) {
             const { rideId, fileName } = data || {};
+            if (preparedRide?.rideId !== rideId || (data.uid != null && String(preparedRide.uid) !== String(data.uid))) return;
             const imageDir = `${appPath}/namePng`;
             const requestedName = fileName || (data.username ? `${data.username}.png` : '');
-            const safeFileName = requestedName && !/[\\/]/.test(requestedName) && !requestedName.includes('..') ? requestedName : '';
+            const safeFileName = requestedName && safeImageName(requestedName) ? requestedName : '';
             const imagePath = safeFileName ? `${imageDir}/${safeFileName}` : '';
             if (!imagePath || !window.electronAPI || !window.electronAPI.readImageFile) {
                 sendMessageToServer({ type: 'ride-image', rideId, hasImage: false, uid: data.uid, username: data.username });
@@ -4624,111 +4470,58 @@
         
         // 处理发车图片
         function handleRideImages(data) {
-            const { rideId, images } = data;
-            addLog(`收到 ${images.length} 张队员图片`, 'info');
-            console.log('队员图片详情:', data);
-            
-            // 找到当前用户的发车配置
-            const matchedSchedule = schedules.find(s => s.trigger.type === 'trigger-ride');
-            if (!matchedSchedule || !matchedSchedule.action.config.jsFolder || matchedSchedule.action.config.jsFolder === '未选择文件夹') {
-                addLog('未找到发车配置或未选择联机js文件夹', 'error');
-                return;
-            }
-            
-            const jsFolder = matchedSchedule.action.config.jsFolder;
-            const targetsDir = `${jsFolder}/targets`;
-            
-            // 保存所有图片
-            let savedCount = 0;
-            images.forEach(image => {
-                const imagePath = `${targetsDir}/${image.fileName}`;
-                
-                if (window.electronAPI && window.electronAPI.saveImageFile) {
-                    window.electronAPI.saveImageFile(imagePath, image.imageData).then(result => {
-                        savedCount++;
-                        addLog(`保存图片: ${image.fileName}`, 'success');
-                        
-                        // 检查是否所有图片都保存完成
-                        if (savedCount === images.length) {
-                            addLog(`所有队员图片保存完成，共 ${savedCount} 张`, 'success');
-                        }
-                    }).catch(error => {
-                        addLog(`保存图片失败 ${image.fileName}: ${error}`, 'error');
-                    });
+            const ride = preparedRide;
+            if (!ride || ride.rideId !== data.rideId || ride.launching) return;
+            ride.images = ride.images.then(async () => {
+                for (const image of data.images || []) {
+                    if (!safeImageName(image.fileName)) throw new Error('无效的队员图片名');
+                    await window.electronAPI.saveImageFile(ride.jsFolder + '/targets/' + image.fileName, image.imageData);
                 }
             });
+            // 发车阶段仍需检查这次写盘的结果。
+            ride.images.catch(error => addLog('保存队员图片失败：' + error.message, 'error'));
         }
-        
-        // 处理发车消息2
-        function handleRideMessage2(data) {
-            const { rideId, rideInfo } = data;
-            addLog(`收到发车消息2，准备启动一条龙...`, 'info');
-            console.log('发车消息2详情:', data);
-            
-            // 标记该发车已处理
-            if (!processedRides.includes(rideId)) {
-                processedRides.push(rideId);
-                addLog(`标记发车 ${rideId} 为已处理`, 'info');
-            }
-            
-            // 找到符合名称和uid的发车配置
-            const { host, members } = rideInfo;
-            const allRiders = [host, ...members];
-            
-            // 找到当前用户的信息
-            let currentRider = null;
-            let matchedSchedule = null;
-            
-            // 遍历所有骑手，找到匹配的发车配置
-            for (const rider of allRiders) {
-                console.log('检查骑手:', rider);
-                // 查找匹配的发车配置
-                const schedule = schedules.find(s => {
-                    return s.trigger.type === 'trigger-ride' &&
-                           s.trigger.config.username === rider.username &&
-                           s.trigger.config.uid === rider.uid;
-                });
-                
-                if (schedule) {
-                    currentRider = rider;
-                    matchedSchedule = schedule;
-                    addLog(`找到匹配的发车配置: ${schedule.name}`, 'info');
-                    break;
-                }
-            }
-            
-            if (!currentRider || !matchedSchedule) {
-                addLog('未找到对应的发车配置', 'warning');
-                // 清空发车标识
-                currentRideIdentifier = '';
+
+        function safeImageName(name) {
+            return typeof name === 'string' && /^[^<>:"/\\|?*\u0000-\u001f]+\.png$/i.test(name);
+        }
+
+        async function handleRideMessage2(data) {
+            const ride = preparedRide;
+            const reply = { type: 'ride-started', rideId: data.rideId, uid: data.seatUid ?? ride?.uid };
+            if (!ride || !ride.readyReply || ride.rideId !== data.rideId ||
+                (data.seatUid != null && String(ride.uid) !== String(data.seatUid))) {
+                if (data.requireLaunchAck) sendMessageToServer({ ...reply, success: false, message: '找不到已就绪座位' });
                 return;
             }
-            
-            // 启动一条龙
-            const configName = matchedSchedule.action.config.configName;
-            if (configName) {
-                addLog(`准备启动联机一条龙: ${configName}`, 'info');
-                startOnlineDragon(configName);
-                addLog(`已启动联机一条龙: ${configName}`, 'success');
-            } else {
-                addLog('发车配置中未设置一条龙配置名称', 'warning');
+            if (ride.launching) {
+                if (ride.launchResult && data.requireLaunchAck) sendMessageToServer(ride.launchResult);
+                return;
             }
-            
-            // 清空发车标识
-            currentRideIdentifier = '';
+            ride.launching = true;
+            try {
+                await ride.images;
+                if (preparedRide !== ride) return;
+                if (timerType === 'protection' || dragonLaunching) throw new Error('本机正在启动其他任务');
+                clearTimeout(dragonTimer);
+                pendingDragonTask = null;
+                await executeDragonWithTimer({ configName: ride.configName, isRideTask: true,
+                    closeGame: Boolean(document.getElementById('close-genshin-checkbox')?.checked), ride });
+                currentRideIdentifier = ride.rideId;
+                ride.launchResult = { ...reply, success: true };
+            } catch (error) {
+                ride.launchResult = { ...reply, success: false, message: String(error.message || error) };
+                addLog('联机一条龙启动失败：' + ride.launchResult.message, 'error');
+            }
+            if (preparedRide === ride && data.requireLaunchAck) sendMessageToServer(ride.launchResult);
+            if (!ride.launchResult.success) resetPreparedRide();
         }
-        
-        // 处理取消消息
+
         function handleRideCancel(data) {
-            const { rideId, reason } = data;
-            addLog(`发车取消: ${reason}`, 'info');
-            
-            // 标记该发车已处理
-            if (!processedRides.includes(rideId)) {
-                processedRides.push(rideId);
-            }
+            if (preparedRide?.rideId === data.rideId) resetPreparedRide();
+            addLog('发车取消：' + data.reason, 'info');
         }
-        
+
         // 重置调度表单
         function resetScheduleForm() {
             document.getElementById('schedule-name').value = '';
@@ -5170,16 +4963,19 @@
                 
                 item.innerHTML = `
                     <div class="schedule-info">
-                        <div class="schedule-name">${schedule.name}</div>
-                        <div class="schedule-detail">${triggerDesc}</div>
-                        <div class="schedule-detail">${actionDesc}</div>
+                        <div class="schedule-name">${escapeText(schedule.name)}</div>
+                        <div class="schedule-detail">${escapeText(triggerDesc)}</div>
+                        <div class="schedule-detail">${escapeText(actionDesc)}</div>
                     </div>
                     <div class="schedule-actions">
-                        <span class="subuser-edit" onclick="editSchedule('${schedule.id}', event)">编辑</span>
-                        <span class="subuser-delete" onclick="deleteSchedule('${schedule.id}', event)">删除</span>
-                        <span class="subuser-execute" onclick="executeScheduleManually('${schedule.id}', event)">手动执行</span>
+                        <span class="subuser-edit" data-action="editSchedule">编辑</span>
+                        <span class="subuser-delete" data-action="deleteSchedule">删除</span>
+                        <span class="subuser-execute" data-action="executeScheduleManually">手动执行</span>
                     </div>
                 `;
+                for (const handler of [editSchedule, deleteSchedule, executeScheduleManually]) {
+                    item.querySelector('[data-action="' + handler.name + '"]').onclick = event => handler(schedule.id, event);
+                }
                 listContainer.appendChild(item);
             });
         }
@@ -5193,49 +4989,24 @@
             }
         }
         // 检查本地团购版本
-        function checkLocalGroupVersion() {
-            try {
-                const path = require('path');
-                const fs = require('fs');
-                let manifestPath = null;
-                
-                // 找manifest
-                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-                for (const schedule of schedules) {
-                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                        const jsPath = schedule.action.config.jsFolder;
-                        manifestPath = path.join(jsPath, 'manifest.json');
-                        if (fs.existsSync(manifestPath)) {
-                            break;
-                        }
-                    }
-                }
-                
-                if (!manifestPath) {
-                    const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                        const groupPurchasingPath = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
-                        manifestPath = path.join(groupPurchasingPath, 'manifest.json');
-                    }
-                }
-                
-                if (manifestPath && fs.existsSync(manifestPath)) {
-                    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-                    const localVersion = manifest.version;
-                    addLog(`本地团购版本: ${localVersion}`, 'info');
-                    return localVersion;
-                } else {
-                    addLog('未找到本地团购manifest文件', 'info');
-                    return null;
-                }
-            } catch (error) {
-                addLog(`检查本地团购版本失败: ${error.message}`, 'error');
-                return null;
+        function groupFolders() {
+            const folders = schedules.filter(s => s.trigger.type === 'trigger-ride').map(s => s.action?.config?.jsFolder)
+                .filter(p => p && p !== '未选择文件夹');
+            const bgi = getBgiFolderPath();
+            if (bgi) folders.push(bgi + '/User/JsScript/ArtifactsGroupPurchasing');
+            return Array.from(new Set(folders));
+        }
+
+        async function checkLocalGroupVersion() {
+            for (const folder of groupFolders()) {
+                try { return JSON.parse(await window.electronAPI.getFileContent(folder + '/manifest.json')).version; }
+                catch (_) { /* 继续检查下一份配置 */ }
             }
+            return null;
         }
 
         // 打开版本检查模态框
-        function openVersionCheckModal() {
+        async function openVersionCheckModal() {
             document.getElementById('version-check-modal').style.display = 'flex';
             document.getElementById('version-check-modal').style.pointerEvents = 'auto';
             document.getElementById('current-version').textContent = `v${VERSION}`;
@@ -5248,7 +5019,7 @@
             document.getElementById('download-progress').style.display = 'none';
             
             // 立即检查本地团购版本
-            const localGroupVersion = checkLocalGroupVersion();
+            const localGroupVersion = await checkLocalGroupVersion();
             document.getElementById('update-group-button').textContent = '检查中...';
             document.getElementById('update-group-button').disabled = true;
             document.getElementById('update-group-button').style.backgroundColor = '';
@@ -5264,7 +5035,6 @@
             // 终止下载（如果有）
             if (currentDownloadController) {
                 currentDownloadController.abort();
-                currentDownloadController = null;
                 addLog('关闭更新窗口，已终止下载', 'info');
             }
             
@@ -5350,57 +5120,9 @@
                 
                 addLog('开始检查自动更新团购...', 'info');
                 
-                // 检查是否存在有效路径
-                const path = require('path');
-                const fs = require('fs');
-                
-                let foundPath = false;
-                let manifestPath = null;
-                
-                // 1. 优先在调度中寻找
-                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-                for (const schedule of schedules) {
-                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                        foundPath = true;
-                        const jsPath = schedule.action.config.jsFolder;
-                        manifestPath = path.join(jsPath, 'manifest.json');
-                        if (fs.existsSync(manifestPath)) {
-                            break;
-                        }
-                    }
-                }
-                
-                // 2. 如果不存在这样的调度，使用BGI文件夹
-                if (!manifestPath) {
-                    const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                        foundPath = true;
-                        const groupPurchasingPath = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
-                        manifestPath = path.join(groupPurchasingPath, 'manifest.json');
-                    }
-                }
-                
-                // 3. 检查路径是否有效
-                if (!foundPath) {
-                    addLog('无有效文件路径，跳过自动更新团购', 'info');
-                    return;
-                }
+                if (!groupFolders().length || !socket?.connected || !isLoggedIn) return;
+                const localVersion = await checkLocalGroupVersion();
 
-                if (!socket || !isLoggedIn || !socket.connected) {
-                    addLog('当前未连接服务器，跳过自动更新团购', 'warning');
-                    return;
-                }
-                
-                // 4. 检查manifest文件是否存在
-                let localVersion = null;
-                if (fs.existsSync(manifestPath)) {
-                    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-                    localVersion = manifest.version;
-                    addLog(`本地团购版本: ${localVersion}`, 'info');
-                } else {
-                    addLog('未找到manifest文件，需要更新', 'info');
-                }
-                
                 // 5. 向服务端请求最新版本
                 return new Promise((resolve) => {
                     let timeoutId = null;
@@ -5450,8 +5172,8 @@
                                 // 如果需要更新，触发下载
                                 if (needUpdate) {
                                     addLog('开始自动更新团购...', 'info');
-                                    downloadGroupUpdate().then(() => {
-                                        resolve();
+                                    downloadGroupUpdate().then(result => {
+                                        resolve(result);
                                     }).catch((err) => {
                                         addLog(`自动更新失败: ${err.message}`, 'error');
                                         resolve();
@@ -5490,8 +5212,10 @@
         
         // 进入主界面流程
         async function enterMainApp() {
+            const generation = loginGeneration;
             // 先加载配置
             await loadConfig();
+            if (!isLoggedIn || generation !== loginGeneration) return;
             addLog('配置加载完成', 'info');
             clearCompletedClientUpdateState();
 
@@ -5508,26 +5232,7 @@
             }
 
             // 只有启用团购自动更新时才需要检查本地团购目录
-            let foundPath = false;
-
-            if (autoUpdateGroupChecked && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT) {
-                // 优先在调度中寻找
-                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-                for (const schedule of schedules) {
-                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                        foundPath = true;
-                        break;
-                    }
-                }
-
-                // 如果没有，检查BGI文件夹
-                if (!foundPath) {
-                    const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                        foundPath = true;
-                    }
-                }
-            }
+            const foundPath = groupFolders().length > 0;
 
             startupGroupUpdateAllowed = autoUpdateGroupChecked && autoUpdateGroupCount < MAX_AUTO_UPDATE_GROUP_COUNT && foundPath;
             if (!autoUpdateClientChecked && !startupGroupUpdateAllowed) {
@@ -5628,7 +5333,7 @@
                 let localGroupVersion = null;
                 if (startupGroupUpdateAllowed) {
                     try {
-                        localGroupVersion = checkLocalGroupVersion();
+                        localGroupVersion = await checkLocalGroupVersion();
                     } catch (error) {
                         addLog(`读取本地团购版本失败: ${error.message}`, 'warning');
                     }
@@ -5747,8 +5452,8 @@
                         
                         // 设置团购更新URL
                         window.groupUpdateUrl = `${SERVER_URL}/JsScript/ArtifactsGroupPurchasing.zip`;
-                        await downloadGroupUpdate();
-                        addLog(`自动更新完成，reconnectDisabled=${reconnectDisabled}`, 'info');
+                        const result = await downloadGroupUpdate();
+                        if (result.success) addLog(`自动更新完成，reconnectDisabled=${reconnectDisabled}`, 'info');
                     }
                 }
                 
@@ -5790,6 +5495,7 @@
         
         // 显示主界面
         function showMainApp() {
+            if (!isLoggedIn) return;
             document.getElementById('login-container').classList.add('hidden');
             document.getElementById('main-container').classList.remove('hidden');
             refreshPointsRanking();
@@ -5812,617 +5518,82 @@
         
         // 获取团购版本
         async function getGroupPurchasingVersion() {
-            try {
-                // 引入必要的模块
-                const path = require('path');
-                const fs = require('fs');
-                
-                let foundPath = false;
-                
-                // 1. 优先在调度中寻找
-                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-                for (const schedule of schedules) {
-                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                        foundPath = true;
-                        const jsPath = schedule.action.config.jsFolder;
-                        const manifestPath = path.join(jsPath, 'manifest.json');
-                        if (fs.existsSync(manifestPath)) {
-                            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-                            return manifest.version;
-                        }
-                    }
-                }
-                
-                // 2. 如果不存在这样的调度，获取左侧的选择BGI文件夹内容
-                const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                    foundPath = true;
-                    const groupPurchasingPath = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
-                    const manifestPath = path.join(groupPurchasingPath, 'manifest.json');
-                    if (fs.existsSync(manifestPath)) {
-                        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-                        return manifest.version;
-                    }
-                }
-                
-                // 3. 都不存在
-                if (!foundPath) {
-                    throw new Error('无有效文件路径，无法检查');
-                } else {
-                    throw new Error('未找到联机团购js的manifest文件');
-                }
-            } catch (error) {
-                console.error('获取团购版本失败:', error);
-                throw error;
-            }
+            const version = await checkLocalGroupVersion();
+            if (!version) throw new Error('未找到联机团购 manifest 文件');
+            return version;
         }
-        
-        // 下载团购更新
+
         async function downloadGroupUpdate() {
-            let downloadController = null;
-            let updateStatus = null;
-            try {
-                // 终止之前的下载（如果有）
-                if (currentDownloadController) {
-                    currentDownloadController.abort();
-                    currentDownloadController = null;
-                    addLog('已终止之前的下载', 'info');
-                }
-                
-                // 创建新的控制器
-                downloadController = new AbortController();
-                currentDownloadController = downloadController;
-                const signal = downloadController.signal;
-                
-                // 引入必要的模块
-                const path = require('path');
-                const fs = require('fs');
-                const os = require('os');
-                
-                if (!window.groupUpdateUrl) {
-                    throw new Error('更新地址未设置');
-                }
-                
-                // 确定目标目录
-                let targetDir = null;
-                let foundPath = false;
-                
-                // 1. 优先在调度中寻找
-                const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
-                for (const schedule of schedules) {
-                    if (schedule.trigger.type === 'trigger-ride' && schedule.action && schedule.action.config && schedule.action.config.jsFolder) {
-                        foundPath = true;
-                        targetDir = schedule.action.config.jsFolder;
-                        break;
-                    }
-                }
-                
-                // 2. 如果不存在这样的调度，使用BGI文件夹
-                if (!targetDir) {
-                    const bgiPath = config?.bgiFolder || localStorage.getItem('bgiPath');
-                    if (bgiPath && bgiPath !== BGI_FOLDER_PLACEHOLDER && bgiPath !== '未选择文件夹' && bgiPath !== '未选择') {
-                        foundPath = true;
-                        targetDir = path.join(bgiPath, 'User', 'JsScript', 'ArtifactsGroupPurchasing');
-                    }
-                }
-                
-                // 3. 检查路径是否有效
-                if (!foundPath) {
-                    throw new Error('无有效文件路径，无法更新');
-                }
-                if (!targetDir) {
-                    throw new Error('无法确定团购JS的目标目录');
-                }
-                
-                // 禁用重连
-                reconnectDisabled = true;
-                addLog('已禁用重连，准备更新团购', 'info');
+            return installUpdate('groupPurchasing', { startup: document.getElementById('main-container').classList.contains('hidden') });
+        }
 
-                // 判断是否在登录界面，使用不同的UI元素
-                const isLoginView = !document.getElementById('main-container') || document.getElementById('main-container').classList.contains('hidden');
+        async function downloadUpdate(_url, options = {}) {
+            const result = await installUpdate('main', options);
+            if (options.startup && !result.success) throw new Error(result.message);
+            return result;
+        }
 
-                let progressBar, progressText;
-
-                if (isLoginView) {
-                    // 登录界面使用登录进度元素
-                    document.getElementById('login-update-progress').style.display = 'block';
-                    progressBar = document.getElementById('login-progress-bar');
-                    progressText = document.getElementById('login-progress-text');
-                    updateStatus = document.getElementById('login-update-status');
-                    progressBar.style.width = '0%';
-                    progressText.textContent = '0%';
-                    updateStatus.textContent = '准备下载...';
-                } else {
-                    // 主界面使用模态框元素
-                    document.getElementById('update-status').style.display = 'block';
-                    document.getElementById('update-status-text').textContent = '准备下载团购更新...';
-                    document.getElementById('download-progress').style.display = 'block';
-                    document.getElementById('update-button').disabled = true;
-                    document.getElementById('update-group-button').disabled = true;
-                    progressBar = document.getElementById('progress-bar');
-                    progressText = document.getElementById('progress-text');
-                    updateStatus = document.getElementById('update-status-text');
-                }
-                
-                // 下载更新包
-                const response = await fetch(window.groupUpdateUrl, {
-                    signal: signal
-                });
-
-                if (!response.ok) {
-                    if (response.status === 503) {
-                        throw new Error('正在上传中，请稍后再试');
-                    }
-                    if (response.status === 409) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || '上传开始，下载已终止');
-                    }
-                    throw new Error(`下载失败, 状态: ${response.status} ${response.statusText}`);
-                }
-                
-                const totalSize = parseInt(response.headers.get('content-length') || 0);
-                if (!response.body || typeof response.body.getReader !== 'function') {
-                    throw new Error('下载响应不支持流式读取');
-                }
-                const reader = response.body.getReader();
-                let receivedSize = 0;
-                const chunks = [];
-                
-                // 下载速度计算
-                let startTime = Date.now();
-                let lastTime = startTime;
-                let lastReceivedSize = 0;
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    chunks.push(value);
-                    receivedSize += value.length;
-
-                    if (totalSize) {
-                        const progress = Math.round((receivedSize / totalSize) * 100);
-                        progressBar.style.width = `${progress}%`;
-                        progressText.textContent = `${progress}%`;
-
-                        // 计算下载速度
-                        const currentTime = Date.now();
-                        const timeElapsed = currentTime - lastTime;
-                        if (timeElapsed > 1000) { // 每秒更新一次
-                            const bytesPerSecond = (receivedSize - lastReceivedSize) / (timeElapsed / 1000);
-                            const speed = formatFileSize(bytesPerSecond);
-                            updateStatus.textContent = `下载中... ${speed}/s`;
-                            lastTime = currentTime;
-                            lastReceivedSize = receivedSize;
-                        }
-                    }
-                }
-                
-                // 合并数据
-                const blob = new Blob(chunks);
-                const arrayBuffer = await blob.arrayBuffer();
-                
-                // 下载完成后断开与服务器的连接
-                if (socket) {
-                    socket.disconnect();
-                    addLog('已断开与服务器的连接，准备更新团购', 'info');
-                }
-                
-                // 保存到临时文件
-                const tempZipPath = path.join(os.tmpdir(), 'ArtifactsGroupPurchasing.zip');
-                fs.writeFileSync(tempZipPath, Buffer.from(arrayBuffer));
-                
-                // 确保目标目录存在
-                if (!fs.existsSync(targetDir)) {
-                    fs.mkdirSync(targetDir, { recursive: true });
-                }
-                
-                // 调用更新脚本
-                let updaterPath = path.join(__dirname, 'updater.ps1');
-                
-                // 检查updater.ps1是否存在，如果不存在，尝试使用应用目录或当前工作目录
-                if (!fs.existsSync(updaterPath)) {
-                    const appDir = window.electronAPI?.getAppPath ? window.electronAPI.getAppPath() : null;
-                    if (appDir) updaterPath = path.join(appDir, 'updater.ps1');
-                }
-
-                if (!fs.existsSync(updaterPath)) {
-                    updaterPath = path.join(process.cwd(), 'updater.ps1');
-                }
-                
-                // 如果仍然不存在，使用与mojang.exe相同的目录
-                if (!fs.existsSync(updaterPath)) {
-                    let currentDir = process.cwd();
-                    if (path.basename(currentDir) !== 'mojang') {
-                        currentDir = path.join(currentDir, 'mojang');
-                    }
-                    updaterPath = path.join(currentDir, 'updater.ps1');
-                }
-                
-                if (!fs.existsSync(updaterPath)) {
-                    throw new Error(`找不到updater.ps1脚本，路径: ${updaterPath}`);
-                }
-                
-                const { execFileSync } = require('child_process');
-
-                updateStatus.textContent = '正在解压更新包...';
-
-                // 执行更新脚本
-                addLog('开始执行更新脚本...', 'info');
-                execFileSync('powershell.exe', [
-                    '-NoProfile', '-NonInteractive',
-                    '-ExecutionPolicy', 'Bypass',
-                    '-File', updaterPath,
-                    tempZipPath, targetDir, 'groupPurchasing', 'false'
-                ], {
-                    stdio: 'inherit'
-                });
-                addLog('更新脚本执行完成', 'info');
-
-                updateStatus.textContent = '更新完成！';
-                addLog('团购更新完成', 'success');
-
-                // 启用重连
-                reconnectDisabled = false;
-                addLog(`已启用重连，reconnectDisabled=${reconnectDisabled}`, 'info');
-
-                // 主动发起重连
-                setTimeout(() => {
-                    addLog('主动发起重连...', 'info');
-                    startConnection();
-                }, 1000);
-
-                // 关闭版本检查窗口
-                closeVersionCheckModal();
-
-                // 更新完成，延迟进入主界面
-                setTimeout(() => {
-                    addLog('准备进入主界面', 'info');
-                    hideUpdateUI();
-                    showMainApp();
-                }, 1000);
-
-                if (currentDownloadController === downloadController) {
-                    currentDownloadController = null;
-                }
-                // 更新完成，立即resolve，重连在后台进行
-                return Promise.resolve();
-
-            } catch (error) {
-                console.error('下载团购更新失败:', error);
-                addLog(`团购更新失败: ${error.message}`, 'error');
-                if (updateStatus) {
-                    updateStatus.textContent = `更新失败: ${error.message}`;
-                }
-
-                // 启用重连
-                reconnectDisabled = false;
-                addLog(`团购更新失败，已启用重连，reconnectDisabled=${reconnectDisabled}`, 'info');
-
-                // 主动发起重连
-                setTimeout(() => {
-                    addLog('主动发起重连...', 'info');
-                    startConnection();
-                }, 1000);
-
-                if (currentDownloadController === downloadController) {
-                    currentDownloadController = null;
-                }
-
-                return Promise.reject(error);
+        async function installUpdate(kind, options) {
+            if (currentDownloadController) {
+                const message = '已有更新任务进行中';
+                addLog(message, 'warning');
+                return { success: false, message };
             }
-        }
-        
-        // 格式化文件大小
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-        
-        // 下载更新
-        async function downloadUpdate(updateUrl, options = {}) {
-            const isStartupUpdate = options.startup === true;
+            const id = crypto.randomUUID();
+            const startup = options.startup === true;
+            const status = document.getElementById(startup ? 'login-update-status' : 'update-status-text');
+            const bar = document.getElementById(startup ? 'login-progress-bar' : 'progress-bar');
+            const label = document.getElementById(startup ? 'login-progress-text' : 'progress-text');
+            if (startup) showUpdateUI();
+            else {
+                document.getElementById('update-status').style.display = 'block';
+                document.getElementById('download-progress').style.display = 'block';
+            }
+            status.textContent = '准备下载更新包…';
+            const api = window.electronAPI;
+            const controller = { cancelled: false, abort() { this.cancelled = true; return api.cancelUpdate(id); } };
+            currentDownloadController = controller;
+            const unsubscribe = api.onUpdateProgress(event => {
+                if (event.id !== id) return;
+                if (event.phase) { status.textContent = event.phase; return; }
+                const pct = event.total ? Math.round(event.bytes * 100 / event.total) : 0;
+                bar.style.width = pct + '%';
+                label.textContent = pct + '%';
+                status.textContent = '已下载 ' + formatFileSize(event.bytes);
+            });
             try {
-                // 终止之前的下载（如果有）
-                if (currentDownloadController) {
-                    currentDownloadController.abort();
-                    currentDownloadController = null;
-                    addLog('已终止之前的下载', 'info');
-                }
-                
-                // 创建新的控制器
-                currentDownloadController = new AbortController();
-                const signal = currentDownloadController.signal;
-                
-                let progressBar;
-                let progressText;
-                let updateStatus;
-                if (isStartupUpdate) {
-                    showUpdateUI();
-                    progressBar = document.getElementById('login-progress-bar');
-                    progressText = document.getElementById('login-progress-text');
-                    updateStatus = document.getElementById('login-update-status');
-                    updateStatus.textContent = '准备下载用户端更新...';
+                await api.installUpdate({ id, kind, folder: kind === 'groupPurchasing' ? groupFolders()[0] : undefined });
+                if (kind === 'main') {
+                    if (startup) { markClientUpdatePending(options.targetVersion); startupClientUpdateTriggered = true; }
+                    reconnectDisabled = true;
+                    window.close();
                 } else {
-                    document.getElementById('update-status').style.display = 'block';
-                    document.getElementById('update-status-text').textContent = '准备下载...';
-                    document.getElementById('download-progress').style.display = 'block';
-                    document.getElementById('update-button').disabled = true;
-                    progressBar = document.getElementById('progress-bar');
-                    progressText = document.getElementById('progress-text');
-                    updateStatus = document.getElementById('update-status-text');
-                }
-                
-                // 下载更新包
-                const response = await fetch(updateUrl, {
-                    signal: signal
-                });
-
-                if (!response.ok) {
-                    if (response.status === 503) {
-                        throw new Error('正在上传中，请稍后再试');
-                    }
-                    if (response.status === 409) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || '上传开始，下载已终止');
-                    }
-                    throw new Error(`下载失败, 状态: ${response.status} ${response.statusText}`);
-                }
-                
-                const totalSize = parseInt(response.headers.get('content-length') || 0);
-                if (!response.body || typeof response.body.getReader !== 'function') {
-                    throw new Error('下载响应不支持流式读取');
-                }
-                const reader = response.body.getReader();
-                let receivedSize = 0;
-                const chunks = [];
-                
-                // 下载速度计算
-                let startTime = Date.now();
-                let lastTime = startTime;
-                let lastReceivedSize = 0;
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    chunks.push(value);
-                    receivedSize += value.length;
-                    
-                    if (totalSize) {
-                        const progress = Math.round((receivedSize / totalSize) * 100);
-                        progressBar.style.width = `${progress}%`;
-                        progressText.textContent = `${progress}%`;
-                        
-                        // 计算下载速度
-                        const currentTime = Date.now();
-                        const timeElapsed = currentTime - lastTime;
-                        if (timeElapsed > 1000) { // 每秒更新一次
-                            const bytesPerSecond = (receivedSize - lastReceivedSize) / (timeElapsed / 1000);
-                            const speed = formatFileSize(bytesPerSecond) + '/s';
-                            const downloaded = formatFileSize(receivedSize);
-                            const total = formatFileSize(totalSize);
-                            
-                            updateStatus.textContent = `下载中... ${progress}% (${downloaded}/${total}, ${speed})`;
-                            
-                            lastTime = currentTime;
-                            lastReceivedSize = receivedSize;
-                        }
-                    }
-                }
-                
-                // 合并二进制数据
-                const blob = new Blob(chunks);
-                
-                updateStatus.textContent = '下载完成，保存文件...';
-                
-                // 直接保存到 mojang 文件夹
-                if (typeof require !== 'undefined') {
-                    try {
-                        const fs = require('fs');
-                        const path = require('path');
-
-                        // 优先使用实际包含更新脚本的目录，避免打包运行时依赖不稳定的 cwd。
-                        const candidates = [];
-                        if (window.electronAPI?.getAppPath) candidates.push(window.electronAPI.getAppPath());
-                        candidates.push(__dirname, process.cwd());
-                        let mojangDir = null;
-                        for (const candidate of candidates) {
-                            if (!candidate) continue;
-                            const options = [candidate, path.join(candidate, 'mojang')];
-                            const match = options.find(item => fs.existsSync(path.join(item, 'updater.ps1')));
-                            if (match) {
-                                mojangDir = match;
-                                break;
-                            }
-                        }
-                        if (!mojangDir) {
-                            mojangDir = path.basename(process.cwd()).toLowerCase() === 'mojang'
-                                ? process.cwd()
-                                : path.join(process.cwd(), 'mojang');
-                        }
-
-                        const updaterPath = path.join(mojangDir, 'updater.ps1');
-                        
-                        // 确定更新包路径
-                        const updateZipPath = path.join(mojangDir, 'mojang.zip');
-                        currentDir = mojangDir;
-                        
-                        // 确保目录存在
-                        if (!fs.existsSync(currentDir)) {
-                            fs.mkdirSync(currentDir, { recursive: true });
-                        }
-                        
-                        // 保存文件
-                        addLog(`保存文件到: ${updateZipPath}`, 'info');
-                        const buffer = Buffer.from(await blob.arrayBuffer());
-                        fs.writeFileSync(updateZipPath, buffer);
-                        addLog('文件保存成功', 'info');
-                        
-                        updateStatus.textContent = '文件保存完成，准备更新...';
-                        
-                        // 给文件系统短暂释放时间，再启动独立更新器。
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-
-                        const updaterReadyPath = `${updateZipPath}.ready`;
-                        try {
-                            if (fs.existsSync(updaterReadyPath)) fs.unlinkSync(updaterReadyPath);
-                        } catch (error) {
-                            throw new Error(`清理更新器就绪标记失败: ${error.message}`);
-                        }
-
-                        addLog(`启动更新器: ${updaterPath}`, 'info');
-                        addLog(`参数: ${updateZipPath} ${currentDir}`, 'info');
-                        updateStatus.textContent = '正在校验更新包...';
-
-                        // 只有脚本完成参数、目录和压缩包校验并写入标记后，才允许当前应用退出。
-                        const { spawn } = require('child_process');
-                        await new Promise((resolve, reject) => {
-                            const updaterProcess = spawn('cmd.exe', [
-                                '/d', '/s', '/c', 'powershell.exe',
-                                '-NoProfile', '-NonInteractive',
-                                '-ExecutionPolicy', 'Bypass',
-                                '-File', updaterPath,
-                                updateZipPath, currentDir, 'main', 'true'
-                            ], {
-                                detached: true,
-                                stdio: 'ignore',
-                                windowsHide: true
-                            });
-                            let settled = false;
-                            let readyPollId = null;
-                            let readyTimeoutId = null;
-
-                            const clearWaiters = () => {
-                                if (readyPollId) clearInterval(readyPollId);
-                                if (readyTimeoutId) clearTimeout(readyTimeoutId);
-                                readyPollId = null;
-                                readyTimeoutId = null;
-                            };
-                            const fail = (error) => {
-                                if (settled) return;
-                                settled = true;
-                                clearWaiters();
-                                try {
-                                    if (fs.existsSync(updaterReadyPath)) fs.unlinkSync(updaterReadyPath);
-                                } catch (cleanupError) {
-                                    addLog(`清理更新器就绪标记失败: ${cleanupError.message}`, 'warning');
-                                }
-                                try {
-                                    if (!updaterProcess.killed) updaterProcess.kill();
-                                } catch (killError) {
-                                    addLog(`终止无响应更新器失败: ${killError.message}`, 'warning');
-                                }
-                                reject(error);
-                            };
-                            const handleError = error => fail(new Error(`更新器进程启动失败: ${error.message}`));
-                            const handleExit = code => fail(new Error(`更新器未完成校验便已退出（退出码 ${code ?? '未知'}）`));
-
-                            updaterProcess.once('error', handleError);
-                            updaterProcess.once('exit', handleExit);
-                            updaterProcess.once('spawn', () => {
-                                readyPollId = setInterval(() => {
-                                    if (settled || !fs.existsSync(updaterReadyPath)) return;
-                                    settled = true;
-                                    clearWaiters();
-                                    updaterProcess.removeListener('error', handleError);
-                                    updaterProcess.removeListener('exit', handleExit);
-                                    updaterProcess.unref();
-                                    resolve();
-                                }, 100);
-                                readyTimeoutId = setTimeout(() => {
-                                    fail(new Error('更新器校验超时，已取消本次自动更新'));
-                                }, 8000);
-                            });
-                        });
-
-                        if (isStartupUpdate) {
-                            markClientUpdatePending(options.targetVersion);
-                            startupClientUpdateTriggered = true;
-                        }
-
-                        reconnectDisabled = true;
-                        addLog('更新器校验通过，已禁用重连', 'info');
-                        if (socket && socket.connected) {
-                            addLog('断开socket连接...', 'info');
-                            socket.disconnect();
-                            addLog('socket连接已断开', 'info');
-                        }
-
-                        updateStatus.textContent = '更新器已就绪，正在关闭应用...';
-                        setTimeout(() => {
-                            addLog('关闭当前应用...', 'info');
-                            if (typeof window !== 'undefined' && window.close) {
-                                window.close();
-                            } else if (typeof process !== 'undefined' && process.exit) {
-                                process.exit(0);
-                            } else if (typeof require !== 'undefined') {
-                                try {
-                                    const electron = require('electron');
-                                    if (electron.app) electron.app.quit();
-                                } catch (error) {
-                                    addLog(`关闭应用失败: ${error.message}`, 'error');
-                                }
-                            }
-                        }, 250);
-                    } catch (error) {
-                        if (isStartupUpdate) {
-                            throw error;
-                        }
-                        addLog(`保存文件失败: ${error.message}`, 'error');
-                        // 回退到浏览器下载
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'mojang.zip';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        
-                        alert('自动保存失败，已启动浏览器下载，请手动将文件保存到 mojang 文件夹并运行 updater.ps1 文件。');
+                    status.textContent = '团购更新完成';
+                    addLog(status.textContent, 'success');
+                    if (!startup) {
+                        currentDownloadController = null;
                         closeVersionCheckModal();
                     }
-                } else {
-                    if (isStartupUpdate) {
-                        throw new Error('当前环境不支持启动自动更新');
-                    }
-                    // 其他环境，使用浏览器下载
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'mojang.zip';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    
-                    alert('更新包已下载，请手动将文件保存到 mojang 文件夹并运行 updater.ps1 文件。');
-                    closeVersionCheckModal();
                 }
-
-                // 下载完成后释放控制器，避免后续检查误判为仍有下载任务。
-                currentDownloadController = null;
-                
+                return { success: true };
             } catch (error) {
-                // 清理下载控制器
-                currentDownloadController = null;
-                
-                addLog(`更新失败: ${error.message}`, 'error');
-                if (isStartupUpdate) {
-                    reconnectDisabled = false;
-                    updateUpdateStatus(`用户端更新失败：${error.message}`);
-                    throw error;
+                const cancelled = controller.cancelled;
+                status.textContent = cancelled ? '已取消更新' : '更新失败：' + error.message;
+                addLog(status.textContent, 'error');
+                if (kind === 'main' && !startup && !cancelled) {
+                    const manual = document.createElement('a');
+                    manual.href = SERVER_URL + '/client/mojang.zip';
+                    manual.download = 'mojang.zip';
+                    manual.textContent = '手动下载更新包';
+                    status.append(' ', manual);
                 }
-                document.getElementById('update-status-text').textContent = '更新失败';
-                document.getElementById('update-button').textContent = '检查更新';
-                document.getElementById('update-button').disabled = false;
+                return { success: false, cancelled, message: status.textContent };
+            } finally {
+                unsubscribe();
+                if (currentDownloadController === controller) currentDownloadController = null;
             }
         }
-        
+
         // 格式化文件大小
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 B';

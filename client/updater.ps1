@@ -9,7 +9,10 @@ param(
     [string]$UpdateType = 'main',
     [Parameter(Position = 3)]
     [ValidateSet('true', 'false')]
-    [string]$CloseMojang = 'false'
+    [string]$CloseMojang = 'false',
+    [Parameter(Position = 4)]
+    [ValidateSet('standalone', 'handshake')]
+    [string]$Coordination = 'standalone'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,10 +93,56 @@ function Assert-ZipEntriesSafe {
     }
 }
 
+function Get-ChildPath {
+    param([string]$Root, [string]$Relative)
+    $base = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    if ([IO.Path]::IsPathRooted($Relative) -or $Relative.Contains(':')) { throw "Invalid member path: $Relative" }
+    $full = [IO.Path]::GetFullPath([IO.Path]::Combine($base, $Relative))
+    if (-not $full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { throw "Path outside target: $Relative" }
+    $cursor = $full
+    while ($cursor.Length -ge $base.Length) {
+        if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to update through a link: $cursor"
+        }
+        $cursor = [IO.Path]::GetDirectoryName($cursor)
+    }
+    return $full
+}
+
+function Install-Member {
+    param([string]$Relative, [bool]$RemoveOnly = $false)
+    $dest = Get-ChildPath $script:TargetDir $Relative
+    $old = Get-ChildPath $backup $Relative
+    if (Test-Path -LiteralPath $dest -PathType Container) { throw "File conflicts with a directory: $dest" }
+    if (Test-Path -LiteralPath $dest -PathType Leaf) {
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($old))
+        [IO.File]::Move($dest, $old)
+    }
+    $changes.Add($Relative)
+    if (-not $RemoveOnly) {
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dest))
+        [IO.File]::Move((Get-ChildPath $stage $Relative), $dest)
+    }
+}
+
+function Test-UserFile {
+    param([string]$Relative)
+    if ($Relative -match '^(records|targets)\\') { return $true }
+    if ($runtimeNames -contains $Relative) { return $true }
+    foreach ($pattern in $savedPatterns) {
+        if ($Relative -like $pattern.Replace('/', '\')) { return $true }
+    }
+    return $false
+}
+
+$changes = New-Object 'System.Collections.Generic.List[string]'
+$work = $null
+$rollbackFailed = $false
+$lock = $null
 $exitCode = 1
 try {
     $script:UpdateZipPath = [System.IO.Path]::GetFullPath($UpdateZipPath)
-    $script:TargetDir = [System.IO.Path]::GetFullPath($TargetDir)
+    $script:TargetDir = [System.IO.Path]::GetFullPath($TargetDir).TrimEnd('\')
     $script:ReadyMarkerPath = "$script:UpdateZipPath.ready"
     Remove-ReadyMarker
 
@@ -113,28 +162,67 @@ try {
     Write-UpdateLog "Close client process: $shouldCloseMojang"
 
     Assert-ZipEntriesSafe
+    $lockPath = Get-ChildPath $script:TargetDir '.mojang-update.lock'
+    $lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
+    $work = Get-ChildPath $script:TargetDir ('.mojang-update-' + [Guid]::NewGuid().ToString('N'))
+    $stage = Get-ChildPath $work 'stage'
+    $backup = Get-ChildPath $work 'backup'
+    [void][IO.Directory]::CreateDirectory($stage)
+    Expand-Archive -LiteralPath $script:UpdateZipPath -DestinationPath $stage -ErrorAction Stop
+    $savedPatterns = @()
+    $runtimeNames = @('command.json', (([string][char]0x5339 + [char]0x914d + [char]0x4fe1 + [char]0x606f) + '.json'),
+        (([string][char]0x8fd0 + [char]0x884c + [char]0x7ed3 + [char]0x679c) + '.txt'))
+    if ($UpdateType -eq 'groupPurchasing') {
+        $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Get-ChildPath $stage 'manifest.json') | ConvertFrom-Json
+        if (-not $manifest.main -or -not (Test-Path -LiteralPath (Get-ChildPath $stage $manifest.main) -PathType Leaf) -or
+            -not (Test-Path -LiteralPath (Get-ChildPath $stage 'assets') -PathType Container)) { throw 'Incomplete group purchasing package.' }
+        $savedPatterns = @($manifest.saved_files | Where-Object { $_ -is [string] })
+        $oldManifest = Get-ChildPath $script:TargetDir 'manifest.json'
+        if (Test-Path -LiteralPath $oldManifest -PathType Leaf) {
+            $previous = Get-Content -Raw -Encoding UTF8 -LiteralPath $oldManifest | ConvertFrom-Json
+            $savedPatterns += @($previous.saved_files | Where-Object { $_ -is [string] })
+        }
+        $savedPatterns += 'assets\targetItems\' + [char]0x4fdd + [char]0x7559 + '\*'
+    } elseif (-not (Test-Path -LiteralPath (Get-ChildPath $stage 'resources\app.asar') -PathType Leaf)) {
+        throw 'Incomplete client package.'
+    }
     Write-UpdateLog 'Update archive validation passed.'
 
     # Signal only after all checks that must complete before the application exits.
     Set-Content -LiteralPath $script:ReadyMarkerPath -Value 'ready' -Encoding ASCII -Force
     Write-UpdateLog 'Updater ready marker created.'
+    if ($Coordination -eq 'handshake') {
+        $deadline = [DateTime]::UtcNow.AddMinutes(1)
+        while (-not (Test-Path -LiteralPath "$script:UpdateZipPath.commit" -PathType Leaf)) {
+            if ((Test-Path -LiteralPath "$script:UpdateZipPath.cancel") -or [DateTime]::UtcNow -ge $deadline) {
+                throw 'Update cancelled before installation.'
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
 
     if ($shouldCloseMojang) {
         Start-Sleep -Seconds 2
         Stop-TargetMojangProcesses
     }
 
-    if ($UpdateType -eq 'groupPurchasing') {
-        $assetsPath = Join-Path $script:TargetDir 'assets'
-        if (Test-Path -LiteralPath $assetsPath) {
-            Write-UpdateLog "Removing old assets directory: $assetsPath"
-            Remove-Item -LiteralPath $assetsPath -Recurse -Force -ErrorAction Stop
+    $files = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Force)
+    foreach ($file in $files) {
+        $relative = $file.FullName.Substring($stage.Length + 1)
+        if ($relative -like '.mojang-update*' -or (Get-ChildPath $script:TargetDir $relative) -ieq $script:UpdateZipPath) { throw "Reserved update path: $relative" }
+        if ($UpdateType -eq 'groupPurchasing' -and (Test-UserFile $relative) -and
+            (Test-Path -LiteralPath (Get-ChildPath $script:TargetDir $relative))) { continue }
+        Install-Member $relative
+    }
+    $assets = Get-ChildPath $script:TargetDir 'assets'
+    if ($UpdateType -eq 'groupPurchasing' -and (Test-Path -LiteralPath $assets -PathType Container)) {
+        $published = @{}
+        foreach ($file in $files) { $published[$file.FullName.Substring($stage.Length + 1)] = $true }
+        foreach ($file in @(Get-ChildItem -LiteralPath $assets -Recurse -File -Force)) {
+            $relative = $file.FullName.Substring($script:TargetDir.Length + 1)
+            if (-not $published.ContainsKey($relative) -and -not (Test-UserFile $relative)) { Install-Member $relative $true }
         }
     }
-
-    Write-UpdateLog 'Extracting update archive.'
-    Expand-Archive -LiteralPath $script:UpdateZipPath -DestinationPath $script:TargetDir -Force -ErrorAction Stop
-    Write-UpdateLog 'Update archive extracted.'
 
     if ($UpdateType -eq 'main') {
         $mojangExePath = Join-Path $script:TargetDir 'mojang.exe'
@@ -160,8 +248,40 @@ try {
     $exitCode = 0
 } catch {
     Write-UpdateLog "Update failed: $($_.Exception.Message)"
+    for ($i = $changes.Count - 1; $i -ge 0; $i--) {
+        try {
+            $relative = $changes[$i]
+            $dest = Get-ChildPath $script:TargetDir $relative
+            $old = Get-ChildPath $backup $relative
+            if (Test-Path -LiteralPath $dest -PathType Leaf) { [IO.File]::Delete($dest) }
+            if (Test-Path -LiteralPath $old -PathType Leaf) { [IO.File]::Move($old, $dest) }
+        } catch {
+            $rollbackFailed = $true
+            Write-UpdateLog "Recovery failed; retained backup in ${backup}: $($_.Exception.Message)"
+        }
+    }
 } finally {
+    if ($work -and -not $rollbackFailed -and (Test-Path -LiteralPath $work -PathType Container)) {
+        try {
+            $verified = Get-ChildPath $script:TargetDir ([IO.Path]::GetFileName($work))
+            if ($verified -ieq $work -and [IO.Path]::GetFileName($work) -match '^\.mojang-update-[a-f0-9]{32}$') {
+                Remove-Item -LiteralPath $verified -Recurse -Force
+            }
+        } catch { Write-UpdateLog "Temporary files retained: $work" }
+    }
+    if ($lock) { $lock.Dispose() }
     Remove-ReadyMarker
+    if ($Coordination -eq 'handshake' -and $exitCode -eq 0) {
+        foreach ($suffix in @('.commit', '.cancel')) {
+            $marker = "$script:UpdateZipPath$suffix"
+            if (Test-Path -LiteralPath $marker -PathType Leaf) { Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue }
+        }
+        $parent = [IO.Path]::GetDirectoryName($script:UpdateZipPath)
+        if ([IO.Path]::GetFileName($parent) -match '^mojang-update-[a-zA-Z0-9]+$' -and
+            [IO.Path]::GetDirectoryName($parent) -ieq [IO.Path]::GetTempPath().TrimEnd('\')) {
+            try { [IO.Directory]::Delete($parent, $false) } catch {}
+        }
+    }
 }
 
 exit $exitCode

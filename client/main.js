@@ -2,7 +2,9 @@ const { app, BrowserWindow, ipcMain, dialog, screen, desktopCapturer, shell } = 
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { exec, execSync, spawn, kill } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
+const { pipeline } = require('stream/promises');
+const os = require('os');
 
 // Electron 27 在部分 Windows 环境中会反复崩溃 GPU 进程，软件渲染进程也无法通过 GPU 沙箱启动。
 app.commandLine.appendSwitch('disable-gpu-sandbox');
@@ -167,12 +169,16 @@ function createWindow() {
     minHeight: 600,
     webPreferences: {
       preload: path.join(app.getAppPath(), 'preload.js'),
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
     }
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', event => event.preventDefault());
+  loadDesktopPermissions();
+  mainWindow.loadFile(path.join(app.getAppPath(), 'index.html'));
 
   mainWindow.on('closed', function () {
     mainWindow = null;
@@ -206,27 +212,76 @@ ipcMain.on('get-app-data-path', (event) => {
   event.returnValue = appDataPath;
 });
 
-// 获取应用程序路径（exe所在的目录）
-ipcMain.on('get-app-path', (event) => {
-  let appPath = '';
-  try {
-    appPath = app.getPath('exe');
-    appPath = path.dirname(appPath);
-  } catch (e) {
-    try {
-      appPath = path.dirname(process.execPath);
-    } catch (e) {
-      appPath = app.getAppPath();
-      if (app.isPackaged) {
-        appPath = path.resolve(appPath, '..');
-        if (appPath.endsWith('resources')) {
-          appPath = path.resolve(appPath, '..');
-        }
-      }
+const clientFolder = path.dirname(app.getPath('exe'));
+const configPath = path.join(clientFolder, 'config.json');
+const selectedFolders = new Set();
+const selectedFiles = new Set();
+const typedExecutables = new Set();
+ipcMain.on('typed-schedule-executable', (_event, file) => {
+  if (validPath(file)) typedExecutables.add(key(file));
+});
+let desktopConfig = {};
+
+function key(file) { return path.resolve(file).toLowerCase(); }
+function validPath(file) { return typeof file === 'string' && path.isAbsolute(file); }
+function loadDesktopPermissions() {
+  try { desktopConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (_) { return; }
+  if (validPath(desktopConfig.bgiFolder)) selectedFolders.add(key(desktopConfig.bgiFolder));
+  for (const schedule of desktopConfig.schedules || []) {
+    const folder = schedule.action?.config?.jsFolder;
+    if (validPath(folder)) selectedFolders.add(key(folder));
+    for (const file of [schedule.trigger?.config?.filePath, schedule.action?.config?.filePath]) {
+      if (validPath(file)) selectedFiles.add(key(file));
     }
   }
-  event.returnValue = appPath;
-});
+}
+
+function groupDirectories() {
+  const folders = (desktopConfig.schedules || []).filter(s => s.trigger?.type === 'trigger-ride')
+    .map(s => s.action?.config?.jsFolder).filter(validPath);
+  if (validPath(desktopConfig.bgiFolder)) folders.push(path.join(desktopConfig.bgiFolder, 'User', 'JsScript', 'ArtifactsGroupPurchasing'));
+  return folders;
+}
+
+function isDefaultGroup(folder, bgi) {
+  return validPath(folder) && validPath(bgi) && key(folder) === key(path.join(bgi, 'User', 'JsScript', 'ArtifactsGroupPurchasing'));
+}
+
+function isScriptCommand(file, bgi) {
+  return validPath(bgi) && ['AutoMojang', 'AAA-Artifacts-Bulk-Supply', 'ArtifactsGroupPurchasing']
+    .some(script => key(file) === key(path.join(bgi, 'User', 'JsScript', script, 'command.json')));
+}
+
+function validateDesktopConfig(config) {
+  const bgi = config.bgiFolder;
+  if (bgi && (!validPath(bgi) || !selectedFolders.has(key(bgi)))) throw new Error('请在本机选择 BetterGI 文件夹');
+  for (const schedule of config.schedules || []) {
+    const folder = schedule.action?.config?.jsFolder;
+    if (validPath(folder) && !selectedFolders.has(key(folder)) && !isDefaultGroup(folder, bgi)) throw new Error('未选择联机脚本目录');
+    for (const file of [schedule.trigger?.config?.filePath, schedule.action?.config?.filePath]) {
+      if (validPath(file) && !selectedFiles.has(key(file)) && !(schedule.action?.config?.filePath === file && typedExecutables.has(key(file))) && !isScriptCommand(file, bgi)) throw new Error('未选择调度文件');
+    }
+  }
+}
+
+function desktopFile(file, writing) {
+  if (typeof file !== 'string' || !file) throw new Error('文件路径无效');
+  const absolute = path.resolve(file);
+  if (key(absolute) === key(configPath) || selectedFiles.has(key(absolute)) || isScriptCommand(absolute, desktopConfig.bgiFolder)) return absolute;
+  const template = /^(?:modelUser|modelUserLcb)[\\/](OneDragon|ScriptGroup)[\\/]([^\\/:]+\.json)$/i.exec(file);
+  if (template && !writing) {
+    const roots = [clientFolder, app.getAppPath()];
+    return roots.map(root => path.join(root, file)).find(p => fs.existsSync(p)) || path.join(clientFolder, file);
+  }
+  if (validPath(desktopConfig.bgiFolder)) {
+    const relative = path.relative(path.join(desktopConfig.bgiFolder, 'User'), absolute);
+    if (/^(OneDragon|ScriptGroup)[\\/][^\\/:]+\.json$/i.test(relative)) return absolute;
+  }
+  if (groupDirectories().some(dir => key(absolute) === key(path.join(dir, writing ? '匹配信息.json' : 'manifest.json')))) return absolute;
+  throw new Error('文件不属于本机配置');
+}
+
+ipcMain.on('get-app-path', event => { event.returnValue = clientFolder; });
 
 ipcMain.handle('capture-desktop', async (_event, options = {}) => {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('主窗口不可用');
@@ -251,6 +306,7 @@ ipcMain.handle('capture-desktop', async (_event, options = {}) => {
 
 ipcMain.handle('list-log-files', async (_event, { kind = 'client', bgiFolder = '' } = {}) => {
   if (kind === 'bgi' && !bgiFolder) return [];
+  if (kind === 'bgi' && key(bgiFolder) !== key(desktopConfig.bgiFolder || '.')) throw new Error('未选择 BetterGI 目录');
   const root = kind === 'bgi' ? path.join(String(bgiFolder || ''), 'log') : getClientLogDirectory();
   if (!root || !fs.existsSync(root)) return [];
   const files = [];
@@ -279,6 +335,7 @@ ipcMain.handle('list-log-files', async (_event, { kind = 'client', bgiFolder = '
 
 ipcMain.handle('read-log-tail', async (_event, { kind = 'client', bgiFolder = '', filePath, bytes = 64 } = {}) => {
   if (kind === 'bgi' && !bgiFolder) throw new Error('未配置BetterGI文件夹');
+  if (kind === 'bgi' && key(bgiFolder) !== key(desktopConfig.bgiFolder || '.')) throw new Error('未选择 BetterGI 目录');
   const root = kind === 'bgi' ? path.join(String(bgiFolder || ''), 'log') : getClientLogDirectory();
   const resolved = path.resolve(root, String(filePath || ''));
   if (!isWithinRoot(resolved, root) || !fs.existsSync(resolved)) throw new Error('日志文件不存在');
@@ -347,6 +404,7 @@ ipcMain.handle('run-remote-executable', async (_event, { id } = {}) => {
 });
 
 ipcMain.handle('execute-remote-command', async (_event, { command, cwd } = {}) => {
+  if (desktopConfig.allowRemoteCmd !== true) throw new Error('本机未允许远程命令');
   return executeRemoteCommand(command, cwd);
 });
 
@@ -355,184 +413,86 @@ ipcMain.handle('reset-remote-command-session', async () => {
   return true;
 });
 
-// 文件操作
-ipcMain.on('read-file', (event, filePath) => {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    event.reply('file-content', content);
-  } catch (error) {
-    event.reply('file-error', error.message);
+// 本机选定的调度与 BetterGI 文件。
+ipcMain.handle('read-file', (_event, file) => fs.readFileSync(desktopFile(file, false), 'utf8'));
+ipcMain.handle('write-file', (_event, { filePath, content }) => {
+  const file = desktopFile(filePath, true);
+  let next;
+  if (key(file) === key(configPath)) {
+    next = JSON.parse(content);
+    validateDesktopConfig(next);
   }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content, 'utf8');
+  if (next) desktopConfig = next;
+  return true;
 });
 
-ipcMain.on('delete-file', (event, filePath) => {
-  try {
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-    event.reply('delete-success', true);
-  } catch (error) {
-    event.reply('delete-error', error.message);
-  }
+function commandSnapshot(filePath) {
+  const file = desktopFile(filePath, true);
+  const content = fs.readFileSync(file, 'utf8');
+  if (!content.trim() || content.trim() === '{}') return null;
+  const modified = fs.statSync(file).mtimeMs;
+  const id = crypto.createHash('sha256').update(key(file)).update(String(modified)).update(content).digest('hex');
+  return { id, modified, content };
+}
+
+ipcMain.handle('read-command', (_event, file) => commandSnapshot(file));
+ipcMain.handle('consume-command', (_event, { file, id }) => {
+  if (commandSnapshot(file)?.id !== id) return false;
+  fs.writeFileSync(desktopFile(file, true), '{}', 'utf8');
+  return true;
 });
 
-// 进程操作
-ipcMain.on('start-process', (event, { command, args, cwd }) => {
-  try {
-    const child = spawn(command, args || [], {
-      cwd: cwd || process.cwd(),
-      detached: true,
-      stdio: 'ignore'
+ipcMain.handle('start-dragon', (_event, { name, folder }) => {
+  if (!name || !validPath(folder) || key(folder) !== key(desktopConfig.bgiFolder || '.')) throw new Error('BetterGI 配置无效');
+  return new Promise((resolve, reject) => {
+    const child = spawn(path.join(folder, 'BetterGI.exe'), ['startOneDragon', name], {
+      cwd: folder, detached: true, stdio: 'ignore', windowsHide: true
     });
-    child.unref();
-    event.reply('process-started', child.pid);
-  } catch (error) {
-    event.reply('process-error', error.message);
-  }
-});
-
-ipcMain.on('kill-process', (event, pid) => {
-  try {
-    process.kill(pid);
-    event.reply('process-killed', true);
-  } catch (error) {
-    event.reply('process-error', error.message);
-  }
-});
-
-// 命令执行
-ipcMain.on('execute-command', (event, { command, cwd }) => {
-  try {
-    // 使用exec异步执行命令，避免阻塞主线程
-    exec(command, {
-      cwd: cwd || process.cwd(),
-      encoding: 'utf8'
-    }, (error, stdout, stderr) => {
-      if (error) {
-        event.reply('command-error', error.message);
-      } else {
-        event.reply('command-result', stdout);
-      }
-    });
-  } catch (error) {
-    event.reply('command-error', error.message);
-  }
-});
-
-// 选择文件夹
-ipcMain.on('select-folder', (event) => {
-  dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory']
-  }).then(result => {
-    if (!result.canceled && result.filePaths.length > 0) {
-      event.reply('folder-selected', result.filePaths[0]);
-    } else {
-      event.reply('folder-selected', null);
-    }
-  }).catch(error => {
-    event.reply('folder-error', error.message);
+    child.once('error', reject);
+    child.once('spawn', () => { child.unref(); resolve(child.pid); });
   });
 });
 
-// 选择文件
-ipcMain.on('select-file', (event) => {
-  dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile']
-  }).then(result => {
-    if (!result.canceled && result.filePaths.length > 0) {
-      event.reply('file-selected', result.filePaths[0]);
-    } else {
-      event.reply('file-selected', null);
-    }
-  }).catch(error => {
-    event.reply('file-error', error.message);
+for (const [channel, type, allowed] of [
+  ['select-folder', 'openDirectory', selectedFolders], ['select-file', 'openFile', selectedFiles]
+]) {
+  ipcMain.handle(channel, async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { properties: [type] });
+    const file = result.filePaths[0];
+    if (result.canceled || !file) return null;
+    allowed.add(key(file));
+    return file;
   });
-});
-
-// 检查进程状态
-ipcMain.on('check-process', (event, processName) => {
-  try {
-    const username = process.env.USERNAME;
-    const cmd = execSync(`tasklist /FI "IMAGENAME eq ${processName}" /FI "USERNAME eq ${username}"`, { encoding: 'utf8' });
-    const isRunning = cmd.includes(processName);
-    event.reply('process-status', isRunning);
-  } catch (error) {
-    event.reply('process-status', false);
-  }
-});
+}
 
 // 执行文件
-ipcMain.on('execute-file', (event, filePath) => {
-  try {
-    // 检查文件是否存在
-    if (!fs.existsSync(filePath)) {
-      console.error('文件不存在:', filePath);
-      event.reply('execute-file-result', false);
-      return;
-    }
-    
-    console.log('执行文件:', filePath);
-    
-    // 使用spawn执行文件
-    const { spawn } = require('child_process');
-    
-    // 根据文件类型选择执行方式
-    const ext = path.extname(filePath).toLowerCase();
-    let command, args;
-    
-    if (ext === '.bat' || ext === '.cmd') {
-      // 批处理文件
-      command = 'cmd.exe';
-      args = ['/c', filePath];
-    } else if (ext === '.ps1') {
-      // PowerShell脚本
-      command = 'powershell.exe';
-      args = ['-ExecutionPolicy', 'Bypass', '-File', filePath];
-    } else {
-      // 其他文件（如.exe）直接执行
-      command = filePath;
-      args = [];
-    }
-    
-    console.log('执行命令:', command, args);
-    
-    // 执行文件
-    const process = spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true
-    });
-    
-    process.on('error', (error) => {
-      console.error('执行文件失败:', error);
-      event.reply('execute-file-result', false);
-    });
-    
-    process.on('exit', (code) => {
-      console.log('文件执行完成，退出码:', code);
-      event.reply('execute-file-result', code === 0);
-    });
-    
-    process.unref();
-  } catch (error) {
-    console.error('执行文件失败:', error);
-    event.reply('execute-file-result', false);
-  }
+ipcMain.handle('execute-file', (_event, file) => {
+  if (!validPath(file) || !(selectedFiles.has(key(file)) || typedExecutables.has(key(file)))) throw new Error('未选择执行文件');
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.lnk') return shell.openPath(file).then(error => !error);
+  const script = ext === '.ps1', batch = ext === '.cmd' || ext === '.bat';
+  const command = script ? 'powershell.exe' : batch ? 'cmd.exe' : file;
+  const args = script ? ['-ExecutionPolicy', 'Bypass', '-File', file] : batch ? ['/d', '/s', '/c', '"' + file + '"'] : [];
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.once('error', reject);
+    child.once('exit', code => resolve(code === 0));
+    child.unref();
+  });
 });
 
 // 关闭进程
-ipcMain.on('close-process', (event, processName) => {
-  try {
-    const username = process.env.USERNAME;
-    execSync(`taskkill /F /IM ${processName} /FI "USERNAME eq ${username}"`, { stdio: 'ignore' });
-    event.reply('process-closed', true);
-  } catch (error) {
-    event.reply('process-closed', true); // 即使失败也视为已关闭
-  }
+ipcMain.handle('close-process', (_event, processName) => {
+  if (!['BetterGI.exe', 'YuanShen.exe'].includes(processName)) throw new Error('进程名无效');
+  try { execFileSync('taskkill', ['/F', '/IM', processName, '/FI', 'USERNAME eq ' + process.env.USERNAME], { stdio: 'ignore', windowsHide: true }); }
+  catch (error) { if (error.status !== 128) throw error; }
+  return true;
 });
 
 // 日志功能
-ipcMain.on('write-log', (event, { level, message }) => {
+ipcMain.handle('write-log', (_event, { level, message }) => {
   try {
     // 创建log文件夹
     const logDir = getClientLogDirectory();
@@ -551,92 +511,30 @@ ipcMain.on('write-log', (event, { level, message }) => {
     // 写入日志文件
     fs.appendFileSync(logFilePath, logContent, 'utf8');
     
-    event.reply('log-success', true);
+    return true;
   } catch (error) {
     console.error('写入日志失败:', error);
-    event.reply('log-error', error.message);
+    throw error;
   }
 });
 
-// 写入文件
-ipcMain.on('write-file', (event, { filePath, content, requestId }) => {
-  try {
-    // 确保文件所在目录存在
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    
-    // 写入文件
-    fs.writeFileSync(filePath, content, 'utf8');
-    
-    if (requestId) {
-      event.reply(`write-file-success-${requestId}`, true);
-    } else {
-      event.reply('write-file-success', true);
-    }
-  } catch (error) {
-    console.error('写入文件失败:', error);
-    if (requestId) {
-      event.reply(`write-file-error-${requestId}`, error.message);
-    } else {
-      event.reply('write-file-error', error.message);
-    }
-  }
-});
+function memberImagePath(filePath) {
+  const dir = path.join(clientFolder, 'namePng');
+  if (!validPath(filePath) || key(path.dirname(filePath)) !== key(dir) || !/\.png$/i.test(filePath)) throw new Error('无效的队员图片路径');
+  return filePath;
+}
 
-// 获取文件内容
-ipcMain.on('get-file-content', (event, { filePath }) => {
-  try {
-    if (fs.existsSync(filePath)) {
-      const content = fs.readFileSync(filePath, 'utf8');
-      event.reply('file-content-result', { filePath, content, success: true });
-    } else {
-      event.reply('file-content-result', { filePath, content: '', success: false, error: '文件不存在' });
-    }
-  } catch (error) {
-    event.reply('file-content-result', { filePath, content: '', success: false, error: error.message });
-  }
-});
-
-// 读取图片文件（二进制）
-ipcMain.on('read-image-file', (event, { filePath }) => {
-  try {
-    if (fs.existsSync(filePath)) {
-      const stats = fs.statSync(filePath);
-      const fileSize = stats.size;
-      
-      // 检查文件大小是否超过100KB
-      const maxSize = 100 * 1024; // 100KB
-      if (fileSize > maxSize) {
-        event.reply('image-file-result', { success: false, error: '文件大小超过100KB限制' });
-        return;
-      }
-      
-      // 读取文件内容为base64
-      const content = fs.readFileSync(filePath);
-      const sha256 = crypto.createHash('sha256').update(content).digest('hex');
-      const base64 = content.toString('base64');
-      
-      event.reply('image-file-result', { 
-        success: true, 
-        filePath, 
-        base64, 
-        fileName: path.basename(filePath),
-        fileSize,
-        sha256
-      });
-    } else {
-      event.reply('image-file-result', { success: false, error: '文件不存在' });
-    }
-  } catch (error) {
-    event.reply('image-file-result', { success: false, error: error.message });
-  }
+ipcMain.handle('read-image-file', (_event, filePath) => {
+  const file = memberImagePath(filePath);
+  if (fs.statSync(file).size > 100 * 1024) throw new Error('文件大小超过100KB限制');
+  const data = fs.readFileSync(file);
+  return { success: true, fileName: path.basename(file), base64: data.toString('base64'), sha256: crypto.createHash('sha256').update(data).digest('hex') };
 });
 
 // 读取图片元数据（仅返回文件名、大小和 SHA-256，不读取正文）
 ipcMain.handle('read-image-metadata', async (_event, filePath) => {
   try {
+    memberImagePath(filePath);
     const stats = await fs.promises.stat(filePath);
     if (!stats.isFile()) throw new Error('路径不是文件');
     const hash = crypto.createHash('sha256');
@@ -661,6 +559,7 @@ ipcMain.handle('read-image-metadata', async (_event, filePath) => {
 // 扫描目录中的 PNG 图片并返回元数据清单
 ipcMain.handle('list-image-metadata', async (_event, directoryPath) => {
   try {
+    if (!groupDirectories().some(dir => key(directoryPath) === key(path.join(dir, 'targets')))) throw new Error('未选择联机脚本目录');
     const entries = await fs.promises.readdir(directoryPath, { withFileTypes: true });
     const files = entries
       .filter(entry => entry.isFile() && /\.png$/i.test(entry.name))
@@ -689,27 +588,100 @@ ipcMain.handle('list-image-metadata', async (_event, directoryPath) => {
 });
 
 // 保存图片文件（二进制）
-ipcMain.on('save-image-file', (event, { filePath, base64 }) => {
+ipcMain.handle('save-image-file', async (_event, { filePath, base64 }) => {
+  const dir = path.dirname(filePath);
+  if (!groupDirectories().some(folder => key(dir) === key(path.join(folder, 'targets'))) ||
+      !/^[^<>:"/\\|?*\u0000-\u001f]+\.png$/i.test(path.basename(filePath))) throw new Error('无效的队员图片路径');
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length > 100 * 1024 || !bytes.length) throw new Error('图片大小无效');
+  await fs.promises.mkdir(dir, { recursive: true });
+  await fs.promises.writeFile(filePath, bytes);
+  return true;
+});
+
+// 只接受两种固定发布包。下载、校验和启动更新器均由主进程完成。
+const releaseOrigin = 'http://121.41.2.163:41013';
+let activeUpdate = null;
+
+ipcMain.handle('cancel-update', (_event, id) => {
+  if (activeUpdate?.id === id && !activeUpdate.committed) activeUpdate.controller.abort();
+});
+
+ipcMain.handle('install-update', async (event, { id, kind, folder }) => {
+  const isMain = kind === 'main';
+  if (activeUpdate || (!isMain && kind !== 'groupPurchasing')) throw new Error('无法开始此更新');
+  if (!isMain && (!validPath(folder) || !groupDirectories().some(dir => key(dir) === key(folder)))) throw new Error('未配置团购目录');
+  const localDirs = app.isPackaged ? [clientFolder] : [app.getAppPath(), clientFolder];
+  const installDir = localDirs.find(dir => fs.existsSync(path.join(dir, 'updater.ps1')));
+  if (!installDir) throw new Error('未找到安装目录中的 updater.ps1');
+  const controller = new AbortController();
+  const update = { id, controller, committed: false };
+  activeUpdate = update;
+  let archive;
+  let temp;
+  const progress = info => { if (!event.sender.isDestroyed()) event.sender.send('update-progress', { id, ...info }); };
   try {
-    // 确保目录存在
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    temp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mojang-update-'));
+    archive = path.join(temp, 'package.zip');
+    const response = await fetch(releaseOrigin + (isMain ? '/client/mojang.zip' : '/JsScript/ArtifactsGroupPurchasing.zip'), {
+      signal: controller.signal, redirect: 'error'
+    });
+    if (!response.ok) throw new Error('下载更新包失败 HTTP ' + response.status);
+    let bytes = 0;
+    const total = Number(response.headers.get('content-length'));
+    const stream = require('stream').Readable.fromWeb(response.body);
+    stream.on('data', chunk => { bytes += chunk.length; progress({ bytes, total }); });
+    await pipeline(stream, fs.createWriteStream(archive, { flags: 'wx' }), { signal: controller.signal });
+    if (total && total !== bytes) throw new Error('更新包下载不完整');
+    const target = isMain ? installDir : folder;
+    await fs.promises.mkdir(target, { recursive: true });
+    progress({ phase: '正在解压并校验更新包…' });
+    await new Promise((resolve, reject) => {
+      controller.signal.throwIfAborted();
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', path.join(installDir, 'updater.ps1'), archive, target, kind, String(isMain), 'handshake'],
+        { detached: isMain, stdio: 'ignore', windowsHide: true });
+      let timer;
+      const stop = () => { clearInterval(timer); controller.signal.removeEventListener('abort', cancel); };
+      const cancel = () => {
+        if (update.committed) return;
+        // 更新器在预处理后读取取消标记，自行释放临时目录和锁。
+        try { fs.writeFileSync(archive + '.cancel', 'cancel'); }
+        catch (_) { child.kill(); }
+      };
+      controller.signal.addEventListener('abort', cancel, { once: true });
+      child.once('error', error => { stop(); reject(error); });
+      child.once('exit', code => {
+        stop();
+        if (controller.signal.aborted) reject(new Error('已取消更新'));
+        else if (code !== 0 || !update.committed) reject(new Error('更新器退出，详见目标目录 updater.log'));
+        else resolve();
+      });
+      timer = setInterval(() => {
+        if (controller.signal.aborted || !fs.existsSync(archive + '.ready')) return;
+        try {
+          fs.writeFileSync(archive + '.commit', 'install', { flag: 'wx' });
+          update.committed = true;
+          stop();
+          progress({ phase: '校验通过，正在安装…' });
+          if (isMain) { child.unref(); resolve(); }
+        } catch (error) { stop(); child.kill(); reject(error); }
+      }, 100);
+    });
+  } finally {
+    activeUpdate = null;
+    if (temp && !(isMain && update.committed)) {
+      for (const suffix of ['', '.ready', '.commit', '.cancel']) {
+        await fs.promises.unlink(path.join(temp, 'package.zip' + suffix)).catch(() => {});
+      }
+      await fs.promises.rmdir(temp).catch(() => {});
     }
-    
-    // 将base64转换为buffer并写入文件
-    const buffer = Buffer.from(base64, 'base64');
-    fs.writeFileSync(filePath, buffer);
-    
-    event.reply('save-image-result', { success: true, filePath });
-  } catch (error) {
-    event.reply('save-image-result', { success: false, error: error.message });
   }
 });
 
 // 获取客户端代码哈希（使用key混入，防篡改校验）
 // 哈希对象为 app.asar 文件本身，与服务端存储的 asar 一致
-ipcMain.on('get-client-code-hash', (event, { key } = {}) => {
+ipcMain.handle('get-client-code-hash', (_event, { key } = {}) => {
   try {
     const crypto = require('crypto');
     
@@ -726,8 +698,7 @@ ipcMain.on('get-client-code-hash', (event, { key } = {}) => {
     }
     
     if (!combinedContent) {
-      event.reply('client-code-hash', { success: false, error: '无法读取客户端代码文件' });
-      return;
+      throw new Error('无法读取客户端代码文件');
     }
     
     // SHA256(源码文本 + key)，key 由服务端下发的随机密钥，防止伪造
@@ -735,9 +706,9 @@ ipcMain.on('get-client-code-hash', (event, { key } = {}) => {
       Buffer.from(combinedContent, 'utf8'),
       Buffer.from(key || '')
     ])).digest('hex');
-    event.reply('client-code-hash', { success: true, hash });
+    return hash;
   } catch (error) {
     console.error('计算客户端代码哈希失败:', error);
-    event.reply('client-code-hash', { success: false, error: error.message });
+    throw error;
   }
 });
