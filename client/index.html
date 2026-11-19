@@ -1585,6 +1585,9 @@
             const active=bridge.bigWorld;
             const cleanup=['cancel-route','leave-world'].includes(m.op);
             const removed = m.op==='roster-update' && m.payload.removed?.includes(lcState.task.seatId);
+            const retained = m.op==='roster-update' && m.payload.roster?.some(s=>s.seatId===lcState.task.seatId) && m.payload.retainedJoin;
+            const originalJoin = m.op==='join-world' && active?.retainedJoin?.messageId===m.messageId &&
+                active.retainedJoin.rosterVersion===m.rosterVersion;
             if (removed) {
                 const old=bridge.resume;
                 if (!old || old.attemptId!==m.worldAttemptId) bridge.resume={attemptId:m.worldAttemptId,
@@ -1595,12 +1598,12 @@
             if (m.op==='cancel-route' && Number.isSafeInteger(m.routeSeq)) {
                 (bridge.canceledRoutes ||= {})[m.worldAttemptId+'_'+m.routeSeq]=true;
             }
-            if ((bridge.closedWorlds || []).includes(m.worldAttemptId) || !active && ['roster-update','cancel-route'].includes(m.op)) {
+            if ((bridge.closedWorlds || []).includes(m.worldAttemptId) || !active && !retained && ['roster-update','cancel-route'].includes(m.op)) {
                 if (cleanup || m.op==='roster-update') lcAck(lcIssue(m,[]),'applied');
                 return;
             }
-            if (active && (active.id!==m.worldAttemptId || active.uid!==m.worldUid || !cleanup && m.rosterVersion<active.rosterVersion)) return;
-            if (!active && !['join-world','leave-world'].includes(m.op)) return;
+            if (active && (active.id!==m.worldAttemptId || active.uid!==m.worldUid || !cleanup && !originalJoin && m.rosterVersion<active.rosterVersion)) return;
+            if (!active && !retained && !['join-world','leave-world'].includes(m.op)) return;
             if (bridge.resume?.attemptId===m.worldAttemptId && ['join-world','route-release'].includes(m.op)) return;
             if (m.op==='route-release' && bridge.canceledRoutes?.[m.worldAttemptId+'_'+m.routeSeq]) return;
             if (m.op==='join-world' && bridge.resume && bridge.resume.attemptId!==m.worldAttemptId) delete bridge.resume;
@@ -1613,7 +1616,7 @@
                 }
             }
             if (m.op==='join-world') {
-                world.detail='向目标 UID 申请入场';
+                world.detail=m.payload.positionOnly ? '重新核对当前队伍席号' : '向目标 UID 申请入场';
             } else if (m.op==='leave-world') {
                 world.leaving=true;
                 world.detail='正在退出世界';
@@ -1636,7 +1639,13 @@
                 cmd.locals[0].message.payload={...m.payload,targetMessageId:route.localId};
                 route.status='canceling';
                 world.detail='正在取消第 '+m.routeSeq+' 条路线';
-            } else lcIssue(m,[directory]);
+            } else {
+                const cmd=lcIssue(m,[directory]);
+                if (m.op==='roster-update') {
+                    world.retainedJoin=retained ? {...retained,localId:bridge.commands[retained.messageId]?.locals[0]?.message.messageId || retained.messageId} : null;
+                    if (retained) cmd.locals[0].message.payload={...m.payload,retainedJoin:{messageId:world.retainedJoin.localId,rosterVersion:retained.rosterVersion}};
+                } else if (originalJoin) cmd.locals[0].message.messageId=world.retainedJoin.localId;
+            }
             lcPersist();
             if (world.detail) lcElement('status').textContent=world.uid+' · '+world.detail;
         }
@@ -1837,7 +1846,7 @@
             if (lcState.options.role==='big' && cmd.net.worldAttemptId) {
                 const world=bridge.bigWorld;
                 if (world?.id===cmd.net.worldAttemptId) {
-                    if (event.op==='join-result') world.detail = event.payload.status==='joined' ?
+                    if (event.op==='join-result') world.detail = ['joined','position'].includes(event.payload.status) ?
                         '已进入 '+event.payload.position+'P，等待目标小号确认' : '入场失败，等待服务端处理';
                     if (cmd.net.op==='route-release' && world.route?.localId===event.replyTo) {
                         const route=world.route;

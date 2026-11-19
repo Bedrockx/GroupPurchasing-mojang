@@ -146,7 +146,9 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         const activeCancel = c.op === "cancel-route" && busy && sameRoute(busy.command, c) &&
             (!c.payload.targetMessageId || c.payload.targetMessageId === busy.command.messageId);
         if (c.op === "cancel-route" && busy && sameRoute(busy.command, c) && c.payload.targetMessageId && !activeCancel) return "取消与本地授权不符";
-        if (w && c.rosterVersion && c.rosterVersion < w.rosterVersion && !activeCancel && !routeWasCanceled(s, c)) return "名单版本已过期";
+        const originalJoin = c.op === "join-world" && w?.retainedJoin?.messageId === c.messageId &&
+            w.retainedJoin.rosterVersion === c.rosterVersion;
+        if (w && c.rosterVersion && c.rosterVersion < w.rosterVersion && !activeCancel && !originalJoin && !routeWasCanceled(s, c)) return "名单版本已过期";
         if (w?.removed && ["join-world", "run-route"].includes(c.op) && !routeWasCanceled(s, c)) return "席位已从本世界移出";
     }
     function makeSession(c) {
@@ -308,10 +310,13 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
                 if (busy?.command.op === "admit-seat") cancel(busy);
                 s.watch = c.messageId;
                 s.lastObservation = null;
-                // 主用户的名单变更只负责观察，新的单席授权到来前不再同意申请。
-            } else if (!s.roster.some(m => m.seatId === s.seatId)) {
-                s.world.removed = true;
-                if (busy && busy.command.worldAttemptId === c.worldAttemptId) cancel(busy);
+                // 新名单复核期间，仅在服务端保留当前申请时继续放行该席。
+            } else {
+                s.world.retainedJoin = c.payload.retainedJoin || null;
+                if (!s.roster.some(m => m.seatId === s.seatId)) {
+                    s.world.removed = true;
+                    if (busy && busy.command.worldAttemptId === c.worldAttemptId) cancel(busy);
+                }
             }
             terminal(rec, "applied");
         } else {
@@ -728,28 +733,36 @@ function createWorldActions(ui) {
         async observe(c, control, s) {
             const until = deadline(s);
             check(control, until);
-            if (c.op !== "roster-update") {
+            const applicant = c.op === "roster-update" ? c.payload?.applicant : c.seatId;
+            if (applicant && s.roster.some(m => m.seatId === applicant)) {
                 const uid = await ui.uid();
                 check(control, until);
                 if (uid !== c.worldUid) { lastAdmission = null; return uncertain(); }
                 const mode = ui.permission();
                 // Y 申请弹窗可遮住 F2 权限标签。仅在本席刚核实过现场时允许短暂遮挡。
                 const recent = lastAdmission && lastAdmission.command === c.messageId && ui.now() - lastAdmission.time < 2500;
-                const active = s.world.opened && s.roster.some(m => m.seatId === c.seatId) &&
-                    (mode === "确认后可加入" || !mode && recent);
+                const active = s.world.opened && (mode === "确认后可加入" || !mode && recent);
                 if (mode && mode !== "确认后可加入") lastAdmission = null;
-                if (ui.request(s.roster, active ? c.seatId : "") !== "none") return uncertain();
+                if (ui.request(s.roster, active ? applicant : "") !== "none") return uncertain();
             }
             if (!ui.f2()) {
                 ui.key("F2");
                 await wait(control, until, 500);
             }
             const seen = await stableMembers(s, control, until, c.worldUid, "确认后可加入");
-            lastAdmission = seen.stable && c.op !== "roster-update" ? { command: c.messageId, time: ui.now() } : null;
+            lastAdmission = seen.stable && applicant ? { command: c.messageId, time: ui.now() } : null;
             return seen;
         },
         async "join-world"(c, control, s) {
             const until = deadline(s);
+            if (c.payload?.positionOnly) {
+                while (true) {
+                    const position = ui.sign();
+                    await wait(control, until, 300);
+                    if ([2,3,4].includes(position) && ui.sign() === position)
+                        return { op: "join-result", payload: { status: "position", position } };
+                }
+            }
             if (ui.sign() !== 0) throw new Error("入场前未确认单人");
             await wait(control, until, 300);
             if (ui.sign() !== 0) throw new Error("单人状态不稳定");

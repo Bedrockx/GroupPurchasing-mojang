@@ -106,6 +106,27 @@ test("降员后的只读成员观测仍能辨认已移出的大号，不再批�
     const seen = await ops.observe({ worldUid, op: "roster-update" }, control, session);
     assert.deepEqual(seen, { stable: true, ambiguous: false, members: [{ seatId: "s0", position: 2 }], observedUid: worldUid, admissionMode: "confirm" });
 });
+test("降员后小号只继续放行指名且仍在世界名单的申请者",async()=>{
+    const {ops,ui,session,control}=fixture();
+    await ops["open-admission"]({worldUid,payload:{roster}},control,session);
+    session.roster=roster.slice(1);
+    const permitted=[];
+    ui.request=(_,seat)=>{ permitted.push(seat); return "none"; };
+    for (const applicant of ["s0","s1"]) {
+        await ops.observe({worldUid,op:"roster-update",payload:{applicant}},control,session);
+    }
+    assert.deepEqual(permitted,["s1"]);
+});
+test("席号复核只读两次一致的客人席号，期间不会再次申请或离队",async()=>{
+    const {ops,ui,model,session,control}=fixture();
+    ui.click=ui.key=ui.pressNamed=()=>assert.fail("席号复核不能操作游戏");
+    const cmd={worldUid,payload:{positionOnly:true}};
+    model.pos=2;
+    assert.deepEqual((await ops["join-world"](cmd,control,session)).payload,{status:"position",position:2});
+    let flip=false;
+    ui.sign=()=>(flip=!flip)?2:3;
+    await assert.rejects(ops["join-world"](cmd,control,session),/超时/);
+});
 test("已开放后小号切错账号、禁止加入或识别不稳定时，不能给下一席授权或通过降员复核", async () => {
     for (const fault of ["错账号", "禁止加入", "读数交替"]) {
         const { ops, ui, model, control, session } = fixture();

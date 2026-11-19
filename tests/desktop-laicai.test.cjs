@@ -340,6 +340,35 @@ test('大号仅处理自己的当前世界，退回单人后拒绝旧尝试的�
     assert.match(f.lookup('lc-status').textContent,/已退回单人/);
 });
 
+for (const updateFirst of [false,true]) test('客户端把保留的原入场授权映射到同一本地指令，并中转只读席号复核：'+updateFirst,async()=>{
+    const f=fixture(),published=[],events=[];
+    Object.assign(f.ctx.window.electronAPI,{publishLaicai:async(_dir,m)=>published.push(m),laicaiEvents:async()=>events.splice(0),consumeLaicai:async()=>{}});
+    await f.run('lcEnroll()');
+    f.msg('task-start',{taskId:'t',messageId:'start',payload:{role:'big',seatId:'s',taskId:'t',laicaiVersion:'1.2.3',worldUids:['100000001']}});
+    f.run("lcBridge().commands.start.launch='spawned';lcBridge().commands.start.locals[0].seen=true");
+    const scope={taskId:'t',worldUid:'100000001',worldAttemptId:'w',rosterVersion:1,seatId:'s',payload:{}};
+    const join=()=>f.msg('join-world',{...scope,messageId:'original'});
+    const update=()=>f.msg('roster-update',{...scope,messageId:'update',rosterVersion:2,payload:{
+        roster:[{seatId:'s'}],removed:['former'],retainedJoin:{messageId:'original',rosterVersion:1}}});
+    if (updateFirst) { update(); join(); } else { join(); update(); }
+    f.msg('join-world',{...scope,messageId:'unauthorized'});
+    await f.run('lcPump()');
+    const original=published.find(m=>m.op==='join-world');
+    assert.equal(published.filter(m=>m.op==='join-world').length,1);
+    assert.equal(published.find(m=>m.op==='roster-update').payload.retainedJoin.messageId,original.messageId);
+    events.push({...original,op:'join-result',messageId:'entered',replyTo:original.messageId,payload:{status:'joined',position:3,fromSingle:true}});
+    await f.run('lcPump()');
+    assert.ok(f.sent.some(m=>m.op==='join-result' && m.replyTo==='original' && m.rosterVersion===1));
+    f.msg('join-world',{...scope,messageId:'position',rosterVersion:2,payload:{positionOnly:true}});
+    await f.run('lcPump()');
+    const verify=published.at(-1);
+    assert.equal(verify.payload.positionOnly,true);
+    events.push({...verify,op:'join-result',messageId:'fresh',replyTo:verify.messageId,payload:{status:'position',position:2}});
+    await f.run('lcPump()');
+    assert.ok(f.sent.some(m=>m.op==='join-result' && m.replyTo==='position' && m.payload.position===2));
+    assert.match(f.lookup('lc-status').textContent,/2P，等待目标小号确认/);
+});
+
 for (const completion of ['success','await-team']) test('个人路线回报 '+completion+' 后等待授权，旧取消不会中断新路线',async()=>{
     const f=fixture(), published=[], events=[];
     Object.assign(f.ctx.window.electronAPI,{publishLaicai:async(_dir,m)=>published.push(m),laicaiEvents:async()=>events.splice(0),consumeLaicai:async()=>{}});

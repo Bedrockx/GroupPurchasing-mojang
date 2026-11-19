@@ -3331,15 +3331,41 @@ function lcNextApplicant(task, world) {
   if (!seat) return lcStartRoute(task,world);
   world.phase = 'arming';
   world.applicant = seat.seatId;
+  world.armId = null;
   world.joinedPosition = null;
   world.members = [];
+  world.absentSince = {};
+  world.checkPosition = false;
   lcQueue(task,task.seats.find(s => s.role === 'host'),'admit-seat',world,{seatId:seat.seatId},{uid:seat.uid,gameName:seat.gameName});
 }
 
 function lcConfirmAdmission(task, world) {
-  if (!world.joinedPosition || !world.members.some(m => m.seatId === world.applicant && m.position === world.joinedPosition)) return;
+  if (world.recheck || !world.joinedPosition) return;
+  const observed = world.members.find(m => m.seatId === world.applicant);
+  if (!observed) return;
+  if (observed.position !== world.joinedPosition) {
+    // 队友离场可能改变客人席号。保留原申请成功的事实，只请求重新读取席号。
+    if (world.checkPosition) {
+      world.checkPosition = false;
+      world.joinedPosition = null;
+      lcQueue(task,task.seats.find(s => s.seatId === world.applicant),'join-world',world,{seatId:world.applicant},{positionOnly:true});
+    }
+    return;
+  }
   world.admitted.push(world.applicant);
   lcNextApplicant(task,world);
+}
+
+function lcValidMembers(members, allowed) {
+  return Array.isArray(members) && members.every(m => m && allowed.includes(m.seatId) && [2,3,4].includes(m.position)) &&
+    new Set(members.map(m => m.position)).size === members.length && new Set(members.map(m => m.seatId)).size === members.length;
+}
+
+function lcNoteAdmissionAbsences(world, p) {
+  const missing = p.stable===true && p.ambiguous===false && p.observedUid===world.worldUid && p.admissionMode==='confirm'
+    ? world.admitted.filter(id=>!p.members.some(m=>m.seatId===id)) : [];
+  world.absentSince = Object.fromEntries(missing.map(id=>[id,world.absentSince?.[id] ?? Date.now()]));
+  return missing.length>0;
 }
 
 function lcStartRoute(task, world) {
@@ -3446,9 +3472,16 @@ function lcDrop(task,world,ids,reason) {
   world.effective = world.effective.filter(id=>!removed.includes(id));
   const host = task.seats.find(s => s.role === 'host');
   const roster = laicaiRoster(task).filter(s=>world.effective.includes(s.seatId));
+  const keepApplicant = world.phase === 'joining' && world.effective.includes(world.applicant);
+  const originalJoin = keepApplicant && task.pending.find(i=>i.seatId===world.applicant && i.message.op==='join-world' &&
+    i.message.worldAttemptId===world.worldAttemptId)?.message;
+  if (world.phase === 'arming') task.pending = task.pending.filter(i=>i.message.op!=='admit-seat' || i.message.worldAttemptId!==world.worldAttemptId);
   task.pending = task.pending.filter(i=>i.message.op !== 'roster-update' && !(removed.includes(i.seatId) && ['join-world','route-release'].includes(i.message.op)));
   for (const member of task.seats) {
-    lcQueue(task,member,'roster-update',world,member.role==='big'?{seatId:member.seatId}:{},{roster,removed:[...world.removed],reason});
+    const update = {roster,removed:[...world.removed],reason};
+    if (member.role==='host' && keepApplicant) update.applicant = world.applicant;
+    if (originalJoin && member.seatId===world.applicant) update.retainedJoin = {messageId:originalJoin.messageId,rosterVersion:originalJoin.rosterVersion};
+    lcQueue(task,member,'roster-update',world,member.role==='big'?{seatId:member.seatId}:{},update);
     if (!removed.includes(member.seatId)) continue;
     member.ready=false;
     member.removed=true;
@@ -3550,28 +3583,38 @@ function lcTimeout(task, now) {
   if (['leaving','releasing'].includes(w.phase) && w.deadline<=now) {
     return onWorld((d,v)=>{d.stopping='退场、清场或释放未确认'; lcEnd(d,d.stopping,[v]);});
   }
-  if (w.recheck) return null;
-  if (['opening','arming','conflict','waiting-evidence'].includes(w.phase) && w.deadline<=now) {
+  const admission = w.phase==='joining' || w.phase==='arming';
+  if (!admission && w.recheck) return null;
+  if (['opening','conflict','waiting-evidence'].includes(w.phase) && w.deadline<=now) {
     return onWorld((d,v)=>{
       if (v.phase==='waiting-evidence' && d.config.allowMissing) lcLeave(d,v,'unproven');
       else lcStop(d,'世界阶段超时：'+v.phase);
     });
   }
-  if (w.phase==='joining' && w.deadline<=now) return onWorld((d,v)=>lcDrop(d,v,[v.applicant],'大号入场超时'));
-  // 初次心跳建立两条独立时钟。准备计时与路线执行计时均不能通过心跳续期。
-  if (['route','joining','waiting-evidence'].includes(w.phase)) {
-    // 心跳大约每五秒一次，短命令超时不应把两个正常心跳之间的间隔判为失联。
-    const livenessWindow=Math.max(15000,task.config.timeoutSeconds*1000);
+  // 入场基线依赖先前已进世界的队友，先判定这些席位，再处理当前申请期限。
+  const livenessWindow = Math.max(15000,task.config.timeoutSeconds*1000);
+  if (admission || w.phase==='route' || w.phase==='waiting-evidence') {
     const stale=s=>(s.offlineSince && now-s.offlineSince>=livenessWindow) || ['client','executor'].some(source=>{
       const suffix=s.role==='host' && source==='executor' ? ':'+w.worldAttemptId : '';
       const at=laicaiSeen.get(task.taskId+':'+s.seatId+':'+source+suffix);
       return at!==undefined && now-at>=livenessWindow;
     });
     if (task.seats.some(s=>s.role==='host' && stale(s))) return onWorld(d=>lcStop(d,'小号主用户失联'));
-    const lost=task.seats.filter(s=>w.effective.includes(s.seatId) && stale(s) &&
-      (w.phase!=='joining'||s.seatId===w.applicant)).map(s=>s.seatId);
-    if (lost.length) return onWorld((d,v)=>lcDrop(d,v,lost,'大号失联'));
+    const participants = task.seats.filter(s=>w.effective.includes(s.seatId));
+    const lost = participants.filter(s=> (!admission || w.admitted.includes(s.seatId) ||
+      (w.phase==='joining' && s.seatId===w.applicant)) && stale(s));
+    if (lost.length) return onWorld((d,v)=>lcDrop(d,v,lost.map(s=>s.seatId),'大号失联'));
+    if (admission && !w.recheck && w.deadline<=now) {
+      const admitted = participants.filter(s=>w.admitted.includes(s.seatId));
+      const absent = admitted.filter(s=>w.absentSince?.[s.seatId]!==undefined &&
+        now-w.absentSince[s.seatId]>=task.config.timeoutSeconds*1000);
+      if (absent.length) return onWorld((d,v)=>lcDrop(d,v,absent.map(s=>s.seatId),'已入场大号离开世界'));
+      if (now<w.deadline+livenessWindow && admitted.some(s=>s.offlineSince || w.absentSince?.[s.seatId]!==undefined)) return null;
+    }
   }
+  if (w.recheck) return null;
+  if (w.phase==='arming' && w.deadline<=now) return onWorld(d=>lcStop(d,'世界阶段超时：arming'));
+  if (w.phase==='joining' && w.deadline<=now) return onWorld((d,v)=>lcDrop(d,v,[v.applicant],'大号入场超时'));
   return null;
 }
 
@@ -3621,6 +3664,8 @@ function lcRuntime(task, seat, m) {
   if (m.worldAttemptId && (!world || (seat.role === 'host' &&
       (world.slotId !== m.slotId || world.workerId !== m.workerId || world.slotGeneration !== m.slotGeneration)))) throw Error('旧世界或位置');
   if (world && m.rosterVersion !== undefined && m.rosterVersion !== world.rosterVersion &&
+      !(seat.seatId===world.applicant && world.effective.includes(seat.seatId) && pending?.message.op==='join-world' &&
+        pending.message.rosterVersion===m.rosterVersion && ['join-result','ack'].includes(m.op)) &&
       !(world.effective.includes(seat.seatId) && pending?.message.op==='route-release' &&
         pending.message.rosterVersion===m.rosterVersion && ['route-result','ack'].includes(m.op)) &&
       !sameProofCommand &&
@@ -3632,6 +3677,30 @@ function lcRuntime(task, seat, m) {
     task.pending.splice(task.pending.indexOf(pending),1);
   };
   const phase = name => { if (!world || world.phase !== name) throw Error('世界阶段不匹配'); };
+  const armSeat = () => {
+    phase('arming');
+    if (!pending || pending.message.op!=='admit-seat' || pending.message.seatId!==world.applicant ||
+        pending.message.worldAttemptId!==world.worldAttemptId || pending.message.worldUid!==world.worldUid ||
+        (m.seatId!==undefined && m.seatId!==world.applicant))
+      throw Error('回报不对应授权');
+    if (p.stable===false || p.ambiguous===true || !lcValidMembers(p.members,world.admitted) ||
+        (m.op==='world-members' && (p.stable!==true || p.ambiguous!==false || p.observedUid!==world.worldUid || p.admissionMode!=='confirm'))) {
+      if (m.op==='seat-armed') throw Error('放行前席位基线不一致');
+      world.absentSince={};
+      return;
+    }
+    if (p.members.length!==world.admitted.length) {
+      if (!lcNoteAdmissionAbsences(world,p) && m.op==='seat-armed') throw Error('放行前席位基线不一致');
+      world.armId=m.replyTo;
+      return;
+    }
+    task.pending.splice(task.pending.indexOf(pending),1);
+    world.baseline=p.members;
+    world.armId=m.replyTo;
+    world.absentSince={};
+    world.phase='joining';
+    lcQueue(task,task.seats.find(s=>s.seatId===world.applicant),'join-world',world,{seatId:world.applicant});
+  };
   if (m.op === 'ack') {
     if (!pending) return;
     if (p.status === 'started' || p.status === 'received') {
@@ -3694,43 +3763,48 @@ function lcRuntime(task, seat, m) {
     case 'admission-opened':
       phase('opening'); complete('open-admission'); lcNextApplicant(task,world); break;
     case 'seat-armed':
-      phase('arming'); complete('admit-seat');
-      if (!Array.isArray(p.members) || p.members.length !== world.admitted.length ||
-          new Set(p.members.map(i => i?.position)).size !== p.members.length ||
-          !world.admitted.every(id => p.members.some(i => i?.seatId === id && [2,3,4].includes(i.position))) ||
-          p.ambiguous === true || p.stable === false) throw Error('放行前席位基线不一致');
-      world.baseline = p.members;
-      world.armId = m.replyTo;
-      world.phase = 'joining';
-      lcQueue(task,task.seats.find(s => s.seatId === world.applicant),'join-world',world,{seatId:world.applicant});
+      armSeat();
       break;
     case 'join-result':
       phase('joining'); complete('join-world');
       if (p.status==='failed') {lcDrop(task,world,[seat.seatId],p.reason || '入场失败'); break;}
-      if (p.status !== 'joined' || p.fromSingle !== true || ![2,3,4].includes(p.position)) throw Error('未确认入场');
+      const confirmed = pending.message.payload.positionOnly ? p.status==='position' : p.status==='joined' && p.fromSingle===true;
+      if (!confirmed || ![2,3,4].includes(p.position)) throw Error('未确认入场');
       world.joinedPosition = p.position;
       lcConfirmAdmission(task,world);
       break;
     case 'world-members':
       if (world?.recheck && m.replyTo===world.recheck.replyTo) {
         const expected=world.admitted.filter(id=>world.effective.includes(id));
+        const keepApplicant = world.phase==='joining' && world.effective.includes(world.applicant);
         if (p.stable!==true || p.ambiguous!==false || p.observedUid!==world.worldUid || p.admissionMode!=='confirm' ||
-            !Array.isArray(p.members) || p.members.length!==expected.length ||
-            !expected.every(id=>p.members.some(r=>r?.seatId===id && [2,3,4].includes(r.position))) ||
-            new Set(p.members.map(r=>r.position)).size!==p.members.length) break;
+            !lcValidMembers(p.members, keepApplicant ? [...expected,world.applicant] : expected) ||
+            !expected.every(id=>p.members.some(r=>r.seatId===id))) {
+          world.members=[];
+          break;
+        }
         world.recheck=null;
         world.admitted=expected;
-        if (world.phase==='joining') lcNextApplicant(task,world);
+        if (keepApplicant) {
+          world.baseline = p.members.filter(r=>r.seatId!==world.applicant);
+          world.armId = m.replyTo;
+          world.members = p.members;
+          world.absentSince = {};
+          world.checkPosition = true;
+          world.deadline = Date.now()+task.config.timeoutSeconds*1000;
+          lcConfirmAdmission(task,world);
+        } else if (world.phase==='joining' || world.phase==='arming') lcNextApplicant(task,world);
         else lcRouteBarrier(task,world);
         break;
       }
+      if (world?.phase==='arming' && !world.recheck && m.replyTo===world.armId) { armSeat(); break; }
       if (world?.phase !== 'joining') throw Error('此时未申请');
       if (m.replyTo !== world.armId) throw Error('非本次申请的成员观测');
-      if (p.stable !== true || p.ambiguous !== false || !Array.isArray(p.members)) { world.members=[]; break; }
-      if (!p.members.every(i => i && (world.admitted.includes(i.seatId) || i.seatId === world.applicant) && [2,3,4].includes(i.position)) ||
-          new Set(p.members.map(i => i.position)).size !== p.members.length ||
-          new Set(p.members.map(i => i.seatId)).size !== p.members.length ||
-          !world.baseline.every(old => p.members.some(i => i.seatId === old.seatId && i.position === old.position))) {
+      if (p.stable !== true || p.ambiguous !== false || !lcValidMembers(p.members,[...world.admitted,world.applicant])) {
+        world.members=[]; world.absentSince={}; break;
+      }
+      lcNoteAdmissionAbsences(world,p);
+      if (!world.baseline.every(old => p.members.some(i => i.seatId === old.seatId && i.position === old.position))) {
         world.members = []; break;
       }
       world.members = p.members; lcConfirmAdmission(task,world); break;

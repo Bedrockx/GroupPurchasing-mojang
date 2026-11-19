@@ -29,6 +29,23 @@ async function admit(file, executor) {
 }
 const join = () => ({ op: "join-result", payload: { status: "joined", position: 2, fromSingle: true } });
 
+test("新版名册先到时，重启后的大号只执行其中指定的旧版本原入场授权",async()=>{
+    const file=fakeFile(),calls=[];
+    const options={role:"big",file,actions:{"join-world"(cmd){calls.push(cmd.messageId);return join();}}};
+    const exe=createExecutor(options);
+    deliver(file,start); exe.poll();
+    deliver(file,packet("update","roster-update",{...world,rosterVersion:2},
+        {roster:[{seatId:"s"}],retainedJoin:{messageId:"original",rosterVersion:1}}));
+    exe.poll();
+    const resumed=createExecutor(options);
+    deliver(file,packet("other","join-world",world));
+    deliver(file,packet("original","join-world",world));
+    resumed.poll(); await resumed.settle();
+    assert.deepEqual(calls,["original"]);
+    assert.ok(results(file,"ack").some(e=>e.replyTo==="other" && e.payload.status==="rejected"));
+    assert.ok(results(file,"join-result").some(e=>e.replyTo==="original"));
+});
+
 test("在补证期间收到取消、换路线、移出、退场或终止不会再提交旧证据", async () => {
     const original = packet("r1", "run-route", { ...world, routeSeq: 1 });
     const proof = { status: "success", evidence: "reward", isLast: false };
