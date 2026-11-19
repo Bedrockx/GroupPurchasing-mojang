@@ -272,7 +272,6 @@ function cleanupRemoteTransfers() {
     if (now - transfer.updatedAt > TRAFFIC_TRANSFER_TIMEOUT) cancelRemoteTransfer(key, '远程数据传输超时');
   }
 }
-setInterval(cleanupRemoteTransfers, 30000).unref();
 
 function getPackageRouteType(req) {
   const requestPath = req.path;
@@ -647,6 +646,10 @@ const RideManager = {
     const ride = this.activeRides.get(rideId);
     if (!ride) return;
     
+    timerManager.clearTimeout(ride.timeoutId);
+    for (const rider of ride.riders) {
+      io.sockets.sockets.get(rider.socketId)?.emit('message', { type: 'ride-cancel', rideId, reason });
+    }
     this.restoreRiders(ride, true);
     
     ride.riders.forEach(rider => {
@@ -723,8 +726,7 @@ function getRoomRideNumbers(dateStr) {
   const byRoom = new Map();
   const filePath = path.join(rideRecordsDir, `${dateStr}.json`);
   if (fs.existsSync(filePath)) {
-    const content = fs.readFileSync(filePath, 'utf8').trim();
-    const records = content ? JSON.parse(content) : [];
+    const records = readRideDay(filePath);
     for (const record of records) {
       if (typeof record?.rideId !== 'string') continue;
       const prefix = `${dateStr}-${record.roomName}-`;
@@ -746,63 +748,27 @@ function loadRideRecords() {
     if (fs.existsSync(rideRecordsDir)) {
       const rideFiles = fs.readdirSync(rideRecordsDir).filter(file => file.endsWith('.json'));
       
-      // 按文件修改时间排序，最新的在前
-      rideFiles.sort((a, b) => {
-        const aPath = path.join(rideRecordsDir, a);
-        const bPath = path.join(rideRecordsDir, b);
-        return fs.statSync(bPath).mtime.getTime() - fs.statSync(aPath).mtime.getTime();
-      });
-      
-      // 只加载最新的两个文件
-      const recentFiles = rideFiles.slice(0, 2);
-      
-      recentFiles.forEach(file => {
-        const filePath = path.join(rideRecordsDir, file);
-        try {
-          const content = fs.readFileSync(filePath, 'utf8');
-          if (content) {
-            const records = JSON.parse(content);
-            if (Array.isArray(records)) {
-              rideRecords.push(...records);
-            }
-          }
-        } catch (error) {
-          log(`加载发车记录文件 ${file} 失败: ${error.message}`, LOG_TYPES.ERROR);
-        }
-      });
-      
-      // 限制rideRecords数组大小，只保留最近的1000条记录
-      if (rideRecords.length > 1000) {
-        // 由于rideRecords是const数组，使用splice方法修改
-        rideRecords.splice(0, rideRecords.length - 1000);
+      // 日文件按发车日期命名。迟到的报告会更新旧文件的修改时间。
+      const files = rideFiles.filter(name => /^\d{4}-\d{2}-\d{2}\.json$/.test(name)).sort().reverse();
+      const recentFiles = [];
+      for (const file of files) {
+        if (rideRecords.length >= 1000) break;
+        recentFiles.push(file);
+        const day = readRideDay(path.join(rideRecordsDir, file));
+        day.sort((a, b) => a.createdAt - b.createdAt);
+        rideRecords.push(...day.slice(-1000));
       }
-      
+      rideRecords.sort((a, b) => a.createdAt - b.createdAt);
+      rideRecords.splice(0, Math.max(0, rideRecords.length - 1000));
+
       // 完整的当日文件用于恢复序号，即使部分发车记录已从内存缓存淘汰。
       getRoomRideNumbers(getRideDateString(Date.now()));
       log(`加载了 ${rideRecords.length} 条发车记录（来自 ${recentFiles.length} 个最新文件）`, LOG_TYPES.INFO);
     }
   } catch (error) {
     handleError(error, 'loadRideRecords');
+    throw error;
   }
-}
-
-/**
- * 检查账户是否是首次作为队员发车（服务端启动后）
- * 最简单粗暴的实现：检查用户是否在首程加分记录数组中
- * @param {string} accountId - 账户ID
- * @returns {boolean} 是否首次作为队员发车
- */
-function isFirstTeamRideToday(accountId) {
-  // 检查用户是否已经获得过首程加分
-  if (firstRideBonusUsers.includes(accountId)) {
-    // 已经在数组中，不额外加分
-    return false;
-  }
-  
-  // 不在数组中，标记为已获得首程加分并返回 true
-  firstRideBonusUsers.push(accountId);
-  log(`用户 ${accountId} 获得首程额外加分`, LOG_TYPES.RIDE, { accountId: accountId });
-  return true;
 }
 
 // ==================== 数据持久化模块 ====================
@@ -1519,10 +1485,22 @@ async function initData() {
     // 加载用户账户数据
     userAccounts = await loadData(USER_ACCOUNTS_FILE, {});
 
+    // 加载版本数据
+    versions = await loadData(VERSIONS_FILE, DEFAULT_VERSIONS);
+
+    // 加载管理员账号
+    adminAccounts = await loadData(ADMIN_ACCOUNTS_FILE, {});
+
+    if (!Array.isArray(rooms) || rooms.some(room => !isRecordMap(room) || typeof room.name !== 'string') ||
+        !isRecordMap(userAccounts) || !isRecordMap(versions) ||
+        !isRecordMap(adminAccounts) || Object.values(userAccounts).some(a => !isRecordMap(a))) {
+      throw new Error('关键数据文件格式无效，已停止启动');
+    }
+
     // 初始化旧数据：确保所有用户有 lastRide 字段
     let lastRideInited = false;
     for (const account of Object.values(userAccounts)) {
-      if (account.lastRide === undefined || account.lastRide === null || typeof account.lastRide !== 'number') {
+      if (account.lastRide !== null && typeof account.lastRide !== 'number') {
         account.lastRide = null;
         lastRideInited = true;
       }
@@ -1531,12 +1509,6 @@ async function initData() {
       await saveData(USER_ACCOUNTS_FILE, userAccounts);
       log(`已初始化部分用户账户的 lastRide 字段`, LOG_TYPES.INFO);
     }
-
-    // 加载版本数据
-    versions = await loadData(VERSIONS_FILE, DEFAULT_VERSIONS);
-
-    // 加载管理员账号
-    adminAccounts = await loadData(ADMIN_ACCOUNTS_FILE, {});
 
     // 确保大澡堂和待机房间存在
     if (!rooms.some(room => room.name === '大澡堂')) {
@@ -2285,11 +2257,13 @@ async function handleToggleSafeUser(data, socket) {
   }
 
   if (userAccounts[accountId]) {
-    const safe = !userAccounts[accountId].safe;
-    userAccounts[accountId].safe = safe;
-
-    await saveData(USER_ACCOUNTS_FILE, userAccounts);
-    resetDataChangeTimer();
+    const safe = data.safe;
+    if (typeof safe !== 'boolean') return emitSocketError(socket, '请刷新管理页面后设置目标信任状态');
+    const account = userAccounts[accountId];
+    if (Boolean(account.safe) !== safe) {
+      saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, [accountId]: { ...account, safe } });
+      account.safe = safe;
+    }
     socket.emit('message', {
       type: 'safe-user-success',
       accountId: accountId,
@@ -2328,6 +2302,7 @@ async function handleDeleteUser(data, socket) {
   }
 
   if (userAccounts[accountId]) {
+    flushAccountRideWrites(userAccounts[accountId]);
     // 从所有房间中移除该用户
     roomUsers.forEach((room, roomName) => {
       // roomName 未被使用，保留以提高代码可读性
@@ -2471,16 +2446,33 @@ function handleUserOffline(data, socket) {
   }
 
   // 获取当前操作用户的accountId
-  let operatorAccountId = providedAccountId;
-  if (!operatorAccountId && socket) {
-    const socketData = getConnectionBySocketId(socket.id);
-    if (socketData) {
-      operatorAccountId = socketData.accountId;
-    }
-  }
+  const connection = socket && getConnectionBySocketId(socket.id);
+  const operatorAccountId = socket ? connection?.accountId : providedAccountId;
 
   if (!operatorAccountId) {
     log(`操作者未认证`, LOG_TYPES.ONLINE, { reason: '操作者未认证' });
+    return;
+  }
+
+  // 入选的席位已从房间队列取出，封存前退车要沿活跃车次处理。
+  for (const [rideId, ride] of RideManager.activeRides) {
+    const seat = ride.riders.find(rider => rider.uid === uid);
+    if (!seat || ride.roomName !== roomName) continue;
+    if (socket && !connection.isAdmin && seat.accountId !== operatorAccountId) {
+      return emitSocketError(socket, '无权下线其他用户的UID');
+    }
+    if (ride.record.charged) {
+      if (socket) emitSocketError(socket, '车次已发车');
+      return;
+    }
+    ride.readyStatus.delete(uid);
+    RideManager.pendingOnlineRequests.delete(uid);
+    if (seat.socketId && getConnectionBySocketId(seat.socketId)?.uid === uid) {
+      setConnectionUserInfo(seat.socketId, { username: seat.username, uid: '', roomName: '' });
+    }
+    RideManager.handleRideCancel(rideId, reason);
+    if (socket) socket.emit('message', { type: 'user-offline-success', data: { room: roomName, uid } });
+    sendRoomsStatusToAll();
     return;
   }
 
@@ -2630,36 +2622,6 @@ function handleUserOffline(data, socket) {
   if (room.users.length === 0) {
     roomUsers.delete(targetRoomName);
     log(`房间 ${targetRoomName} 已空，自动删除`, LOG_TYPES.INFO, { room: targetRoomName, reason: '房间为空' });
-  }
-
-  // 清理用户在活跃发车中的状态
-  for (const [rideId, ride] of RideManager.activeRides.entries()) {
-    if (ride.riders) {
-      // 检查用户是否在发车列表中
-      const riderIndex = ride.riders.findIndex(r => r.uid === uid);
-      if (riderIndex !== -1) {
-        // 从发车列表中移除用户
-        ride.riders.splice(riderIndex, 1);
-        log(`用户 ${uid} 已从发车 ${rideId} 中移除`, LOG_TYPES.RIDE, { uid: uid, rideId: rideId, room: targetRoomName });
-        
-        // 如果发车列表为空，取消发车
-        if (ride.riders.length === 0) {
-          if (ride.timeoutId) {
-            timerManager.clearTimeout(ride.timeoutId);
-          }
-          RideManager.activeRides.delete(rideId);
-          // 只有当发车不是因为成功完成而下线时，才更新状态为取消
-          // 检查是否是因为发车成功下线
-          if (reason !== '发车成功下线') {
-            updateRideRecordStatus(rideId, 'cancelled');
-            log(`发车 ${rideId} 因所有骑手下线而取消`, LOG_TYPES.RIDE, { rideId: rideId, room: targetRoomName });
-          }
-        } else if (ride.readyStatus) {
-          // 清理就绪状态
-          ride.readyStatus.delete(uid);
-        }
-      }
-    }
   }
 
   // 发送更新后的房间状态给所有客户端
@@ -2930,6 +2892,19 @@ function countOnlineUsers(roomName) {
 // 子用户相关功能已移除，改为本地预设管理
 
 // ==================== 9. 发车管理函数 ====================
+function isRecordMap(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readRideDay(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  const records = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  if (!Array.isArray(records) || records.some(r => !r || typeof r.rideId !== 'string')) {
+    throw new Error('发车历史格式无效，保留原文件');
+  }
+  return records;
+}
+
 /**
  * 保存发车记录到文件
  * @param {Object} rideRecord - 发车记录对象
@@ -2943,51 +2918,75 @@ function countOnlineUsers(roomName) {
  * };
  * saveRideRecord(rideRecord);
  */
-function saveRideRecord(rideRecord) {
-  try {
-    const dateStr = getRideDateString(rideRecord.createdAt || Date.now());
+function saveRideRecord(rideRecord, patch = null) {
+  const filePath = path.join(rideRecordsDir, getRideDateString(rideRecord.createdAt) + '.json');
+  const records = readRideDay(filePath);
+  const index = records.findIndex(record => record.rideId === rideRecord.rideId);
+  if (index < 0) records.push({ ...rideRecord, ...patch });
+  else records[index] = patch ? { ...records[index], ...patch } : rideRecord;
+  saveDataSync(filePath, records);
+  cleanupOldRecords(rideRecordsDir, 42);
+}
 
-    const filePath = path.join(rideRecordsDir, `${dateStr}.json`);
-
-    let records = [];
-    if (fs.existsSync(filePath)) {
-      const existingContent = fs.readFileSync(filePath, 'utf8');
-      if (existingContent) {
-        try {
-          records = JSON.parse(existingContent);
-        } catch (parseError) {
-          log(`解析发车记录文件失败: ${parseError.message}`, LOG_TYPES.RIDE);
-          records = [];
-        }
-      }
-    }
-
-    // 检查是否已存在相同rideId的记录
-    const existingIndex = records.findIndex(record => record.rideId === rideRecord.rideId);
-    if (existingIndex !== -1) {
-      // 更新现有记录
-      records[existingIndex] = rideRecord;
-    } else {
-      // 添加新记录
-      records.push(rideRecord);
-    }
-
-    // 确保rideRecords目录存在
-    if (!fs.existsSync(rideRecordsDir)) {
-      fs.mkdirSync(rideRecordsDir, { recursive: true });
-      log(`创建发车记录目录: ${rideRecordsDir}`, LOG_TYPES.INFO);
-    }
-    
-    const tempPath = `${filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(records, null, 2), 'utf8');
-    fs.renameSync(tempPath, filePath);
-    log(`发车记录已保存到 ${filePath}`, LOG_TYPES.FILE, { filePath: filePath });
-
-    // 清理42天前的发车记录文件
-    cleanupOldRecords(rideRecordsDir, 42);
-  } catch (error) {
-    handleError(error, 'saveRideRecord');
+// 账户和待写入的车次结果同一次原子替换。重启时只补写车次，绝不重放积分。
+function flushAccountRideWrites(account) {
+  for (const [key, entry] of Object.entries(account.pendingRideWrites || {})) {
+    saveRideRecord(entry.ride, entry.patch);
+    delete account.pendingRideWrites[key];
   }
+  delete account.pendingRideWrites;
+}
+
+function commitRidePoints(ride, patch, changes) {
+  const ids = Object.keys(changes);
+  if (!ids.length) {
+    saveRideRecord(ride, patch);
+    Object.assign(ride, patch);
+    return;
+  }
+  const anchor = changes[ids[0]];
+  const prior = anchor.pendingRideWrites?.[ride.rideId];
+  anchor.pendingRideWrites = { ...anchor.pendingRideWrites, [ride.rideId]: {
+    ride: { ...ride, ...patch }, patch: { ...prior?.patch, ...patch }
+  } };
+  saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, ...changes });
+  for (const id of ids) Object.assign(userAccounts[id], changes[id]);
+  Object.assign(ride, patch);
+  try {
+    flushAccountRideWrites(userAccounts[ids[0]]);
+  } catch (error) {
+    // 账户已提交，本轮及恢复时仅补车次记录。
+    handleError(error, 'flushAccountRideWrites');
+  }
+}
+
+function basePointDeltas(riders) {
+  const hostId = riders[0].accountId;
+  const deltas = Object.create(null);
+  if (!userAccounts[hostId]) return deltas;
+  deltas[hostId] = 0;
+  for (const rider of riders) {
+    if (rider.accountId === hostId) continue;
+    deltas[hostId]--;
+    if (userAccounts[rider.accountId]) deltas[rider.accountId] = (deltas[rider.accountId] || 0) + 1;
+  }
+  return deltas;
+}
+
+function chargeRide(ride, seats = ride.riders) {
+  if (ride.charged) return;
+  const riders = seats.map(({ accountId, uid, username }) => ({ accountId, uid, username }));
+  const basePoints = basePointDeltas(riders);
+  const changes = Object.create(null);
+  const firstMembers = [];
+  for (const [id, base] of Object.entries(basePoints)) {
+    const bonus = base > 0 && !firstRideBonusUsers.includes(id) ? 1 : 0;
+    if (bonus) firstMembers.push(id);
+    changes[id] = { ...userAccounts[id], lastRide: Date.now(), points: (userAccounts[id].points || 0) + base + bonus };
+  }
+  commitRidePoints(ride, { riders, basePoints, charged: true }, changes);
+  firstRideBonusUsers.push(...firstMembers);
+  log(`发车积分已提交: ${ride.rideId}`, LOG_TYPES.POINTS, { rideId: ride.rideId });
 }
 
 /**
@@ -3226,41 +3225,15 @@ async function handleReceivedMessage(socket, message) {
 
               // 检查是否所有用户都已回复
               if (ride.readyStatus.size === ride.riders.length && !ride.imageNegotiationStarted) {
-                // 处理未就绪的用户
-                const notReadyRiders = ride.riders.filter(rider => !ride.readyStatus.get(rider.uid));
-                if (notReadyRiders.length > 0) {
-                  // 将未就绪的用户下线
-                  notReadyRiders.forEach(rider => {
-                    log(`发车准备: 用户 ${rider.username} (${rider.uid}) 未就绪，将其从房间下线`, LOG_TYPES.RIDE, { username: rider.username, uid: rider.uid, rideId: rideId, room: ride.roomName });
-                    // 使用 handleUserOffline 函数下线用户
-                    handleUserOffline({
-                      type: 'user-offline',
-                      uid: rider.uid,
-                      room: ride.roomName,
-                      operatorAccountId: rider.accountId,
-                      reason: '发车未就绪下线'
-                    }, null);
-                    // 从发车列表中移除
-                    ride.riders = ride.riders.filter(r => r.uid !== rider.uid);
-                  });
-
-                  // 清除就绪状态，重新开始
-                  ride.readyStatus = new Map();
-
-                  // 发送更新后的房间状态给所有客户端
-                  sendRoomsStatusToAll();
-
-                  // 如果还有骑手，继续等待
-                  if (ride.riders.length > 0) {
-                    log(`发车准备: 还有 ${ride.riders.length} 个骑手就绪，继续等待其他用户`, LOG_TYPES.RIDE, { rideId: rideId, room: ride.roomName, readyCount: ride.riders.length });
-                  } else {
-                    // 没有骑手了，取消发车
-                    if (ride.timeoutId) {
-                      timerManager.clearTimeout(ride.timeoutId);
-                    }
-                    RideManager.handleRideCancel(rideId, '所有骑手都未就绪');
+                if (!host || ride.riders.some(seat => !ride.readyStatus.get(seat.uid))) {
+                  for (const seat of ride.riders) {
+                    if (!ride.readyStatus.get(seat.uid)) RideManager.pendingOnlineRequests.delete(seat.uid);
                   }
+                  RideManager.handleRideCancel(rideId, '房主或队员未就绪');
+                  sendRoomsStatusToAll();
+                  break;
                 } else {
+                  chargeRide(ride.record, ride.riders);
                   ride.imageNegotiationStarted = true;
                   // 所有用户都已就绪，发送发车消息2
                   ride.status = 'all_ready';
@@ -3268,56 +3241,6 @@ async function handleReceivedMessage(socket, message) {
                   // 清除超时定时器
                   if (ride.timeoutId) {
                     timerManager.clearTimeout(ride.timeoutId);
-                  }
-
-                  // 处理积分变动
-                  if (host) {
-                    const hostAccountId = host.accountId;
-                    const hostAccount = userAccounts[hostAccountId];
-
-                    if (hostAccount) {
-                      // 统计非房主的队员数量（每个队员都算，不管是否同一账户）
-                      const memberRiders = ride.riders.filter(rider => rider.accountId !== hostAccountId);
-                      const pointsToConsume = memberRiders.length;
-
-                      // 房主消耗积分 = 队员数量
-                      hostAccount.points = (hostAccount.points || 0) - pointsToConsume;
-                      log(`积分变动: 房主 ${host.username} (${host.uid}) 消耗 ${pointsToConsume} 积分，当前积分: ${hostAccount.points}`, LOG_TYPES.POINTS, { username: host.username, uid: host.uid, points: hostAccount.points, consumed: pointsToConsume });
-
-                      // 按账户统计队员数量，每个账户获得相应积分
-                      const memberAccountPoints = {};
-                      memberRiders.forEach(rider => {
-                        if (!memberAccountPoints[rider.accountId]) {
-                          memberAccountPoints[rider.accountId] = 0;
-                        }
-                        memberAccountPoints[rider.accountId]++;
-                      });
-
-                      // 每个账户获得其队员数量的积分
-                      Object.entries(memberAccountPoints).forEach(([accountId, points]) => {
-                        const memberAccount = userAccounts[accountId];
-                        if (memberAccount) {
-                          const isFirstTeamRide = isFirstTeamRideToday(accountId);
-                          const bonusPoints = isFirstTeamRide ? 1 : 0;
-                          const totalPoints = points + bonusPoints;
-                          memberAccount.points = (memberAccount.points || 0) + totalPoints;
-                          log(`积分变动: 队员账户 ${accountId} 获得 ${totalPoints} 积分（基础${points} + 首程加成${bonusPoints}），当前积分: ${memberAccount.points}`, LOG_TYPES.POINTS, { accountId: accountId, points: memberAccount.points, gained: totalPoints, base: points, bonus: bonusPoints });
-                        }
-                      });
-
-                      // 更新所有参与者的 lastRide 时间
-                      if (host.accountId && userAccounts[host.accountId]) {
-                        userAccounts[host.accountId].lastRide = Date.now();
-                      }
-                      memberRiders.forEach(rider => {
-                        if (rider.accountId && userAccounts[rider.accountId]) {
-                          userAccounts[rider.accountId].lastRide = Date.now();
-                        }
-                      });
-
-                      // 保存积分变动
-                      await saveData(USER_ACCOUNTS_FILE, userAccounts);
-                    }
                   }
                 }
 
@@ -4338,10 +4261,6 @@ async function checkAndHandleRideInternal(roomName) {
     byRoom.set(roomName, rideNumber);
     const rideId = `${dateStr}-${roomName}-${rideNumber}`;
 
-    // 创建发车状态并从房间移除骑手
-    const rideData = RideManager.createRideState(roomName, host, teamMembers);
-    RideManager.activeRides.set(rideId, rideData);
-
     // 保存发车记录（用于炸车处理）
     const rideRecord = {
       rideId: rideId,
@@ -4354,13 +4273,15 @@ async function checkAndHandleRideInternal(roomName) {
       rideInfo: rideInfo,
       createdAt,
       status: 'waiting_for_ready',
+      charged: false,
       crashReports: []
     };
+    saveRideRecord(rideRecord);
+    const rideData = RideManager.createRideState(roomName, host, teamMembers);
+    rideData.record = rideRecord;
+    RideManager.activeRides.set(rideId, rideData);
     currentProcessRides.add(rideRecord);
     rideRecords.push(rideRecord);
-
-    // 保存到文件
-    saveRideRecord(rideRecord);
 
     // 限制rideRecords数组大小，只保留最近的1000条记录
     if (rideRecords.length > 1000) {
@@ -4390,21 +4311,6 @@ async function checkAndHandleRideInternal(roomName) {
       log(`发车超时: ${rideId}`);
       const ride = RideManager.activeRides.get(rideId);
       if (ride && ride.status === RideManager.STATUS.WAITING_FOR_READY) {
-        // 超时，发送取消消息
-        allRiders.forEach(rider => {
-          const socket = io.sockets.sockets.get(rider.socketId);
-          if (socket) {
-            socket.emit('message', {
-              type: 'ride-cancel',
-              rideId: rideId,
-              reason: '超时未收到所有回复'
-            });
-            log(`向用户 ${rider.username} (${rider.uid}) 发送取消消息`);
-          } else {
-            log(`未找到用户 ${rider.username} (${rider.uid}) 的连接，socketId: ${rider.socketId}`);
-          }
-        });
-
         // 处理发车取消
         RideManager.handleRideCancel(rideId, '超时未收到所有回复');
       }
@@ -4967,14 +4873,9 @@ function getOrCreateGainRecords(dateStr) {
   let records = {};
   const fileExists = fs.existsSync(filePath);
   if (fileExists) {
-    const existingContent = fs.readFileSync(filePath, 'utf8');
-    if (existingContent) {
-      try {
-        records = JSON.parse(existingContent);
-      } catch (parseError) {
-        log(`解析收益记录文件失败: ${parseError.message}`, LOG_TYPES.POINTS);
-        records = {};
-      }
+    records = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!isRecordMap(records) || Object.values(records).some(items => !Array.isArray(items))) {
+      throw new Error('收益历史格式无效，保留原文件');
     }
   } else {
     // 新文件添加兜底记录
@@ -4984,7 +4885,7 @@ function getOrCreateGainRecords(dateStr) {
       moraGain: 0,
       reportedAt: Date.now()
     }];
-    fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
+    saveDataSync(filePath, records);
     log(`创建收益记录文件: ${filePath}`, LOG_TYPES.INFO);
   }
 
@@ -5095,7 +4996,7 @@ function handleReportGain(message, socket) {
     records[accountId].push(gainRecord);
 
     // 保存记录
-    fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
+    saveDataSync(filePath, records);
 
     log(`收益记录已保存: 用户 ${accountId}, 游戏账户 ${gameAccount}, 经验 +${expGain}, 摩拉 +${moraGain}`, LOG_TYPES.INFO, {
       accountId: accountId,
@@ -5164,6 +5065,10 @@ function handleReportCrash(message, socket) {
     }
     if (ride.status === 'crashed' || ride.crashReports?.length) {
       emitSocketError(socket, '此发车的炸车报告已处理');
+      return;
+    }
+    if (!(ride.charged === true || (ride.charged === undefined && ride.status === 'completed'))) {
+      emitSocketError(socket, '该车次没有已结算的发车记录');
       return;
     }
     if (pending?.reports.some(report => report.accountId === socketData.accountId)) {
@@ -5277,7 +5182,7 @@ function processCrashReports(rideKey) {
     log(`炸车处理结果: 发车ID ${ride.rideId}, 过错方: ${atFaultUsers.length > 0 ? atFaultUsers.join(', ') : '无'}`, LOG_TYPES.RIDE, { rideId: ride.rideId, atFault: atFaultUsers });
 
     // 回退发车时的积分变动并执行补偿
-    const updatedAccounts = { ...userAccounts };
+    const updatedAccounts = Object.create(null);
     const participants = new Set(ride.riders.map(rider => rider.accountId).filter(id => userAccounts[id]));
     for (const accountId of participants) {
       updatedAccounts[accountId] = { ...userAccounts[accountId] };
@@ -5291,13 +5196,11 @@ function processCrashReports(rideKey) {
       pointChanges.push({ accountId, points: account.points, change, description });
     }
 
-    // 1. 回退房主的-3分（房主加回3分）
-    const [host, ...members] = ride.riders;
-    adjustPoints(host.accountId, 3, `炸车回退: 房主 ${host.accountId} 加回 3 分`);
-
-    // 2. 回退队员的+1分（队员扣回1分）
-    for (const member of members) {
-      adjustPoints(member.accountId, -1, `炸车回退: 队员 ${member.accountId} 扣回 1 分`);
+    // 旧版仅已完成的车次可按当时的基础计费规则还原；首程奖励保留。
+    const basePoints = ride.basePoints ?? (ride.charged === undefined && ride.status === 'completed'
+      ? basePointDeltas(ride.riders) : {});
+    for (const [id, base] of Object.entries(basePoints)) {
+      adjustPoints(id, -base, `炸车退还原基础积分: ${id}`);
     }
 
     // 3. 过错方补偿：过错方-6分，其余人+2分，每个账户只处理一次。
@@ -5334,21 +5237,15 @@ function processCrashReports(rideKey) {
 
     // 积分和自动冻结一起落盘。写入失败时保留待判车次，重试不会重复计数或扣分。
     try {
-      saveDataSync(USER_ACCOUNTS_FILE, updatedAccounts);
+      commitRidePoints(ride, { status: 'crashed', crashReports: rideReports }, updatedAccounts);
     } catch (error) {
       pending.timeoutId = timerManager.setTimeout(() => processCrashReports(rideKey), 2 * 60 * 1000);
       throw error;
     }
-    for (const accountId of participants) {
-      Object.assign(userAccounts[accountId], updatedAccounts[accountId]);
-    }
     for (const [account, state] of countsToCommit) {
       crashFreezeState.set(account, state);
     }
-    ride.status = 'crashed';
-    ride.crashReports = rideReports;
     pendingCrashRides.delete(rideKey);
-    saveRideRecord(ride);
 
     for (const { accountId, points, change, description } of pointChanges) {
       log(`${description}，当前积分: ${points}`, LOG_TYPES.POINTS, { accountId, points, change });
@@ -5654,18 +5551,26 @@ async function handleEditUserPoints(message, socket) {
     return;
   }
 
-  // 更新用户积分
+  const { operationId } = message;
+  if (typeof operationId !== 'string' || !/^[a-zA-Z0-9_-]{12,96}$/.test(operationId)) {
+    return emitSocketError(socket, '请刷新管理页面后重新确认调分操作');
+  }
   const account = userAccounts[accountId];
   const oldPoints = account.points || 0;
-  account.points = oldPoints + pointsChange;
-
-  // 保存用户数据
-  await saveData(USER_ACCOUNTS_FILE, userAccounts);
-  resetDataChangeTimer();
+  const receipts = account.pointAdjustments || {};
+  if (Object.hasOwn(receipts, operationId)) {
+    if (receipts[operationId] !== pointsChange) return emitSocketError(socket, '该操作编号已用于其他调分');
+    socket.emit('message', { type: 'success', operationId, message: '该次积分操作已完成' });
+    return;
+  }
+  const updated = { ...account, points: oldPoints + pointsChange, pointAdjustments: { ...receipts, [operationId]: pointsChange } };
+  saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, [accountId]: updated });
+  Object.assign(account, updated);
 
   // 发送成功响应
   socket.emit('message', {
     type: 'success',
+    operationId,
     message: `用户 ${accountId} 的积分已更新，从 ${oldPoints} 变为 ${account.points}`
   });
 
@@ -6011,7 +5916,7 @@ async function startServer() {
     // 初始化房间用户
     await initRoomUsers();
 
-    // 加载发车记录
+    for (const account of Object.values(userAccounts)) flushAccountRideWrites(account);
     loadRideRecords();
 
     // 输出服务端版本号
@@ -6020,15 +5925,9 @@ async function startServer() {
     log('服务器初始化完成，开始监听端口...', LOG_TYPES.INFO);
   } catch (error) {
     handleError(error, 'startServer');
-    log('服务器初始化失败', LOG_TYPES.ERROR);
+    throw error;
   }
 }
-
-// 启动服务器
-startServer().catch(error => {
-  handleError(error, 'startServer');
-  process.exit(1);
-});
 
 // 清除60天前的日志和发车记录文件
 function cleanupOldFiles() {
@@ -6100,6 +5999,9 @@ function setupDailyOfflineTask() {
     }
     cleanupTimer = timerManager.setInterval(() => {
       try {
+        for (const account of Object.values(userAccounts)) {
+          if (account.pendingRideWrites) flushAccountRideWrites(account);
+        }
         cleanupData();
       } catch (error) {
         handleError(error, 'periodicCleanup');
@@ -6166,8 +6068,6 @@ function setupDailyOfflineTask() {
   startPeriodicCleanup();
 }
 
-// 启动每天自动下线任务
-setupDailyOfflineTask();
 
 // 设置定时重启任务
 function setupScheduledRestart() {
@@ -6261,8 +6161,6 @@ function setupScheduledRestart() {
   scheduleNextRestart();
 }
 
-// 启动定时重启任务
-setupScheduledRestart();
 
 // Add root path handler
 app.get('/', (req, res) => {
@@ -7377,8 +7275,8 @@ io.on('connection', (socket) => {
       // 同时检查RideManager.activeRides中是否有关联的用户（发车中的用户已从roomUsers移除）
       RideManager.activeRides.forEach((ride, rideId) => {
         if (ride.riders) {
-          const offlineRider = ride.riders.find(r => r.socketId === socket.id);
-          if (offlineRider) {
+          for (const offlineRider of ride.riders.filter(r => r.socketId === socket.id)) {
+            ride.readyStatus.delete(offlineRider.uid);
             // 发车中断开连接的用户也需要处理
             usersToOffline.push({
               ...offlineRider,
@@ -7488,12 +7386,17 @@ function initGainRecordsFile() {
     getOrCreateGainRecords(getTodayDateStr());
   } catch (error) {
     log(`初始化收益记录文件失败: ${error.message}`, LOG_TYPES.POINTS);
+    throw error;
   }
 }
 
-// 初始化收益记录文件
-initGainRecordsFile();
-
-server.listen(PORT, '0.0.0.0', () => {
-  log(`服务器运行于 http://0.0.0.0:${PORT}`);
+startServer().then(() => {
+  initGainRecordsFile();
+  setInterval(cleanupRemoteTransfers, 30000).unref();
+  setupDailyOfflineTask();
+  setupScheduledRestart();
+  server.listen(PORT, '0.0.0.0', () => log(`服务器运行于 http://0.0.0.0:${PORT}`));
+}).catch(error => {
+  handleError(error, 'startServer');
+  process.exit(1);
 });
