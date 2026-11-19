@@ -148,7 +148,9 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         if (c.op === "cancel-route" && busy && sameRoute(busy.command, c) && c.payload.targetMessageId && !activeCancel) return "取消与本地授权不符";
         const originalJoin = c.op === "join-world" && w?.retainedJoin?.messageId === c.messageId &&
             w.retainedJoin.rosterVersion === c.rosterVersion;
-        if (w && c.rosterVersion && c.rosterVersion < w.rosterVersion && !activeCancel && !originalJoin && !routeWasCanceled(s, c)) return "名单版本已过期";
+        // 退场按当前任务、世界和席位核验，后续降员升级名单时原退场授权仍有效。
+        if (w && c.rosterVersion && c.rosterVersion < w.rosterVersion && c.op !== "leave-world" &&
+            !activeCancel && !originalJoin && !routeWasCanceled(s, c)) return "名单版本已过期";
         if (w?.removed && ["join-world", "run-route"].includes(c.op) && !routeWasCanceled(s, c)) return "席位已从本世界移出";
     }
     function makeSession(c) {

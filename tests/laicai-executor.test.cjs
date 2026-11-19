@@ -241,6 +241,53 @@ test("名单升版后旧授权的精准取消仍有效，退单人后单独重�
     assert.ok(!("worldAttemptId" in ready));
 });
 
+test("连续降员后仍执行本席旧名单的退场，并拒绝不匹配的退场", async () => {
+    const file = fakeFile(), leaves = [];
+    const options = { role: "big", file, actions: {
+        "join-world": join,
+        "leave-world"(cmd) {
+            leaves.push(cmd.messageId);
+            return { op: "seat-left", payload: { single: true } };
+        }
+    }};
+    const executor = createExecutor(options);
+    await admit(file, executor);
+    deliver(file, packet("v2", "roster-update", { ...world, rosterVersion: 2 },
+        { roster: [{ seatId: "teammate" }], removed: ["s"] }));
+    executor.poll();
+    deliver(file, packet("v3", "roster-update", { ...world, rosterVersion: 3 },
+        { roster: [], removed: ["s", "teammate"] }));
+    executor.poll();
+
+    const resumed = createExecutor(options);
+    const leave = packet("leave", "leave-world", { ...world, rosterVersion: 2 });
+    const invalid = [
+        ["task", { taskId: "other" }], ["room", { roomName: "其他房间" }],
+        ["world", { worldAttemptId: "other" }], ["uid", { worldUid: "100000002" }],
+        ["seat", { seatId: "other" }], ["version", { rosterVersion: 0 }],
+    ];
+    for (const [name, scope] of invalid) {
+        deliver(file, { ...leave, ...scope, messageId: "bad_" + name });
+    }
+    resumed.poll();
+    assert.deepEqual(leaves, []);
+    for (const [name] of invalid) {
+        assert.ok(results(file, "ack").some(e => e.replyTo === "bad_" + name && e.payload.status === "rejected"));
+    }
+    deliver(file, leave);
+    resumed.poll();
+    await resumed.settle();
+    assert.deepEqual(leaves, ["leave"]);
+    assert.ok(results(file, "seat-left").some(e => e.replyTo === "leave" && e.rosterVersion === 2 && e.payload.single));
+
+    deliver(file, leave);
+    deliver(file, { ...leave, messageId: "closed" });
+    resumed.poll();
+    await resumed.settle();
+    assert.deepEqual(leaves, ["leave"]);
+    assert.ok(results(file, "ack").some(e => e.replyTo === "closed" && e.payload.status === "rejected"));
+});
+
 test("重新启动只读核对退场结果，不再发起离开操作", async () => {
     const file = fakeFile();
     let clicks = 0, inspections = 0;
