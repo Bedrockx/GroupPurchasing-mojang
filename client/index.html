@@ -1063,6 +1063,7 @@
         let onlineUsers = []; // 存储已上线用户
         let schedules = []; // 存储调度任务
         let currentEditScheduleId = null; // 当前编辑的调度任务ID
+        let rideDiskWrites = Promise.resolve();
         let preparedRide = null; // 当前客户端一次只能为一个 BetterGI 进程准备座位
         let currentRideIdentifier = ''; // 存储当前发车标识
         let fileWatcherState = {
@@ -2501,10 +2502,12 @@
         
         // 加载配置
         function loadConfig() {
+            const generation = loginGeneration;
             return new Promise((resolve) => {
                 if (window.electronAPI && window.electronAPI.readFile) {
                     const filePath = `${appPath}/config.json`;
                     window.electronAPI.readFile(filePath, (err, data) => {
+                        if (generation !== loginGeneration) { resolve(); return; }
                         if (!err && data) {
                             try {
                                 const parsedConfig = JSON.parse(data);
@@ -2513,7 +2516,6 @@
                                     document.getElementById('login-account').value = config.autoLogin.account || '';
                                     document.getElementById('login-password').value = config.autoLogin.password || '';
                                     document.getElementById('auto-login').checked = true;
-                                    const generation = loginGeneration;
                                     setTimeout(() => {
                                         if (generation !== loginGeneration) return;
                                         const loginButton = document.querySelector('.button[onclick="startConnection()"]');
@@ -2565,6 +2567,7 @@
                                     
                                     // 启动文件监听
                                     setTimeout(() => {
+                                        if (generation !== loginGeneration) return;
                                         startFileWatchers();
                                         startCronWatchers();
                                     }, 500);
@@ -4318,6 +4321,9 @@
             preparedRide = ride;
             ride.timeout = setTimeout(() => { if (preparedRide === ride) resetPreparedRide(); }, 120000);
             try {
+            // 上一车已交给主进程的写入结束后，再扫描本车使用的图片清单。
+            await rideDiskWrites;
+            if (preparedRide !== ride) return;
             // 判断是否是队员（不是房主）
             const isMember = rideInfo.host.username !== currentRider.username || rideInfo.host.uid !== currentRider.uid;
             
@@ -4418,9 +4424,9 @@
                 }
             }, null, 2);
             
-            await new Promise((resolve, reject) => {
+            await writeForRide(ride, () => new Promise((resolve, reject) => {
                 window.electronAPI.writeFile(matchInfoPath, matchInfoContent, error => error ? reject(new Error(error)) : resolve());
-            });
+            }));
             if (preparedRide !== ride) return;
             ride.readyReply = { ...reply, ready: true,
                 ...(isMember ? { imageMeta: rideImageMeta } : { imageManifest: rideImageManifest }) };
@@ -4431,6 +4437,13 @@
                 addLog('准备发车失败：' + error.message, 'error');
                 sendMessageToServer({ ...reply, ready: false });
             }
+        }
+
+        function writeForRide(ride, write) {
+            // 本机同时仅有一个座位。旧车已发出的 IPC 完成后，新车才能读取或覆盖相同文件。
+            const result = rideDiskWrites.then(() => preparedRide === ride ? write() : undefined);
+            rideDiskWrites = result.catch(() => {});
+            return result;
         }
 
         function resetPreparedRide() {
@@ -4474,8 +4487,9 @@
             if (!ride || ride.rideId !== data.rideId || ride.launching) return;
             ride.images = ride.images.then(async () => {
                 for (const image of data.images || []) {
+                    if (preparedRide !== ride) return;
                     if (!safeImageName(image.fileName)) throw new Error('无效的队员图片名');
-                    await window.electronAPI.saveImageFile(ride.jsFolder + '/targets/' + image.fileName, image.imageData);
+                    await writeForRide(ride, () => window.electronAPI.saveImageFile(ride.jsFolder + '/targets/' + image.fileName, image.imageData));
                 }
             });
             // 发车阶段仍需检查这次写盘的结果。

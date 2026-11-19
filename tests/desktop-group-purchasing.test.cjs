@@ -156,3 +156,114 @@ test('启动团购更新失败仍进入主界面，并保留失败结果', async
     assert.equal(d.logs.some(row => row.msg.includes('自动更新完成')), false);
     assert.equal(d.logs.some(row => row.msg === '主界面'), true);
 });
+
+function deferred() {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return { promise, resolve };
+}
+
+for (const transition of ['注销', '切号']) {
+    test(transition + '后才返回的旧配置不会重新填入凭据或调度自动登录', async () => {
+        const d = desktop();
+        let reply;
+        d.api.readFile = (_path, callback) => { reply = callback; };
+        d.run(`
+            const scheduled = [];
+            setTimeout = fn => scheduled.push(fn);
+            config = { dragonName:'当前设置' };
+            document.getElementById('login-account').value = '乙';
+            document.getElementById('login-password').value = '';
+        `);
+        const loading = d.run('loadConfig()');
+        if (transition === '注销') {
+            d.run("socket = null; document.getElementById('main-container').classList.add = () => {}; document.getElementById('login-container').classList.remove = () => {}; logout()");
+        } else {
+            d.run("bindCommandAccount('乙')");
+        }
+        reply(null, JSON.stringify({ autoLogin:{account:'甲', password:'旧凭据'}, dragonName:'迟到的设置' }));
+        await loading;
+        assert.equal(d.run("document.getElementById('login-account').value"), transition === '注销' ? '' : '乙');
+        assert.equal(d.run("document.getElementById('login-password').value"), '');
+        assert.equal(d.run("config.dragonName"), '当前设置');
+        assert.equal(d.run('scheduled.length'), 0);
+    });
+}
+
+function rideDesktop() {
+    const d = desktop();
+    const files = new Map();
+    d.run(`
+        socket.connected = isLoggedIn = true;
+        getBgiFolderPath = () => '测试BGI';
+        schedules = [{ trigger:{ type:'trigger-ride', config:{ uid:'1', username:'甲' }},
+            action:{ type:'start-online-dragon', config:{ jsFolder:'同一目录', configName:'联机' } } }];
+        const prepare = rideId => handleRideMessage1({ rideId, seatUid:'1',
+            rideInfo:{ host:{ uid:'1', username:'甲' }, members:[], room:'测试房间' } });
+    `);
+    d.api.writeFile = (name, data, done) => { files.set(name, JSON.parse(data).onlineInfo.rideIdentifier); done(); };
+    d.api.listImageMetadata = async () => ({ success:true, files:[] });
+    return { d, files };
+}
+
+test('旧车扫描迟到，新车匹配信息已落盘后仍保持新车内容', async () => {
+    const { d, files } = rideDesktop();
+    const scanning = deferred(), release = deferred();
+    d.api.listImageMetadata = async () => {
+        scanning.resolve();
+        await release.promise;
+        return { success:true, files:[] };
+    };
+    const oldRide = d.run("prepare('旧车')");
+    await scanning.promise;
+    d.run("handleRideCancel({rideId:'旧车'})");
+    d.api.listImageMetadata = async () => ({success:true, files:[]});
+    await d.run("prepare('新车')");
+    release.resolve();
+    await oldRide;
+    assert.equal(files.get('同一目录/匹配信息.json'), '新车');
+    assert.deepEqual(d.sent.filter(m => m.ready).map(m => m.rideId), ['新车']);
+});
+
+test('已经提交的旧车匹配写入必须在新车扫描和落盘之前结束', async () => {
+    const { d, files } = rideDesktop();
+    const writing = deferred(), release = deferred();
+    const write = d.api.writeFile;
+    d.api.writeFile = async (name, data, done) => {
+        if (JSON.parse(data).onlineInfo.rideIdentifier === '旧车') { writing.resolve(); await release.promise; }
+        write(name, data, done);
+    };
+    const oldRide = d.run("prepare('旧车')");
+    await writing.promise;
+    d.run("handleRideCancel({rideId:'旧车'})");
+    let scanned;
+    d.api.listImageMetadata = async () => { scanned = files.get('同一目录/匹配信息.json'); return {success:true, files:[]}; };
+    const newRide = d.run("prepare('新车')");
+    release.resolve();
+    await Promise.all([oldRide, newRide]);
+    assert.equal(scanned, '旧车');
+    assert.equal(files.get('同一目录/匹配信息.json'), '新车');
+});
+
+test('同目录旧车图片写盘期间换车，新车读取落盘结果且旧车余图不再写入', async () => {
+    const { d, files } = rideDesktop();
+    await d.run("prepare('旧车')");
+    const writing = deferred(), release = deferred();
+    d.api.saveImageFile = async (name, data) => {
+        if (data === '旧图') { writing.resolve(); await release.promise; }
+        files.set(name, data);
+    };
+    const oldImages = d.run(`handleRideImages({rideId:'旧车', images:[
+        {fileName:'甲.png',imageData:'旧图'}, {fileName:'乙.png',imageData:'过期图片'}]}); preparedRide.images`);
+    await writing.promise;
+    d.run("handleRideCancel({rideId:'旧车'})");
+    let scanned;
+    d.api.listImageMetadata = async () => { scanned = files.get('同一目录/targets/甲.png'); return { success:true, files:[] }; };
+    const newRide = d.run("prepare('新车')");
+    release.resolve();
+    await Promise.all([oldImages, newRide]);
+    await d.run("handleRideImages({rideId:'新车',images:[{fileName:'甲.png',imageData:'新图'}]}); preparedRide.images");
+    assert.equal(scanned, '旧图');
+    assert.equal(files.get('同一目录/targets/甲.png'), '新图');
+    assert.equal(files.has('同一目录/targets/乙.png'), false);
+});
