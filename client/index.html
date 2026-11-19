@@ -1444,6 +1444,9 @@
             bridge.workers ||= {};
             return bridge.workers['w_'+id] ||= {done:[],state:'cold'};
         }
+        function lcHostMailboxActive(bridge,slot) {
+            return slot && !slot.released && ['preparing','ready','active'].includes(bridge.workers?.['w_'+slot.workerId]?.state);
+        }
         function lcReportStage(cmd,stage,extra={}) {
             const event = lcPacket(cmd.net,'worker-stage',{stage,...extra},cmd.net.messageId);
             lcBridge().outbox[event.messageId] = event;
@@ -1836,7 +1839,9 @@
             }
             if (lcState.options.role==='host' && cmd.net.workerId) {
                 const slot=bridge.slots[cmd.net.slotId];
-                if (cmd.retired && !heartbeat || slot?.worldAttemptId!==cmd.net.worldAttemptId || slot.slotGeneration!==cmd.net.slotGeneration || slot.released && !cmd.ack) {
+                if (cmd.retired && !heartbeat || !slot || slot.worldAttemptId!==cmd.net.worldAttemptId || slot.worldUid!==cmd.net.worldUid ||
+                    slot.workerId!==cmd.net.workerId || slot.slotGeneration!==cmd.net.slotGeneration || slot.released && !cmd.ack ||
+                    heartbeat && (bridge.ending || !lcHostMailboxActive(bridge,slot))) {
                     await window.electronAPI.consumeLaicai(directory,event.messageId,'out');
                     return;
                 }
@@ -1983,13 +1988,23 @@
                         lcPersist();
                     }
                 }
-                const directories = [...new Set(commands.flatMap(c => [
+                const directories = new Set(commands.flatMap(c => [
                     ...c.locals.filter(l=>(!c.retired || !l.withdrawn) && (!c.net.workerId ||
                         !['cold','isolated'].includes(lcWorkerData(bridge,c.net.workerId).state) ||
                         c.net.op==='cancel-attempt' && !c.retired && c.ack?.payload?.status!=='applied')).map(l=>l.directory),
                     ...(c.retirePrevious && !c.retirePrevious.finished ? [c.retirePrevious.directory] : [])
-                ]))];
-                if (state.options.role==='host') lcHostLabel(bridge);
+                ]));
+                if (state.options.role==='host') {
+                    // 路线期间小号可能没有待办，仍须按当前槽位读取执行端心跳。
+                    if (!state.task.cleanupOnly && !bridge.ending) {
+                        for (const slot of Object.values(bridge.slots)) {
+                            if (!lcHostMailboxActive(bridge,slot)) continue;
+                            const directory=bridge.commands[slot.prepareId]?.locals[0]?.directory;
+                            if (directory) directories.add(directory);
+                        }
+                    }
+                    lcHostLabel(bridge);
+                }
                 for (const directory of directories) {
                     let events;
                     try { events = await window.electronAPI.laicaiEvents(directory); }

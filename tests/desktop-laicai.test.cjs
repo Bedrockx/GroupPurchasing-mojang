@@ -193,6 +193,54 @@ function hostFixture(start) {
     return {f,launched,published,events,prep,result};
 }
 
+test('主用户重连收回旧入场授权后仍轮询在役槽位，只转发匹配代次的新鲜小号心跳',async()=>{
+    const {f,published,events,prep,result}=hostFixture();
+    const a=prep('a',1,1,'100000001'), b=prep('b',2,1,'100000002');
+    const polls=[];
+    const read=f.ctx.window.electronAPI.laicaiEvents;
+    f.ctx.window.electronAPI.laicaiEvents=async dir=>{polls.push(dir);return read(dir);};
+    f.msg('prepare-world',a);f.msg('prepare-world',b);
+    await f.run('lcPump()');
+    for (const cmd of published) await result(cmd,'world-ready',{exactReads:2,observedUid:cmd.message.worldUid});
+    f.msg('open-admission',{...a,rosterVersion:1,messageId:'open',payload:{roster:[]}});
+    await f.run('lcPump()');
+    await result(published.at(-1),'admission-opened',{});
+    f.msg('admit-seat',{...a,seatId:'guest',rosterVersion:1,messageId:'arm',payload:{uid:'100000008',gameName:'甲'}});
+    await f.run('lcPump()');
+    const arm=published.at(-1);
+    await result(arm,'seat-armed',{stable:true,ambiguous:false,members:[]});
+    await result(arm,'ack',{status:'applied'});
+    const snapshot=f.run("lcSend('state-request',{}, {clientId:lcClientId(),taskId:'t'})");
+    const task=f.run('lcState.task');
+    f.msg('state-snapshot',{replyTo:snapshot,payload:{task:{...task,phase:'route',pending:[],worlds:[
+        {...a,phase:'route',rosterVersion:1},{...b,phase:'ready'}
+    ]}}});
+    await f.run('lcPump()');
+    assert.equal(f.run("lcBridge().commands.arm.retired && lcBridge().commands.arm.locals[0].withdrawn"),true);
+    const heartbeat=()=>({source:'executor',role:'host',laicaiVersion:'1.2.3',observedAt:Date.now(),stage:'idle'});
+    const observed=()=>f.sent.filter(m=>m.op==='heartbeat' && m.payload.source==='executor');
+    polls.length=0;
+    await result(arm,'heartbeat',heartbeat());
+    await result(published[1],'heartbeat',heartbeat());
+    assert.deepEqual([...new Set(polls)].sort(),['a','b']);
+    assert.deepEqual(observed().map(e=>e.worldAttemptId),[a.worldAttemptId,b.worldAttemptId]);
+    await result(arm,'heartbeat',{...heartbeat(),observedAt:Date.now()-20000});
+    await result({...arm,message:{...arm.message,slotGeneration:2}},'heartbeat',heartbeat());
+    assert.equal(observed().length,2);
+    for (const state of ['isolated','cold','released']) {
+        polls.length=0;
+        if (state==='released') f.run("lcWorkerData(lcBridge(),'a').state='idle';lcBridge().slots[1].released=true");
+        else {f.ctx.workerState=state;f.run("lcWorkerData(lcBridge(),'a').state=workerState");}
+        await result(arm,'heartbeat',heartbeat());
+        assert.equal(polls.includes('a'),false);
+        // 强制其他待办轮询该目录时，迟到心跳也不能表示槽位仍在役。
+        const event=events.splice(0).at(-1);
+        f.ctx.oldPulse=event.message;
+        await f.run("lcEvent('a',oldPulse,lcBridge(),()=>true)");
+        assert.equal(observed().length,2);
+    }
+});
+
 test('备用多用户启动失败后可接替，已接待的位置正常复用且不重复启动 BAT',async()=>{
     const {f,launched,published,prep,result}=hostFixture(id=>id==='b'?{started:false,reason:'BAT不存在'}:null);
     const a=prep('a',1,1,'100000001'), b=prep('b',2,1,'100000002'), c=prep('c',2,2,'100000003');
