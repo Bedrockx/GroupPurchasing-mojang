@@ -319,6 +319,22 @@ test("主用户离线跨重启仅滞留一个带观测时间的执行端心跳",
     assert.equal(results(file, "heartbeat")[0].payload.observedAt, t);
 });
 
+test("同一目录换角色或用可创建会话的撤销指令，仍须服从原小号隔离", async () => {
+    const file = fakeFile();
+    file.WriteTextSync("mailbox/state/executor1.json", JSON.stringify({ revision: 1, session: null, ended: ["old"],
+        records: {}, quarantine: { taskId: "old", roomName: "原房" } }));
+    const host = createExecutor({ role: "host", file });
+    deliver(file, packet("cancel", "cancel-attempt", { ...world, workerId: "worker", slotId: 1, slotGeneration: 1 }));
+    host.poll(); await host.settle();
+    assert.equal(host.stopped, false);
+    const big = createExecutor({ role: "big", file });
+    deliver(file, start); big.poll(); await big.settle();
+    assert.deepEqual(results(file, "executor-ready"), []);
+    for (const id of ["cancel", start.messageId]) {
+        assert.ok(results(file, "ack").some(e => e.replyTo === id && e.payload.status === "rejected" && e.payload.reason.includes("隔离")));
+    }
+});
+
 test("人工核对标记只解除对应旧任务，也阻止从未领取的旧发车在离线后复活", () => {
     const file = fakeFile();
     const options = { role: "big", file };

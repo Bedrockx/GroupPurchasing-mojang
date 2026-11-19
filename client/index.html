@@ -1364,8 +1364,10 @@
                 if (old.ack) lcEmit(old.ack);
                 return old;
             }
+            const payload = lcState.options.role==='host' && ['prepare-world','task-end'].includes(m.op)
+                ? {...m.payload,localOwner:lcLocalOwner(m.taskId)} : m.payload;
             const command = {net:m,locals:directories.map(directory => ({
-                directory, message:lcPacket(m,m.op === 'route-release' ? 'run-route' : m.op,m.payload)
+                directory, message:lcPacket(m,m.op === 'route-release' ? 'run-route' : m.op,payload)
             }))};
             bridge.commands[m.messageId] = command;
             return command;

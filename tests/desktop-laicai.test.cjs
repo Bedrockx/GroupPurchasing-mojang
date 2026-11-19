@@ -193,6 +193,21 @@ function hostFixture(start) {
     return {f,launched,published,events,prep,result};
 }
 
+test('小号准备及终止的本地指令都保留原莫酱账号和客户端归属',async()=>{
+    const {f,published,prep}=hostFixture();
+    const original=prep('a',1,1,'100000001');
+    f.run('lcState.task.timeoutSeconds=20');
+    f.msg('prepare-world',original);
+    await f.run('lcPump()');
+    f.msg('task-end',{taskId:'t',messageId:'end',payload:{unsafeWorlds:[original]}});
+    await f.run('lcPump()');
+    const messages=published.map(p=>p.message);
+    assert.deepEqual(messages.map(m=>m.op),['prepare-world','task-end']);
+    for (const m of messages) {
+        assert.deepEqual({...m.payload.localOwner},{taskId:'t',roomName:'房',role:'host',accountId:'甲',clientId:f.run('lcClientId()')});
+    }
+});
+
 test('主用户重连收回旧入场授权后仍轮询在役槽位，只转发匹配代次的新鲜小号心跳',async()=>{
     const {f,published,events,prep,result}=hostFixture();
     const a=prep('a',1,1,'100000001'), b=prep('b',2,1,'100000002');

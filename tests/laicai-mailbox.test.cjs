@@ -6,6 +6,65 @@ const os = require('node:os');
 const {createDesktopFiles, limitedFile} = require('./helpers/laicai-files.cjs');
 const {createExecutor} = require('../js/来财/main.js');
 
+for (const restart of [false,true]) test('小号目录隔离只接受原任务的人工解除，'+(restart?'重启执行端':'驻留执行端')+'随后只能运行新授权',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'laicai-isolated-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:4,retryDelay:60}));
+  const dir=path.join(root,'多用户','来财');
+  fs.mkdirSync(dir,{recursive:true});
+  const [oldClient,otherClient]=['原安装','另一安装'].map(name=>{
+    const install=path.join(root,name);
+    fs.mkdirSync(install);
+    return createDesktopFiles(install);
+  });
+  for (const client of [oldClient,otherClient]) { await client.select(dir); client.confirmRecovery(true); }
+  const owner={taskId:'old',roomName:'原房',role:'host',accountId:'原账号',clientId:'old_pc'};
+  const other={...owner,taskId:'other',accountId:'另一账号',clientId:'other_pc'};
+  oldClient.bind(dir,owner); otherClient.bind(dir,other);
+  const calls=[];
+  const create=()=>createExecutor({role:'host',file:limitedFile(dir),actions:{'prepare-world':async c=>{
+    calls.push(c.taskId);
+    return {op:'world-ready',payload:{observedUid:c.worldUid,exactReads:2}};
+  }}});
+  const world={workerId:'worker1',slotId:1,slotGeneration:1,worldUid:'200000001',worldAttemptId:'world1'};
+  // 一条用旧版本已经发出的准备指令，另一条核验新版保存的原主用户归属。
+  const first={type:'laicai',version:1,messageId:'old_prepare',taskId:'old',roomName:'原房',op:'prepare-world',...world,
+    payload:restart ? {} : {localOwner:owner}};
+  async function send(client,ex,m) {
+    client.publish(dir,m); ex.poll(); await ex.settle(); client.consume(dir,'in',m.messageId);
+  }
+  const original=create();
+  await send(oldClient,original,first);
+  await send(oldClient,original,{...first,op:'task-end',messageId:'end',payload:{unsafeWorlds:[world]}});
+  assert(original.stopped);
+  let worker=create();
+  const next={...first,taskId:'next',worldAttemptId:'world2',messageId:'new_prepare',payload:{localOwner:{...other,taskId:'next'}}};
+  await send(otherClient,worker,next);
+  assert.deepEqual(calls,['old'],'隔离时不能切换小号');
+  assert(otherClient.events(dir).some(e=>e.replyTo===next.messageId && e.payload.status==='rejected'));
+  assert.equal(await otherClient.recover(dir,other),true);
+  await send(otherClient,worker,{...next,messageId:'another'});
+  assert.deepEqual(calls,['old'],'其他主用户解除自己的任务不能解除原隔离');
+  if (!restart) {
+    const barrier=path.join(dir,'mailbox/state/end-old.json');
+    fs.writeFileSync(barrier,'{');
+    await send(otherClient,worker,{...next,messageId:'unreadable'});
+    assert.deepEqual(calls,['old'],'无法读取有效解除记录时应继续隔离');
+    for (const [i,wrong] of [{accountId:'其他账号'},{clientId:'other_pc'},{roomName:'其他房'},{role:'big'}].entries()) {
+      fs.writeFileSync(barrier,JSON.stringify({type:'laicai-local-end',version:1,...owner,...wrong}));
+      await send(otherClient,worker,{...next,messageId:'wrong_'+i});
+      assert.deepEqual(calls,['old'],'解除记录必须与原归属相匹配');
+    }
+    fs.unlinkSync(barrier);
+  }
+  assert.equal(await oldClient.recover(dir,owner),true);
+  if (restart) worker=create();
+  await send(otherClient,worker,next);
+  await send(oldClient,worker,{...first,messageId:'late_old'});
+  await send(otherClient,worker,{...next,messageId:'after_clear'});
+  assert.deepEqual(calls,['old','next']);
+  assert(otherClient.events(dir).some(e=>e.replyTo==='after_clear' && e.op==='world-ready'));
+});
+
 test('执行端离线错过终止，原客户端现场核对后拦截旧任务重放并允许新任务',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'laicai-recover-'));
   t.after(()=>{

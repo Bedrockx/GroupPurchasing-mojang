@@ -31,27 +31,39 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         try { write("mailbox/state/executor" + (state.revision % 2) + ".json", state); }
         catch (error) { fatal = error; throw error; }
     }
-    function manuallyEnded(taskId, room, expectedRole) {
+    function manuallyEnded(taskId, room, expectedRole, owner) {
         if (!identifier.test(taskId || "")) return false;
         const path = "mailbox/state/end-" + taskId + ".json";
-        if (!file.IsExists(path)) return false;
-        const mark = read(path);
+        let mark;
+        try {
+            if (!file.IsExists(path)) return false;
+            mark = read(path);
+        } catch (error) {
+            if (state.quarantine) return false;
+            throw error;
+        }
         return mark?.type === "laicai-local-end" && mark.version === 1 && mark.taskId === taskId &&
-            mark.roomName === room && ["big", "host"].includes(mark.role) && (!expectedRole || expectedRole === mark.role);
+            mark.roomName === room && ["big", "host"].includes(mark.role) && (!expectedRole || expectedRole === mark.role) &&
+            identifier.test(mark.clientId || "") && typeof mark.accountId === "string" && Boolean(mark.accountId.trim()) &&
+            (!owner || mark.clientId === owner.clientId && mark.accountId === owner.accountId);
+    }
+    function refreshQuarantine() {
+        const held = state.quarantine;
+        if (held && manuallyEnded(held.taskId, held.roomName, "host", held.owner)) {
+            if (!state.ended.includes(held.taskId)) state.ended.push(held.taskId);
+            delete state.quarantine;
+            save();
+        }
     }
     if (state.session && manuallyEnded(state.session.id, state.session.room, state.session.role)) {
         const previous = state.session;
         for (const [id, rec] of Object.entries(state.records)) {
             if (rec.command.taskId === previous.id && rec.command.roomName === previous.room) delete state.records[id];
         }
-        if (state.quarantine?.taskId === previous.id) delete state.quarantine;
         state.session = null;
         save();
     }
-    if (state.quarantine && manuallyEnded(state.quarantine.taskId, state.quarantine.roomName, "host")) {
-        delete state.quarantine;
-        save();
-    }
+    refreshQuarantine();
     if (state.session && state.session.role !== role) throw new Error("原任务仍占用此游戏会话");
     let sequence = 0;
     function event(command, op, payload, taskOnly = false) {
@@ -105,7 +117,7 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         if (completed) {
             terminal(rec, ["failed", "canceled"].includes(completed.payload.status) ? "rejected" : "applied",
                 completed.payload.reason);
-        } else if (actions.recover && ["leave-world", "check-clear"].includes(rec.command.op) &&
+        } else if (!state.quarantine && actions.recover && ["leave-world", "check-clear"].includes(rec.command.op) &&
             rec.command.worldAttemptId === state.session?.world?.worldAttemptId) recovery.push(rec);
         else terminal(rec, "rejected", "执行端已重启，原动作未确认，需要核对现场");
     }
@@ -114,6 +126,10 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         const s = state.session;
         if (!identifier.test(c.taskId || "")) return "无效任务";
         if (state.ended.includes(c.taskId)) return "任务已结束";
+        if (state.quarantine) {
+            refreshQuarantine();
+            if (state.quarantine) return "该小号目录尚未确认清场，请由原客户端核对并解除隔离";
+        }
         if (s && (s.id !== c.taskId || s.room !== c.roomName)) return "会话已由其他任务占用";
         if (c.op === "task-start") {
             if (s || p.role !== role || p.laicaiVersion !== LAICAI_VERSION || !identifier.test(p.seatId || "")) return "席位、版本或任务不符";
@@ -293,7 +309,10 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
                 if (c.op === "task-end") {
                     const unsafe = c.payload.unsafeWorlds?.find(w => active && w.worldAttemptId === active.worldAttemptId &&
                         w.workerId === active.workerId && w.slotGeneration === active.slotGeneration && w.slotId === active.slotId);
-                    if (unsafe && role === "host") state.quarantine = { taskId: c.taskId, roomName: c.roomName, ...unsafe };
+                    if (unsafe && role === "host") {
+                        const owner = active.payload?.localOwner || c.payload.localOwner;
+                        state.quarantine = { taskId: c.taskId, roomName: c.roomName, ...unsafe, ...(owner && {owner}) };
+                    }
                     state.ended.push(c.taskId); state.session = null; stopped = true;
                 }
                 else retire(s);
@@ -355,7 +374,7 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         }
         visible = current;
         const s = state.session;
-        if (s && s.watch && !busy && !monitor && actions.observe && now() >= nextObservation) {
+        if (!state.quarantine && s && s.watch && !busy && !monitor && actions.observe && now() >= nextObservation) {
             const rec = state.records["m_" + s.watch];
             const watching = { canceled: false };
             monitor = watching;
@@ -370,7 +389,7 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
                 }
             })().catch(error => { fatal = error; }).finally(() => { monitor = null; });
         }
-        if (s && now() - lastHeartbeat >= 5000) {
+        if (!state.quarantine && s && now() - lastHeartbeat >= 5000) {
             lastHeartbeat = now();
             if (heartbeatId && file.IsExists("mailbox/out/" + heartbeatId + ".ready.json")) return;
             const ref = busy ? busy.command : s.lastCommand;
