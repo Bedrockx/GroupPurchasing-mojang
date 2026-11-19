@@ -3311,7 +3311,7 @@ function lcFillSlots(task) {
       deadline:Date.now()+90000, prepareUntil:Date.now()+360000, stage:'starting'};
     task.worlds.push(world);
     occupied.add(worker.workerId);
-    lcQueue(task,host,'prepare-world',world,{}, {deadline:world.deadline,prepareUntil:world.prepareUntil});
+    lcQueue(task,host,'prepare-world',world,{}, {deadline:world.deadline,prepareUntil:world.prepareUntil,timeoutSeconds:task.config.timeoutSeconds});
   }
 }
 

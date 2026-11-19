@@ -241,6 +241,31 @@ test('主用户重连收回旧入场授权后仍轮询在役槽位，只转发�
     }
 });
 
+test('旧准备授权首次投递时从房间补齐时限，重复派发沿用同一本地指令',async()=>{
+    const {f,published,prep}=hostFixture();
+    f.run('lcState.task.timeoutSeconds=300');
+    const p=prep('a',1,1,'100000001');
+    f.msg('prepare-world',p);await f.run('lcPump()');
+    assert.equal(published[0].message.payload.timeoutSeconds,300);
+    assert.equal(published[0].message.payload.localOwner.clientId,f.run('lcClientId()'));
+    assert.equal(p.payload.timeoutSeconds,undefined);
+    f.msg('prepare-world',p);await f.run('lcPump()');
+    assert.equal(published.length,1);
+});
+
+test('账本中已有的小号准备信封按原文恢复，新清场授权同步房间时限',async()=>{
+    const {f,published,prep}=hostFixture();
+    const p=prep('a',1,1,'100000001');
+    f.msg('prepare-world',p);
+    const original=f.run("JSON.stringify(lcBridge().commands.p100000001.locals[0].message)");
+    f.run('lcState.task.timeoutSeconds=300;lcPersist()');
+    f.msg('prepare-world',p);await f.run('lcPump()');
+    assert.equal(JSON.stringify(published[0].message),original);
+    f.msg('check-clear',{...p,messageId:'cleanup',rosterVersion:1,payload:{}});
+    await f.run('lcPump()');
+    assert.equal(published.find(e=>e.message.op==='check-clear').message.payload.timeoutSeconds,300);
+});
+
 test('备用多用户启动失败后可接替，已接待的位置正常复用且不重复启动 BAT',async()=>{
     const {f,launched,published,prep,result}=hostFixture(id=>id==='b'?{started:false,reason:'BAT不存在'}:null);
     const a=prep('a',1,1,'100000001'), b=prep('b',2,1,'100000002'), c=prep('c',2,2,'100000003');

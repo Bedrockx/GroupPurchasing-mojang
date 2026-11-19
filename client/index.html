@@ -1481,6 +1481,16 @@
             });
             if (parts.length) lcElement('status').textContent = parts.join(' / ');
         }
+        function lcIssueHost(m,directory) {
+            const cmd=lcIssue(m,[directory]);
+            const local=cmd.locals[0].message;
+            // 旧任务的 prepare 可能缺少时限，后续新授权也可把房间配置同步到当前小号。
+            if (['prepare-world','open-admission','admit-seat','roster-update','check-clear'].includes(m.op) &&
+                local.payload.timeoutSeconds===undefined && lcState.task.timeoutSeconds!==undefined) {
+                local.payload={...local.payload,timeoutSeconds:lcState.task.timeoutSeconds};
+            }
+            return cmd;
+        }
         function lcTrackHost(m,bridge,directory) {
             const slot = bridge.slots[m.slotId];
             if (m.op === 'prepare-world') {
@@ -1488,7 +1498,7 @@
                     slot && (m.slotGeneration <= slot.slotGeneration || !slot.released)) return;
                 const worker = lcWorkerData(bridge,m.workerId);
                 if (!['idle','cold'].includes(worker.state)) return;
-                const cmd=lcIssue(m,[directory]);
+                const cmd=lcIssueHost(m,directory);
                 cmd.until = Date.now()+360000;
                 lcHostStage(cmd,'starting');
                 cmd.warm = worker.state === 'idle';
@@ -1525,7 +1535,7 @@
             }
             if (m.op==='admit-seat') { slot.armId=m.messageId; slot.detail='等待 '+m.payload.gameName+' 申请'; }
             if (m.op==='check-clear') { delete slot.armId; slot.detail='核验世界已清空'; }
-            const cmd=lcIssue(m,[directory]);
+            const cmd=lcIssueHost(m,directory);
             const worker=lcWorkerData(bridge,m.workerId);
             if (m.op==='release-world') {
                 const declared=lcState.options.workers.find(w=>w.workerId===m.workerId);

@@ -262,6 +262,8 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         if (!state.session) makeSession(c);
         const s = state.session;
         if (["check-clear", "admit-seat", "cancel-attempt", "release-world", "task-end"].includes(c.op)) s.watch = null;
+        if (role === "host" && Number.isSafeInteger(c.payload.timeoutSeconds) && c.payload.timeoutSeconds > 0 && c.payload.timeoutSeconds <= 86400)
+            s.timeoutSeconds = c.payload.timeoutSeconds;
         s.lastCommand = c;
         if (worldOps.includes(c.op) && !s.world) s.world = { ...c, rosterVersion: c.rosterVersion || 0 };
         if (role === "host" && ["admit-seat", "roster-update"].includes(c.op)) s.world.observationSeq=c.payload.observationSeq || 0;
