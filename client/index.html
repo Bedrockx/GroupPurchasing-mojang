@@ -1491,6 +1491,14 @@
             const prepare=bridge.commands[slot.prepareId];
             if (prepare.failed && !['cancel-attempt','release-world'].includes(m.op)) return;
             if (slot.released || m.rosterVersion && m.rosterVersion<(slot.rosterVersion || 0)) return;
+            if (['admit-seat','roster-update'].includes(m.op)) {
+                const seq=m.payload.observationSeq || 0;
+                if (seq<(slot.observationSeq || 0)) return;
+                slot.observationSeq=seq;
+                for (const [id,event] of Object.entries(bridge.outbox)) {
+                    if (event.op==='world-members' && event.worldAttemptId===slot.worldAttemptId && event.replyTo!==m.messageId) delete bridge.outbox[id];
+                }
+            }
             if (m.rosterVersion) slot.rosterVersion=m.rosterVersion;
             if (m.op==='open-admission') slot.detail='开放入场中';
             if (m.op==='roster-update') {

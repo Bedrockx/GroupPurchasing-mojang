@@ -138,6 +138,8 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         if (s && s.closed.includes(c.worldAttemptId)) return "世界尝试已关闭";
         if (state.retired && state.retired.some(r => r.task === c.taskId && r.world === c.worldAttemptId)) return "世界尝试已回收";
         const w = s && s.world;
+        if (role === "host" && ["admit-seat", "roster-update"].includes(c.op) &&
+            (p.observationSeq || 0) < (w?.observationSeq || 0)) return "旧的成员观测授权";
         if (w && ["release-world", "cancel-attempt"].includes(c.op) && w.everOpened && !w.cleared) return "世界尚未确认清空";
         if (w && (w.worldAttemptId !== c.worldAttemptId || w.worldUid !== c.worldUid)) return "当前尝试不符";
         if (!w && !["prepare-world", "join-world", "cancel-attempt", "leave-world", "roster-update"].includes(c.op)) return "世界未绑定";
@@ -246,6 +248,8 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
             return false;
         }
         if (!invalid && busy && !control.includes(c.op)) {
+            if (c.op === "admit-seat" && busy.command.op === "admit-seat" &&
+                c.payload.observationSeq > (busy.command.payload.observationSeq || 0)) cancel(busy);
             if (c.op === "run-route" && busy.awaitingProof && c.routeSeq > busy.command.routeSeq) cancel(busy);
             if (c.op === "leave-world" && c.worldAttemptId === busy.command.worldAttemptId &&
                 ["run-route", "join-world"].includes(busy.command.op)) cancel(busy);
@@ -260,6 +264,7 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         if (["check-clear", "admit-seat", "cancel-attempt", "release-world", "task-end"].includes(c.op)) s.watch = null;
         s.lastCommand = c;
         if (worldOps.includes(c.op) && !s.world) s.world = { ...c, rosterVersion: c.rosterVersion || 0 };
+        if (role === "host" && ["admit-seat", "roster-update"].includes(c.op)) s.world.observationSeq=c.payload.observationSeq || 0;
         if (c.op === "join-world") s.single = false;
         if (c.op === "open-admission") s.world.everOpened = true;
         if (s.world && c.rosterVersion) s.world.rosterVersion = Math.max(s.world.rosterVersion, c.rosterVersion);

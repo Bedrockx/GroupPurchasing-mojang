@@ -33,6 +33,7 @@ function createRenderer(transport, actor, options, api, clock, seed) {
   run(`accountId=account; isLoggedIn=true; socket=network; closeBGI=async()=>true;
       lcState={enabled:true,room:'测试房间',options,payload:{laicaiVersion:'1.0.0'}};`);
   return {receive(message){ctx.message=message;run('lcReceive(message)');},
+    requestSnapshot:()=>run("lcSend('state-request',{}, {clientId:lcClientId(),taskId:lcState.task.taskId})"),
     pump:()=>run('lcPump()'), locked:()=>Boolean(run('lcLock()'))};
 }
 
@@ -92,7 +93,7 @@ async function simulateTask(t, {workers,bigCount,makeActions,limit=2000,stopWhen
     for (const packet of up.splice(0)) {
       trace.push({direction:'up',...packet});
       const deliver=(event=packet.data)=>room.app.send(packet.uid,event);
-      if(sendUp)await sendUp(packet,room,deliver);
+      if(sendUp)await sendUp(packet,room,deliver,clients.get(packet.uid));
       else await deliver();
     }
     // 让异步游戏操作运行到下一次等待，不能直接 await settle 而阻塞另一窗口。

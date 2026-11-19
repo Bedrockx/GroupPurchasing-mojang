@@ -3278,6 +3278,10 @@ function lcQueue(task, seat, op, world, extra = {}, payload = {}) {
   if (world) {
     Object.assign(scope, {worldUid:world.worldUid, worldAttemptId:world.worldAttemptId});
     if (seat.role === 'host') Object.assign(scope, {workerId:world.workerId,slotId:world.slotId,slotGeneration:world.slotGeneration});
+    if (seat.role==='host' && ['admit-seat','roster-update'].includes(op)) {
+      world.observationSeq=(world.observationSeq || 0)+1;
+      payload={...payload,observationSeq:world.observationSeq};
+    }
     if (world.rosterVersion) scope.rosterVersion = world.rosterVersion;
   }
   const message = laicaiMsg(task.roomName,op,payload,scope);
@@ -3332,6 +3336,7 @@ function lcNextApplicant(task, world) {
   world.phase = 'arming';
   world.applicant = seat.seatId;
   world.armId = null;
+  world.freshAdmission = false;
   world.joinedPosition = null;
   world.members = [];
   world.absentSince = {};
@@ -3340,7 +3345,7 @@ function lcNextApplicant(task, world) {
 }
 
 function lcConfirmAdmission(task, world) {
-  if (world.recheck || !world.joinedPosition) return;
+  if (world.needsObservation || world.recheck || !world.joinedPosition) return;
   const observed = world.members.find(m => m.seatId === world.applicant);
   if (!observed) return;
   if (observed.position !== world.joinedPosition) {
@@ -3359,6 +3364,48 @@ function lcConfirmAdmission(task, world) {
 function lcValidMembers(members, allowed) {
   return Array.isArray(members) && members.every(m => m && allowed.includes(m.seatId) && [2,3,4].includes(m.position)) &&
     new Set(members.map(m => m.position)).size === members.length && new Set(members.map(m => m.seatId)).size === members.length;
+}
+
+function lcWatchedWorld(task) {
+  return task.worlds.find(w=>w.worldAttemptId===task.active && (w.phase==='arming' || w.phase==='joining' || w.recheck));
+}
+
+function lcPauseHostObservation(task) {
+  const w=lcWatchedWorld(task);
+  if (!w) return;
+  w.needsObservation=true;
+  w.members=[];
+  w.absentSince={};
+  w.armId=null;
+}
+
+function lcRefreshHostObservation(task,requestId) {
+  const old=lcWatchedWorld(task);
+  if (!old || (!old.needsObservation && old.observationRequest===requestId)) return task;
+  // 即使新授权写盘失败，当前进程也不能再凭旧观测发车。重启时同样先封存旧观测。
+  lcPauseHostObservation(task);
+  const draft=JSON.parse(JSON.stringify(task));
+  const w=lcWatchedWorld(draft), host=draft.seats.find(s=>s.role==='host');
+  w.needsObservation=false;
+  w.observationRequest=requestId;
+  w.freshAdmission=true;
+  draft.pending=draft.pending.filter(i=>i.seatId!==host.seatId || i.message.worldAttemptId!==w.worldAttemptId ||
+    !['admit-seat','roster-update'].includes(i.message.op));
+  if (w.phase==='arming' && !w.recheck) {
+    const seat=draft.seats.find(s=>s.seatId===w.applicant);
+    lcQueue(draft,host,'admit-seat',w,{seatId:seat.seatId},{uid:seat.uid,gameName:seat.gameName});
+    // 刷新观测不会为原入场申请或正在进行的降员复核续期。
+    w.deadline=old.deadline;
+  } else {
+    const roster=laicaiRoster(draft).filter(s=>w.effective.includes(s.seatId));
+    const payload={roster,removed:w.removed || [],reason:'重连后核对小号现场'};
+    if (w.phase==='joining' && w.effective.includes(w.applicant)) payload.applicant=w.applicant;
+    lcQueue(draft,host,'roster-update',w,{},payload);
+    w.armId=draft.pending.at(-1).message.messageId;
+    if (w.recheck) w.recheck.replyTo=w.armId;
+  }
+  lcPublish(task,draft);
+  return draft;
 }
 
 function lcNoteAdmissionAbsences(world, p) {
@@ -3679,12 +3726,13 @@ function lcRuntime(task, seat, m) {
   const phase = name => { if (!world || world.phase !== name) throw Error('世界阶段不匹配'); };
   const armSeat = () => {
     phase('arming');
+    if (world.needsObservation) throw Error('等待主用户恢复后重新观测');
     if (!pending || pending.message.op!=='admit-seat' || pending.message.seatId!==world.applicant ||
         pending.message.worldAttemptId!==world.worldAttemptId || pending.message.worldUid!==world.worldUid ||
         (m.seatId!==undefined && m.seatId!==world.applicant))
       throw Error('回报不对应授权');
     if (p.stable===false || p.ambiguous===true || !lcValidMembers(p.members,world.admitted) ||
-        (m.op==='world-members' && (p.stable!==true || p.ambiguous!==false || p.observedUid!==world.worldUid || p.admissionMode!=='confirm'))) {
+        ((world.freshAdmission || m.op==='world-members') && (p.stable!==true || p.ambiguous!==false || p.observedUid!==world.worldUid || p.admissionMode!=='confirm'))) {
       if (m.op==='seat-armed') throw Error('放行前席位基线不一致');
       world.absentSince={};
       return;
@@ -3774,6 +3822,7 @@ function lcRuntime(task, seat, m) {
       lcConfirmAdmission(task,world);
       break;
     case 'world-members':
+      if (world?.needsObservation) throw Error('等待主用户恢复后重新观测');
       if (world?.recheck && m.replyTo===world.recheck.replyTo) {
         const expected=world.admitted.filter(id=>world.effective.includes(id));
         const keepApplicant = world.phase==='joining' && world.effective.includes(world.applicant);
@@ -3800,7 +3849,8 @@ function lcRuntime(task, seat, m) {
       if (world?.phase==='arming' && !world.recheck && m.replyTo===world.armId) { armSeat(); break; }
       if (world?.phase !== 'joining') throw Error('此时未申请');
       if (m.replyTo !== world.armId) throw Error('非本次申请的成员观测');
-      if (p.stable !== true || p.ambiguous !== false || !lcValidMembers(p.members,[...world.admitted,world.applicant])) {
+      if (p.stable !== true || p.ambiguous !== false || !lcValidMembers(p.members,[...world.admitted,world.applicant]) ||
+          (world.freshAdmission && (p.observedUid!==world.worldUid || p.admissionMode!=='confirm'))) {
         world.members=[]; world.absentSince={}; break;
       }
       lcNoteAdmissionAbsences(world,p);
@@ -3941,8 +3991,8 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
   }
   if (!room) return ack('rejected','来财房间不存在');
   if (laicaiTasks.has(room.name)) lcPrepareTick(laicaiTasks.get(room.name));
-  const task = laicaiTasks.get(room.name);
-  const seat = task?.seats.find(s => s.accountId === identity.accountId &&
+  let task = laicaiTasks.get(room.name);
+  let seat = task?.seats.find(s => s.accountId === identity.accountId &&
     (m.op === 'state-request' ? s.clientId === m.payload?.clientId &&
       (s.socketId === socket.id || !io.sockets.sockets.get(s.socketId)?.connected) : s.socketId === socket.id));
   const role = seat?.role || m.payload?.role || 'big';
@@ -3951,6 +4001,10 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
   if (m.op === 'state-request') {
     if (!seat && task?.seats.some(s => s.accountId === identity.accountId && s.clientId === m.payload.clientId)) {
       return ack('rejected','原客户端连接仍在线，请在连接释放后重试',true);
+    }
+    if (seat?.role==='host' && userAccounts[identity.accountId]?.rooms?.includes(room.name)) {
+      task=lcRefreshHostObservation(task,m.messageId);
+      seat=task.seats.find(s=>s.seatId===seat.seatId);
     }
     if (seat) {
       seat.socketId = socket.id;
@@ -6739,6 +6793,7 @@ async function startServer() {
     // 初始化数据
     await initData();
     for (const task of await loadData(LAICAI_FILE, [])) {
+      lcPauseHostObservation(task);
       for (const seat of task.seats) { seat.socketId = null; seat.offlineSince = Date.now(); }
       laicaiTasks.set(task.roomName, task);
     }
@@ -8021,6 +8076,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     for (const t of laicaiTasks.values()) {
       const s=t.seats.find(s=>s.socketId===socket.id);
+      if (s?.role==='host') lcPauseHostObservation(t);
       if (s) s.offlineSince=Date.now();
     }
     for (const [roomName, seats] of laicaiWaiting) {
