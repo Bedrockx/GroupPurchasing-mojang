@@ -1662,7 +1662,7 @@
                             <button class="button" onclick="loadAllAccounts()">刷新列表</button>
                             <button class="button" onclick="resetPassword()">重置密码</button>
                             <button id="freeze-user-btn" class="button button-danger" disabled>冻结用户</button>
-                            <button id="safe-user-btn" class="button" onclick="toggleSafeUser(document.getElementById('admin-user-select').value)">信任用户</button>
+                            <button id="safe-user-btn" class="button" disabled>信任用户</button>
                             <button class="button button-danger" onclick="deleteUser()">删除用户</button>
                         </div>
                     </div>
@@ -1882,6 +1882,10 @@
         let currentRoom = null; // 当前操作的房间
         let moveUserInfo = null; // 移动用户的信息
         
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+        }
+
         // 关闭自定义弹窗
         function closeCustomModal(confirmed) {
             const modal = document.getElementById('custom-modal');
@@ -2144,9 +2148,9 @@
                             }[roomInfo.mode] || '顺序发车';
                             
                             // 根据房间模式决定是否显示发车人数
-                            let roomPropertiesHTML = `<span>${modeText}</span>`;
+                            let roomPropertiesHTML = `<span>${escapeHtml(modeText)}</span>`;
                             if (roomInfo.mode !== 'none') {
-                                roomPropertiesHTML += `<span>${roomInfo.count}人发车</span>`;
+                                roomPropertiesHTML += `<span>${escapeHtml(roomInfo.count)}人发车</span>`;
                             }
                             
                             roomProperties.innerHTML = roomPropertiesHTML;
@@ -2178,7 +2182,7 @@
                                     const hostIcon = user.notHost ? '' : ' 👑';
                                     
                                     userItem.innerHTML = `
-                                        <span>${user.accountId}-${user.connectionId}-${user.username} (UID: ${user.uid})${hostIcon}</span>
+                                        <span>${escapeHtml(user.accountId)}-${escapeHtml(user.connectionId)}-${escapeHtml(user.username)} (UID: ${escapeHtml(user.uid)})${hostIcon}</span>
                                     `;
                                     userItem.onclick = function(e) {
                                         e.stopPropagation(); // 防止事件冒泡
@@ -2253,10 +2257,10 @@
                                 socketItem.style.borderRadius = '4px';
                                 
                                 socketItem.innerHTML = `
-                                    <div><strong>Socket ID:</strong> ${socket.socketId}</div>
-                                    <div><strong>连接ID:</strong> ${socket.connectionId}</div>
-                                    <div><strong>房间:</strong> ${socket.roomName}</div>
-                                    <div><strong>UID:</strong> ${socket.uid}</div>
+                                    <div><strong>Socket ID:</strong> ${escapeHtml(socket.socketId)}</div>
+                                    <div><strong>连接ID:</strong> ${escapeHtml(socket.connectionId)}</div>
+                                    <div><strong>房间:</strong> ${escapeHtml(socket.roomName)}</div>
+                                    <div><strong>UID:</strong> ${escapeHtml(socket.uid)}</div>
                                 `;
                                 
                                 connectionsContainer.appendChild(socketItem);
@@ -2286,11 +2290,11 @@
                         // 根据房间模式决定是否显示发车人数
                         let propertiesHTML = `
                             <div style="padding: 10px;">
-                                <p><strong>房间名称：</strong>${data.roomProperties.name}</p>
-                                <p><strong>发车模式：</strong>${modeText}</p>
+                                <p><strong>房间名称：</strong>${escapeHtml(data.roomProperties.name)}</p>
+                                <p><strong>发车模式：</strong>${escapeHtml(modeText)}</p>
                         `;
                         if (data.roomProperties.mode !== 'none') {
-                            propertiesHTML += `<p><strong>发车人数：</strong>${data.roomProperties.count}</p>`;
+                            propertiesHTML += `<p><strong>发车人数：</strong>${escapeHtml(data.roomProperties.count)}</p>`;
                         }
                         propertiesHTML += `</div>`;
                         
@@ -2313,14 +2317,15 @@
                             userItem.className = 'user-item online';
                             userItem.innerHTML = `
                                 <div>
-                                    <strong>${user.accountId}:${user.username}-${user.uid}</strong>
+                                    <strong>${escapeHtml(user.accountId)}:${escapeHtml(user.username)}-${escapeHtml(user.uid)}</strong>
                                     <br>
                                     <small>状态: 在线</small>
                                 </div>
-                                <button class="button button-secondary" onclick="toggleUserStatus('${user.uid}', '${data.roomName}', '${user.username}')">
+                                <button class="button button-secondary">
                                     强制下线
                                 </button>
                             `;
+                            userItem.querySelector('button').onclick = () => toggleUserStatus(user.uid, data.roomName, user.username);
                             output.appendChild(userItem);
                         });
                     }
@@ -2338,7 +2343,7 @@
                             userItem.className = 'user-item offline';
                             userItem.innerHTML = `
                                 <div>
-                                    <strong>${user.accountId}</strong>
+                                    <strong>${escapeHtml(user.accountId)}</strong>
                                     <br>
                                     <small>状态: 离线</small>
                                 </div>
@@ -2411,9 +2416,10 @@
                                     permissionItem.style.padding = '5px 0';
                                     permissionItem.style.borderBottom = '1px solid #f0f0f0';
                                     permissionItem.innerHTML = `
-                                        <span>${room}</span>
-                                        <button class="button button-danger" onclick="removeRoomPermission('${accountId}', '${room}')" style="white-space: nowrap;">移除</button>
+                                        <span>${escapeHtml(room)}</span>
+                                        <button class="button button-danger" style="white-space: nowrap;">移除</button>
                                     `;
+                                    permissionItem.querySelector('button').onclick = () => removeRoomPermission(accountId, room);
                                     existingList.appendChild(permissionItem);
                                 });
                                 
@@ -2441,10 +2447,11 @@
                                     <select id="add-room-select" style="flex: 1;">
                                         <option value="">-- 选择房间 --</option>
                                     </select>
-                                    <button class="button" onclick="addRoomPermission('${accountId}')" style="white-space: nowrap;">添加权限</button>
+                                    <button class="button" style="white-space: nowrap;">添加权限</button>
                                 </div>
                             `;
                             
+                            addPermissionDiv.querySelector('button').onclick = () => addRoomPermission(accountId);
                             // 填充房间选择下拉框
                             const roomSelect = addPermissionDiv.querySelector('#add-room-select');
                             data.data.forEach(room => {
@@ -2503,9 +2510,9 @@
                     
                     output.innerHTML = `
                         <div>
-                            <strong>账号：</strong> ${data.data.account}<br>
+                            <strong>账号：</strong> ${escapeHtml(data.data.account)}<br>
                             <strong>状态：</strong> ${data.data.isFrozen ? '已冻结' : '正常'}<br>
-                            <strong>积分：</strong> ${data.data.points || 0}<br>
+                            <strong>积分：</strong> ${escapeHtml(data.data.points || 0)}<br>
                             <strong>距上次发车：</strong> ${lastRideText}<br>
                             <strong>信任状态：</strong> ${data.data.safe ? '是' : '否'}
                         </div>
@@ -2513,14 +2520,17 @@
                             <h4>编辑积分</h4>
                             <div style="display: flex; gap: 10px; align-items: center;">
                                 <input type="number" id="edit-points-input" placeholder="输入积分变动值" style="flex: 1; padding: 5px;">
-                                <button class="button button-secondary" onclick="editUserPoints('${data.data.account}')">修改积分</button>
+                                <button class="button button-secondary">修改积分</button>
                             </div>
                             <small style="color: #666; margin-top: 5px; display: block;">提示：输入正数增加积分，输入负数减少积分</small>
                         </div>
                     `;
                     
+                    output.querySelector('button').onclick = () => editUserPoints(data.data.account);
                     // 更新信任用户按钮状态
                     const safeBtn = document.getElementById('safe-user-btn');
+                    safeBtn.disabled = false;
+                    safeBtn.onclick = () => toggleSafeUser(data.data.account, !data.data.safe);
                     safeBtn.textContent = data.data.safe ? '取消信任' : '信任用户';
                     safeBtn.className = `button ${data.data.safe ? 'button-danger' : ''}`;
                     
@@ -2602,6 +2612,10 @@
                     // 重新加载用户信息
                     loadUserInfo();
                 } else if (data.type === 'success') {
+                    if (data.operationId) {
+                        const pending = readPendingPointChanges();
+                        savePendingPointChanges(pending.filter(item => item.operationId !== data.operationId));
+                    }
                     // 积分编辑成功
                     showAlertModal('成功', data.message);
                     // 重新加载用户信息
@@ -2923,9 +2937,9 @@
                 gainItem.className = 'points-ranking-item';
                 gainItem.innerHTML = `
                     <span class="points-ranking-rank">${index + 1}</span>
-                    <span class="points-ranking-account">${item.accountId}-${item.gameAccount}</span>
-                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #3b82f6; margin-left: 10px;">${item.expGain.toLocaleString()}</span>
-                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #60a5fa; margin-left: 15px;">${item.moraGain.toLocaleString()}</span>
+                    <span class="points-ranking-account">${escapeHtml(item.accountId)}-${escapeHtml(item.gameAccount)}</span>
+                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #3b82f6; margin-left: 10px;">${escapeHtml(item.expGain.toLocaleString())}</span>
+                    <span style="min-width: 90px; text-align: right; font-weight: bold; color: #60a5fa; margin-left: 15px;">${escapeHtml(item.moraGain.toLocaleString())}</span>
                 `;
                 container.appendChild(gainItem);
             });
@@ -3231,9 +3245,9 @@
                 rankItem.className = 'points-ranking-item';
                 rankItem.innerHTML = `
                     <span class="points-ranking-rank">${index + 1}</span>
-                    <span class="points-ranking-account">${item.accountId}</span>
+                    <span class="points-ranking-account">${escapeHtml(item.accountId)}</span>
                     <span class="points-ranking-lastride">${formatLastRide(item.lastRide)}</span>
-                    <span class="points-ranking-points">${item.points}</span>
+                    <span class="points-ranking-points">${escapeHtml(item.points)}</span>
                 `;
                 container.appendChild(rankItem);
             });
@@ -3382,7 +3396,7 @@
                 let crashReportHTML = '';
                 
                 if (hasCrashReports) {
-                    const reportId = `crash-report-${record.rideId || displayIndex}`;
+                    const reportId = `crash-report-${displayIndex}`;
                     
                     // 炸车类型中文映射
                     const crashTypeMap = {
@@ -3402,29 +3416,29 @@
                         let details = [];
                         if (cr.reporter) {
                             const reporterInfo = `${cr.reporter.username} (UID: ${cr.reporter.uid}, 位置: ${cr.reporter.position})`;
-                            details.push(`<span style="color: #2196F3; font-weight: bold;">报告人: ${reporterInfo}</span>`);
+                            details.push(`<span style="color: #2196F3; font-weight: bold;">报告人: ${escapeHtml(reporterInfo)}</span>`);
                         }
-                        if (cr.myPosition) details.push(`<span style="color: #666;">位置: ${cr.myPosition}</span>`);
+                        if (cr.myPosition) details.push(`<span style="color: #666;">位置: ${escapeHtml(cr.myPosition)}</span>`);
                         if (cr.enteredPlayers && cr.enteredPlayers.length > 0) {
-                        details.push(`<span style="color: #3b82f6;">已进入: ${cr.enteredPlayers.join(', ')}</span>`);
+                        details.push(`<span style="color: #3b82f6;">已进入: ${escapeHtml(cr.enteredPlayers.join(', '))}</span>`);
                         }
                         if (cr.notEnteredPlayers && cr.notEnteredPlayers.length > 0) {
-                            details.push(`<span style="color: #f44336;">未进入: ${cr.notEnteredPlayers.join(', ')}</span>`);
+                            details.push(`<span style="color: #f44336;">未进入: ${escapeHtml(cr.notEnteredPlayers.join(', '))}</span>`);
                         }
                         if (cr.expectedPlayerCount) {
-                            details.push(`<span style="color: #666;">预期人数: ${cr.expectedPlayerCount}</span>`);
+                            details.push(`<span style="color: #666;">预期人数: ${escapeHtml(cr.expectedPlayerCount)}</span>`);
                         }
                         if (cr.actualPlayerCount !== undefined) {
-                            details.push(`<span style="color: #666;">实际人数: ${cr.actualPlayerCount}</span>`);
+                            details.push(`<span style="color: #666;">实际人数: ${escapeHtml(cr.actualPlayerCount)}</span>`);
                         }
                         if (cr.description) {
-                            details.push(`<span style="color: #666;">描述: ${cr.description}</span>`);
+                            details.push(`<span style="color: #666;">描述: ${escapeHtml(cr.description)}</span>`);
                         }
                         
                         const detailsHtml = details.length > 0 ? `<div style="margin-top: 5px; font-size: 12px;">${details.join('<br>')}</div>` : '';
                         
                         return `<div style="margin-bottom: 8px; padding: 8px; background-color: #ffebee; border-radius: 4px;">
-                            <strong>报告 ${idx + 1}:</strong> ${crashTypeCn}
+                            <strong>报告 ${idx + 1}:</strong> ${escapeHtml(crashTypeCn)}
                             ${detailsHtml}
                         </div>`;
                     }).join('');
@@ -3446,11 +3460,11 @@
                 recordDiv.innerHTML = `
                     <h4>发车记录 ${displayIndex}</h4>
                     <p><strong>发车时间:</strong> ${startTime}</p>
-                    <p><strong>发车标识:</strong> ${record.rideId || '无'}</p>
-                    <p><strong>房间:</strong> ${record.roomName || '无'}</p>
-                    <p><strong>房主:</strong> ${host ? `${host.accountId || '未知'}-${host.username} (UID: ${host.uid})` : '无'}</p>
-                    <p><strong>队员:</strong> ${members.length > 0 ? members.map(m => `${m.accountId || '未知'}-${m.username} (UID: ${m.uid})`).join(', ') : '无'}</p>
-                    <p><strong>状态:</strong> ${record.status}</p>
+                    <p><strong>发车标识:</strong> ${escapeHtml(record.rideId || '无')}</p>
+                    <p><strong>房间:</strong> ${escapeHtml(record.roomName || '无')}</p>
+                    <p><strong>房主:</strong> ${host ? `${escapeHtml(host.accountId || '未知')}-${escapeHtml(host.username)} (UID: ${escapeHtml(host.uid)})` : '无'}</p>
+                    <p><strong>队员:</strong> ${members.length > 0 ? members.map(m => `${escapeHtml(m.accountId || '未知')}-${escapeHtml(m.username)} (UID: ${escapeHtml(m.uid)})`).join(', ') : '无'}</p>
+                    <p><strong>状态:</strong> ${escapeHtml(record.status)}</p>
                     ${crashReportHTML}
                 `;
                 container.appendChild(recordDiv);
@@ -3594,9 +3608,9 @@
             // 为每行添加行号容器，便于高亮整行
             const highlightedLines = lines.map((line, lineIndex) => {
                 // 高亮关键词，使用蓝色背景
-                const highlightedLine = line.replace(new RegExp(escapeRegExp(keyword), 'g'), match => {
-                    return `<span class="search-highlight" data-line="${lineIndex}">${match}</span>`;
-                });
+                const highlightedLine = line.split(keyword).map(escapeHtml).join(
+                    `<span class="search-highlight" data-line="${lineIndex}">${escapeHtml(keyword)}</span>`
+                );
                 return `<div class="log-line" data-line="${lineIndex}">${highlightedLine}</div>`;
             });
             
@@ -3794,6 +3808,7 @@
             const accountId = document.getElementById('admin-user-select').value;
             const freezeBtn = document.getElementById('freeze-user-btn');
             freezeBtn.disabled = true;
+            document.getElementById('safe-user-btn').disabled = true;
             if (!accountId) {
                 document.getElementById('user-info-output').innerHTML = '请选择用户';
                 document.getElementById('room-permissions-output').innerHTML = '请选择用户';
@@ -3896,12 +3911,9 @@
         }
         
         // 切换信任用户状态
-        function toggleSafeUser(accountId) {
-            if (!accountId) {
-                showAlertModal('提示', '请选择用户');
-                return;
-            }
-            socket.emit('message', { type: 'toggle-safe-user', accountId });
+        function toggleSafeUser(accountId, safe) {
+            if (accountId !== document.getElementById('admin-user-select').value) return;
+            socket.emit('message', { type: 'toggle-safe-user', accountId, safe });
         }
         
         // 删除用户
@@ -3919,6 +3931,15 @@
             });
         }
         
+        // 同一次确认在回执丢失、页面刷新之后重试时沿用相同编号。
+        function readPendingPointChanges() {
+            return JSON.parse(sessionStorage.getItem('pending-points-' + currentAccount) || '[]');
+        }
+
+        function savePendingPointChanges(pending) {
+            sessionStorage.setItem('pending-points-' + currentAccount, JSON.stringify(pending));
+        }
+
         // 编辑用户积分
         function editUserPoints(accountId) {
             const pointsInput = document.getElementById('edit-points-input');
@@ -3927,10 +3948,10 @@
                 return;
             }
             
-            const pointsChange = parseInt(pointsInput.value.trim());
+            const pointsChange = Number(pointsInput.value.trim());
             
             // 验证输入是否为非零的整数
-            if (isNaN(pointsChange) || pointsChange === 0) {
+            if (!Number.isSafeInteger(pointsChange) || pointsChange === 0) {
                 showAlertModal('提示', '请输入非零的整数');
                 return;
             }
@@ -3938,12 +3959,15 @@
             // 显示确认对话框
             showConfirmModal('确认修改', `确定要对用户 ${accountId} 的积分进行 ${pointsChange > 0 ? '增加' : '减少'} ${Math.abs(pointsChange)} 分的操作吗？`, function(confirmed) {
                 if (confirmed) {
-                    // 发送修改积分的请求到服务端
-                    socket.emit('message', { 
-                        type: 'edit-user-points', 
-                        accountId: accountId, 
-                        pointsChange: pointsChange 
-                    });
+                    const pending = readPendingPointChanges();
+                    let operation = pending.find(item => item.accountId === accountId && item.pointsChange === pointsChange);
+                    if (!operation) {
+                        const bytes = crypto.getRandomValues(new Uint8Array(16));
+                        const operationId = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+                        operation = { accountId, pointsChange, operationId };
+                        savePendingPointChanges([...pending, operation]);
+                    }
+                    socket.emit('message', { type: 'edit-user-points', ...operation });
                 }
             });
         }
