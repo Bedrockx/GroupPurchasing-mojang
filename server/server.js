@@ -530,10 +530,11 @@ const adminConnections = new Map();
 const roomUsers = new Map();
 const loginKeys = new Map();
 const pendingCrashRides = new Map();
+const gainReportKeys = new Set();
 const roomRideCheckTimers = new Map();
 const rideRecords = [];
-// 发车对象只在创建时加入，磁盘恢复的历史车次不参与本轮冻结计数。
-const currentProcessRides = new WeakSet();
+// 记录本轮实际创建的车次编号，从磁盘重新读取同一车次时仍能判断所属运行周期。
+const currentProcessRideIds = new Set();
 const crashFreezeState = new WeakMap();
 // 首次上报和解冻按服务端接收顺序划界，避免同一毫秒内的操作混淆。
 let crashReportSequence = 0;
@@ -566,6 +567,8 @@ const RideManager = {
       createdAt: Date.now(),
       timeoutId: null,
       readyStatus: new Map(),
+      launchAckSeats: new Set(),
+      startedSeats: new Set(),
       removedUsersCache,
       memberImages: [],
       imageMetadata: new Map(),
@@ -601,7 +604,7 @@ const RideManager = {
       : null;
     
     ride.removedUsersCache.forEach(cachedUser => {
-      if (readyUids && !readyUids.has(cachedUser.uid)) {
+      if (userAccounts[cachedUser.accountId]?.isFrozen || (readyUids && !readyUids.has(cachedUser.uid))) {
         return;
       }
       
@@ -636,6 +639,7 @@ const RideManager = {
     
     ride.status = this.STATUS.COMPLETED;
     this.activeRides.delete(rideId);
+    timerManager.clearTimeout(ride.timeoutId);
     
     log(`发车 ${rideId} 已完成`, LOG_TYPES.RIDE, { rideId: rideId });
     
@@ -650,7 +654,8 @@ const RideManager = {
     for (const rider of ride.riders) {
       io.sockets.sockets.get(rider.socketId)?.emit('message', { type: 'ride-cancel', rideId, reason });
     }
-    this.restoreRiders(ride, true);
+    this.activeRides.delete(rideId);
+    if (ride.status !== 'waiting_for_launch') this.restoreRiders(ride, true);
     
     ride.riders.forEach(rider => {
       const pending = this.pendingOnlineRequests.get(rider.uid);
@@ -662,7 +667,6 @@ const RideManager = {
     });
     
     ride.status = this.STATUS.CANCELLED;
-    this.activeRides.delete(rideId);
     
     updateRideRecordStatus(rideId, 'cancelled');
     
@@ -752,9 +756,12 @@ function loadRideRecords() {
       const files = rideFiles.filter(name => /^\d{4}-\d{2}-\d{2}\.json$/.test(name)).sort().reverse();
       const recentFiles = [];
       for (const file of files) {
-        if (rideRecords.length >= 1000) break;
-        recentFiles.push(file);
         const day = readRideDay(path.join(rideRecordsDir, file));
+        for (const ride of day) {
+          if (ride.status !== 'crashed' && ride.pendingCrashReports?.length) restoreCrashWindow(ride);
+        }
+        if (rideRecords.length >= 1000) continue;
+        recentFiles.push(file);
         day.sort((a, b) => a.createdAt - b.createdAt);
         rideRecords.push(...day.slice(-1000));
       }
@@ -1449,21 +1456,6 @@ function cleanupData() {
       }
     }
 
-    // 清理过期的房间发车锁
-    for (const [roomName, isLocked] of RideManager.roomLocks.entries()) {
-      if (isLocked) {
-        // 清除所有被锁定的房间，防止死锁
-        RideManager.roomLocks.delete(roomName);
-      }
-    }
-
-    // 清理过期的发车检查计时器
-    for (const [roomName, timerId] of roomRideCheckTimers.entries()) {
-      timerManager.clearTimeout(timerId);
-      roomRideCheckTimers.delete(roomName);
-      log(`清理过期的发车检查计时器: ${roomName}`, LOG_TYPES.CLEANUP, { room: roomName });
-    }
-
     log('清理数据完成', LOG_TYPES.CLEANUP);
   } catch (error) {
     handleError(error, 'cleanupData');
@@ -1706,6 +1698,7 @@ function handleUserLogin(data, socket) {
 
             socket.emit('message', {
               type: 'login-success',
+              supportsReportAck: true,
               isAdmin: true,
               accountId: accountId,
               username: adminAccount.username,
@@ -1846,6 +1839,7 @@ function handleUserLogin(data, socket) {
 
             socket.emit('message', {
               type: 'login-success',
+              supportsReportAck: true,
               isAdmin: false,
               accountId: accountId,
               username: account.username,
@@ -2219,6 +2213,16 @@ async function handleToggleFreezeUser(data, socket) {
 
 // 冻结后下线该账户在各房间的所有 UID。
 function offlineFrozenAccount(accountId) {
+  for (const [uid, pending] of RideManager.pendingOnlineRequests) {
+    if ((getConnectionBySocketId(pending.socket?.id)?.accountId || pending.data.operatorAccountId) === accountId) {
+      RideManager.pendingOnlineRequests.delete(uid);
+    }
+  }
+  for (const [rideId, ride] of RideManager.activeRides) {
+    if (!ride.record.charged && ride.riders.some(seat => seat.accountId === accountId)) {
+      RideManager.handleRideCancel(rideId, '参车账户被冻结');
+    }
+  }
   for (const [roomName, room] of roomUsers) {
     const users = room.users.filter(item => item.accountId === accountId);
     for (const item of users) {
@@ -2827,7 +2831,8 @@ function handleUserOnline(data, socket) {
     socketId: socket ? socket.id : null,
     joinedAt: Date.now(),
     disconnected: false,
-    notHost: notHost || false
+    notHost: notHost || false,
+    memberOnly: typeof data.memberOnly === 'boolean' ? data.memberOnly : Boolean(notHost)
   });
 
   // 更新连接中的userInfo
@@ -2923,7 +2928,11 @@ function saveRideRecord(rideRecord, patch = null) {
   const records = readRideDay(filePath);
   const index = records.findIndex(record => record.rideId === rideRecord.rideId);
   if (index < 0) records.push({ ...rideRecord, ...patch });
-  else records[index] = patch ? { ...records[index], ...patch } : rideRecord;
+  else {
+    // 迟到的发车凭据不能覆盖已经判责的车次。
+    if (patch?.status === 'completed' && records[index].status === 'crashed') return;
+    records[index] = patch ? { ...records[index], ...patch } : rideRecord;
+  }
   saveDataSync(filePath, records);
   cleanupOldRecords(rideRecordsDir, 42);
 }
@@ -2984,7 +2993,7 @@ function chargeRide(ride, seats = ride.riders) {
     if (bonus) firstMembers.push(id);
     changes[id] = { ...userAccounts[id], lastRide: Date.now(), points: (userAccounts[id].points || 0) + base + bonus };
   }
-  commitRidePoints(ride, { riders, basePoints, charged: true }, changes);
+  commitRidePoints(ride, { riders, basePoints, charged: true, status: 'completed' }, changes);
   firstRideBonusUsers.push(...firstMembers);
   log(`发车积分已提交: ${ride.rideId}`, LOG_TYPES.POINTS, { rideId: ride.rideId });
 }
@@ -3070,6 +3079,53 @@ async function negotiateRideImages(ride, rideId) {
   const unresolved = pending.filter(uid => !ride.memberImages.some(image => image.uid === uid));
   if (unresolved.length > 0) {
     log(`部分队员图片未在协商期限内上传: ${unresolved.join(', ')}`, LOG_TYPES.RIDE, { rideId, unresolved });
+  }
+}
+
+function completeStartedRide(rideId, ride) {
+  if (RideManager.activeRides.get(rideId) !== ride || ride.startedSeats.size !== ride.riders.length) return;
+  try {
+    chargeRide(ride.record, ride.riders);
+  } catch (error) {
+    handleError(error, 'chargeRide');
+    RideManager.handleRideCancel(rideId, '发车结算失败');
+    return;
+  }
+  RideManager.handleRideSuccess(rideId);
+}
+
+async function prepareRideLaunch(rideId, ride) {
+  ride.status = 'preparing_images';
+  ride.imageNegotiationStarted = true;
+  timerManager.clearTimeout(ride.timeoutId);
+  ride.timeoutId = timerManager.setTimeout(() => {
+    if (RideManager.activeRides.get(rideId) === ride) RideManager.handleRideCancel(rideId, '等待启动确认超时');
+  }, 90000);
+  try {
+    await negotiateRideImages(ride, rideId);
+    if (RideManager.activeRides.get(rideId) !== ride) return;
+    const hostSocket = io.sockets.sockets.get(ride.host.socketId);
+    if (!hostSocket) return RideManager.handleRideCancel(rideId, '房主连接已断开');
+    if (ride.memberImages.length) {
+      hostSocket.emit('message', { type: 'ride-images', rideId, images: ride.memberImages.slice(0, ride.riders.length - 1) });
+    }
+    await new Promise(resolve => timerManager.setTimeout(resolve, 2000));
+    if (RideManager.activeRides.get(rideId) !== ride) return;
+    const targets = ride.riders.map(seat => io.sockets.sockets.get(seat.socketId));
+    if (targets.some(socket => !socket) || ride.riders.some(seat => userAccounts[seat.accountId]?.isFrozen)) {
+      return RideManager.handleRideCancel(rideId, '发车前席位已失效');
+    }
+    ride.status = 'waiting_for_launch';
+    for (const [index, seat] of ride.riders.entries()) {
+      const requireLaunchAck = ride.launchAckSeats.has(seat.uid);
+      targets[index].emit('message', { type: 'ride-message-2', rideId, seatUid: seat.uid,
+        requireLaunchAck, rideInfo: ride.record.rideInfo });
+      if (!requireLaunchAck) ride.startedSeats.add(seat.uid);
+    }
+    completeStartedRide(rideId, ride);
+  } catch (error) {
+    handleError(error, 'prepareRideLaunch');
+    if (RideManager.activeRides.get(rideId) === ride) RideManager.handleRideCancel(rideId, '发车准备失败');
   }
 }
 
@@ -3200,7 +3256,9 @@ async function handleReceivedMessage(socket, message) {
               // 通过uid找到对应的骑手
               rider = ride.riders.find(r => r.uid === uid);
             }
-            if (rider && rider.accountId === riderConnection.accountId) {
+            if (rider && rider.accountId === riderConnection.accountId && rider.socketId === socket.id &&
+                ride.status === RideManager.STATUS.WAITING_FOR_READY) {
+              if (message.supportsLaunchAck === true) ride.launchAckSeats.add(uid);
               if (!ride.readyStatus) {
                 ride.readyStatus = new Map();
               }
@@ -3232,86 +3290,30 @@ async function handleReceivedMessage(socket, message) {
                   RideManager.handleRideCancel(rideId, '房主或队员未就绪');
                   sendRoomsStatusToAll();
                   break;
-                } else {
-                  chargeRide(ride.record, ride.riders);
-                  ride.imageNegotiationStarted = true;
-                  // 所有用户都已就绪，发送发车消息2
-                  ride.status = 'all_ready';
-
-                  // 清除超时定时器
-                  if (ride.timeoutId) {
-                    timerManager.clearTimeout(ride.timeoutId);
-                  }
                 }
-
-                // 仅在全部骑手就绪后收集图片（先完成哈希协商，再发送需要更新的正文）
-                if (ride.imageNegotiationStarted) {
-                  if (!ride.memberImages) {
-                    ride.memberImages = [];
-                  }
-
-                // 检查房主是否存在
-                  if (host) {
-                  const hostSocket = io.sockets.sockets.get(host.socketId);
-                  if (hostSocket) {
-                    await negotiateRideImages(ride, rideId);
-                    // 将收集到的图片发送给房主（最多发车人数-1张）
-                    const maxImages = ride.riders.length - 1;
-                    const imagesToSend = ride.memberImages.slice(0, maxImages);
-
-                    if (imagesToSend.length > 0) {
-                      hostSocket.emit('message', {
-                        type: 'ride-images',
-                        rideId: rideId,
-                        images: imagesToSend
-                      });
-                      log(`向房主 ${host.username} 发送 ${imagesToSend.length} 张队员图片`, LOG_TYPES.RIDE, { username: host.username, images: imagesToSend.length });
-                    } else {
-                      log(`没有队员图片发送给房主`, LOG_TYPES.RIDE);
-                    }
-
-                    // 延迟发送发车消息2，给房主时间保存图片
-                    setTimeout(() => {
-                      // 发送发车消息2
-                      ride.riders.forEach(rider => {
-                        const riderSocket = io.sockets.sockets.get(rider.socketId);
-                        if (riderSocket) {
-                          riderSocket.emit('message', {
-                            type: 'ride-message-2',
-                            rideId: rideId,
-                            rideInfo: {
-                              host: {
-                                username: ride.host.username,
-                                uid: ride.host.uid
-                              },
-                              members: ride.teamMembers.map(member => ({
-                                username: member.username,
-                                uid: member.uid
-                              })),
-                              room: ride.roomName
-                            }
-                          });
-                          log(`向用户 ${rider.username} (${rider.uid}) 发送发车消息2`, LOG_TYPES.RIDE, { username: rider.username, uid: rider.uid, rideId: rideId });
-                        } else {
-                          log(`未找到用户 ${rider.username} (${rider.uid}) 的连接，socketId: ${rider.socketId}`, LOG_TYPES.ERROR, { username: rider.username, uid: rider.uid, socketId: rider.socketId });
-                        }
-                      });
-
-                      // 更新发车记录状态为完成
-                      updateRideRecordStatus(rideId, 'completed');
-
-                      // 处理发车成功
-                      RideManager.handleRideSuccess(rideId);
-                    }, 2000); // 延迟2秒
-                  }
-                }
-              }
+                await prepareRideLaunch(rideId, ride);
               }
             } else {
               log(`收到未在发车列表中的用户的准备状态，rideId: ${rideId}`, LOG_TYPES.ERROR, { rideId: rideId, uid: uid });
             }
           } else {
             log(`收到不存在的发车ID的准备状态: ${rideId}`, LOG_TYPES.RIDE, { rideId: rideId, uid: uid });
+          }
+          break;
+        }
+        case 'ride-started': {
+          const { rideId, uid, success } = message;
+          const ride = RideManager.activeRides.get(rideId);
+          const sender = requireAuthenticated(socket);
+          if (!ride || !sender || sender.isAdmin || ride.status !== 'waiting_for_launch' ||
+              typeof success !== 'boolean' || !ride.launchAckSeats.has(uid) || ride.startedSeats.has(uid)) break;
+          const seat = ride.riders.find(r => r.uid === uid);
+          if (!seat || seat.accountId !== sender.accountId || seat.socketId !== socket.id) break;
+          if (!success) {
+            RideManager.handleRideCancel(rideId, '队员启动失败');
+          } else {
+            ride.startedSeats.add(uid);
+            completeStartedRide(rideId, ride);
           }
           break;
         }
@@ -3468,9 +3470,17 @@ async function handleReceivedMessage(socket, message) {
             if (senderData && !senderData.isAdmin && !senderData.connection?.isMobile &&
                 mobileData && !mobileData.isAdmin && mobileData.connection?.isMobile &&
                 senderData.accountId === mobileData.accountId && mobileSocket && Array.isArray(schedules)) {
+              const requestId = message.requestId ?? message.data?.requestId;
+              const matching = requestId === undefined
+                ? [...remoteCommandTimers.values()].filter(item => item.command === 'get-schedules' &&
+                    item.mobileSocketId === message.targetSocketId && item.desktopSocketId === socket.id)
+                : [getRemoteCommand(message.targetSocketId, requestId, socket.id)];
+              const pending = matching.length === 1 && matching[0];
+              if (!pending || pending.command !== 'get-schedules') break;
+              clearRemoteCommand(message.targetSocketId, pending.requestId, socket.id);
               mobileSocket.emit('message', {
                 type: 'schedules-list',
-                data: { schedules: schedules.slice(0, 500) }
+                data: { sourceConnectionId: pending.sourceConnectionId, requestId: pending.requestId, schedules: schedules.slice(0, 500) }
               });
             } else {
               log(`拒绝无效的调度列表回传: socket=${socket.id}, target=${message.targetSocketId}`, LOG_TYPES.WARN);
@@ -4106,6 +4116,7 @@ function scheduleRideCheck(roomName) {
   }
 
   const timerId = timerManager.setTimeout(async () => {
+    if (roomRideCheckTimers.get(roomName) !== timerId) return;
     roomRideCheckTimers.delete(roomName);
     await checkAndHandleRideInternal(roomName);
   }, 1000);
@@ -4144,7 +4155,7 @@ async function checkAndHandleRideInternal(roomName) {
     }
 
     // 收集所有在线用户
-    const onlineUsers = room.users.filter(item => !item.disconnected);
+    const onlineUsers = room.users.filter(item => !item.disconnected && userAccounts[item.accountId] && !userAccounts[item.accountId].isFrozen);
 
     // 检查人数是否大于等于房间的发车人数
     if (onlineUsers.length < roomInfo.count) {
@@ -4242,11 +4253,13 @@ async function checkAndHandleRideInternal(roomName) {
     const rideInfo = {
       host: {
         username: host.username,
-        uid: host.uid
+        uid: host.uid,
+        memberOnly: host.memberOnly ?? Boolean(host.notHost)
       },
       members: teamMembers.map(member => ({
         username: member.username,
-        uid: member.uid
+        uid: member.uid,
+        memberOnly: member.memberOnly ?? Boolean(member.notHost)
       })),
       room: roomName
     };
@@ -4280,7 +4293,7 @@ async function checkAndHandleRideInternal(roomName) {
     const rideData = RideManager.createRideState(roomName, host, teamMembers);
     rideData.record = rideRecord;
     RideManager.activeRides.set(rideId, rideData);
-    currentProcessRides.add(rideRecord);
+    currentProcessRideIds.add(rideId);
     rideRecords.push(rideRecord);
 
     // 限制rideRecords数组大小，只保留最近的1000条记录
@@ -4297,6 +4310,7 @@ async function checkAndHandleRideInternal(roomName) {
         socket.emit('message', {
           type: 'ride-message-1',
           rideId: rideId,
+          seatUid: rider.uid,
           rideInfo: rideInfo,
           rideIdentifier: rideId // 发送发车标识给客户端
         });
@@ -4654,7 +4668,6 @@ async function handleMobileCommand(message, socket) {
     case 'yjl':
     case 'close-bgi':
     case 'close-game':
-    case 'get-schedules':
     case 'execute-schedule': {
       targetSocket.emit('message', {
         type: 'mobile-control-command',
@@ -4666,6 +4679,7 @@ async function handleMobileCommand(message, socket) {
       });
       break;
     }
+    case 'get-schedules':
     case 'get-screenshot':
     case 'get-client-log-files':
     case 'get-client-log-tail':
@@ -4700,6 +4714,8 @@ async function handleMobileCommand(message, socket) {
         }, TRAFFIC_TRANSFER_TIMEOUT);
         remoteCommandTimers.set(commandKey, {
           timer: timeout,
+          command,
+          sourceConnectionId: targetConnectionId,
           desktopSocketId: targetSocket.id,
           mobileSocketId: socket.id,
           requestId: effectiveRequestId
@@ -4708,7 +4724,7 @@ async function handleMobileCommand(message, socket) {
           type: 'mobile-control-command',
           command,
           requestId: effectiveRequestId,
-          params: { ...(params || {}), targetSocketId: socket.id }
+          params: { ...(params || {}), requestId: effectiveRequestId, targetSocketId: socket.id }
         });
         break;
       }
@@ -4897,133 +4913,65 @@ function getOrCreateGainRecords(dateStr) {
  * @returns {string} - 日期字符串，格式为 YYYY-MM-DD
  */
 function getTodayDateStr() {
-  const now = getBeijingTime();
-  // 如果当前时间在凌晨4点之前，使用前一天的日期
-  if (now.getHours() < 4) {
-    now.setDate(now.getDate() - 1);
-  }
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  // 北京时间四点等于 UTC 前一日二十点；平移后用 UTC 日历读取业务日期。
+  return new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-/**
- * 处理收益值，如果超过150000则进行处理：
- * 1. 如果各位数字中有1，则去掉最靠后的1
- * 2. 如果没有1，则除以10后向上取整
- * 处理后需要递归回去再检查一次，直到满足要求
- * @param {number} value 原始收益值
- * @returns {number} 处理后的收益值
- */
-function processExcessiveGain(value) {
-  if (value <= 150000) {
-    return value;
+// 回执仅在报告落盘后确认。旧客户端继续接收原有成功/错误消息。
+function replyReport(socket, reportId, success, message, retryable = false, legacyType = 'success') {
+  if (reportId !== undefined) {
+    socket.emit('message', { type: 'report-ack', reportId, success, retryable, message });
+  } else {
+    socket.emit('message', { type: success ? legacyType : 'error', message });
   }
+}
 
-  const str = String(value);
-  // 从右往左找第一个1（最靠后的1）
-  for (let i = str.length - 1; i >= 0; i--) {
-    if (str[i] === '1') {
-      // 去掉该位置的1
-      const newStr = str.slice(0, i) + str.slice(i + 1);
-      const newValue = parseInt(newStr, 10);
-      // 递归检查
-      return processExcessiveGain(newValue);
+function validReportId(id) {
+  return id === undefined || (typeof id === 'string' && id.length > 0 && id.length <= 160);
+}
+
+function loadGainReportKeys() {
+  for (const file of fs.readdirSync(gainRecordsDir)) {
+    if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(file)) continue;
+    const records = getOrCreateGainRecords(file.slice(0, -5));
+    for (const [id, items] of Object.entries(records)) {
+      for (const item of items) {
+        if (typeof item?.reportId === 'string') gainReportKeys.add(JSON.stringify([id, item.reportId]));
+      }
     }
   }
-  // 没有找到1，除以10后向上取整
-  const newValue = Math.ceil(value / 10);
-  // 递归检查
-  return processExcessiveGain(newValue);
 }
 
 function handleReportGain(message, socket) {
+  const { reportId, gameAccount } = message;
+  const reply = (ok, reason, retry) => replyReport(socket, reportId, ok, reason, retry, 'gain-reported');
   try {
-    const socketData = requireAuthenticated(socket);
-    if (!socketData || socketData.isAdmin) return;
-    let { gameAccount, expGain, moraGain } = message;
-
-    if (typeof gameAccount !== 'string' || gameAccount.length === 0 || gameAccount.length > 128 ||
-        typeof expGain !== 'number' || !Number.isFinite(expGain) || expGain < 0 ||
-        typeof moraGain !== 'number' || !Number.isFinite(moraGain) || moraGain < 0) {
-      emitSocketError(socket, '收益报告参数无效');
-      return;
+    const sender = requireAuthenticated(socket);
+    if (!sender || sender.isAdmin || (message.accountId && message.accountId !== sender.accountId)) {
+      return reply(false, '无权上报收益');
     }
-    if (message.accountId && message.accountId !== socketData.accountId) {
-      emitSocketError(socket, '无权为其他账户上报收益');
-      return;
+    if (!validReportId(reportId) || typeof gameAccount !== 'string' || !gameAccount || gameAccount.length > 128) {
+      return reply(false, '收益报告参数无效');
     }
-    const accountId = socketData.accountId;
-
-    // 对过高的收益值进行处理
-    expGain = processExcessiveGain(expGain);
-    moraGain = processExcessiveGain(moraGain);
-
-    // 验证必要参数
-    if (!gameAccount || expGain === undefined || moraGain === undefined) {
-      log('收益报告参数不完整', LOG_TYPES.ERROR);
-      if (socket) {
-        socket.emit('message', {
-          type: 'error',
-          message: '收益报告参数不完整'
-        });
-      }
-      return;
+    const key = JSON.stringify([sender.accountId, reportId]);
+    if (reportId && gainReportKeys.has(key)) return reply(true, '收益已记录');
+    const gain = { gameAccount, reportedAt: Date.now(), reportId };
+    for (const field of ['expGain', 'moraGain']) {
+      const value = message[field];
+      if (Number.isSafeInteger(value) && value >= 0 && value <= 150000) gain[field] = value;
     }
-
-    // 获取今天的日期字符串
-    const dateStr = getTodayDateStr();
-
-    // 获取或创建收益记录
-    let records = getOrCreateGainRecords(dateStr);
-
-    // 构建文件路径（用于保存）
-    const filePath = path.join(gainRecordsDir, `${dateStr}.json`);
-
-    // 如果该用户当天没有记录，创建新数组
-    if (!records[accountId]) {
-      records[accountId] = [];
-    }
-
-    // 添加新的收益记录
-    const gainRecord = {
-      gameAccount: gameAccount,
-      expGain: expGain,
-      moraGain: moraGain,
-      reportedAt: Date.now()
-    };
-    records[accountId].push(gainRecord);
-
-    // 保存记录
-    saveDataSync(filePath, records);
-
-    log(`收益记录已保存: 用户 ${accountId}, 游戏账户 ${gameAccount}, 经验 +${expGain}, 摩拉 +${moraGain}`, LOG_TYPES.INFO, {
-      accountId: accountId,
-      gameAccount: gameAccount,
-      expGain: expGain,
-      moraGain: moraGain
-    });
-
-    // 清理42天前的收益记录文件
+    if (gain.expGain === undefined && gain.moraGain === undefined) return reply(false, '缺少有效的收益数值');
+    const date = getTodayDateStr();
+    const records = getOrCreateGainRecords(date);
+    if (!Object.hasOwn(records, sender.accountId)) Object.defineProperty(records, sender.accountId, { value: [], enumerable: true });
+    records[sender.accountId].push(gain);
+    saveDataSync(path.join(gainRecordsDir, date + '.json'), records);
+    if (reportId) gainReportKeys.add(key);
+    reply(true, '收益报告成功');
     cleanupOldRecords(gainRecordsDir, 42);
-
-    // 发送成功响应
-    if (socket) {
-      socket.emit('message', {
-        type: 'gain-reported',
-        message: '收益报告成功'
-      });
-    }
-
   } catch (error) {
     handleError(error, 'handleReportGain');
-    if (socket) {
-      socket.emit('message', {
-        type: 'error',
-        message: '收益报告处理失败'
-      });
-    }
+    reply(false, '收益记录写入失败', true);
   }
 }
 
@@ -5037,74 +4985,84 @@ function handleReportGain(message, socket) {
  * // 处理炸车报告
  * handleReportCrash({ crashInfo: {...}, rideIdentifier: '2024-01-01-大澡堂-1' }, socket);
  */
+function restoreCrashWindow(ride, firstReportSequence = 0) {
+  const pending = { ride, reports: ride.pendingCrashReports, firstReportSequence };
+  pendingCrashRides.set(ride.rideId, pending);
+  pending.timeoutId = timerManager.setTimeout(() => processCrashReports(ride.rideId),
+    Math.max(0, ride.crashDeadline - Date.now()));
+}
+
 function handleReportCrash(message, socket) {
+  const { reportId } = message;
+  const reply = (ok, reason, retry) => replyReport(socket, reportId, ok, reason, retry);
   try {
-    const socketData = requireAuthenticated(socket);
-    if (!socketData || socketData.isAdmin) return;
-    const { crashInfo, rideIdentifier } = message;
-
-    if (!crashInfo) {
-      log('炸车报告信息不完整');
-      return;
+    const sender = requireAuthenticated(socket);
+    if (!sender || sender.isAdmin || !validReportId(reportId)) return reply(false, '炸车报告身份或编号无效');
+    const body = message.crashInfo?.crashInfo || message.crashInfo;
+    const rideId = message.rideIdentifier || message.crashInfo?.rideIdentifier;
+    const pending = pendingCrashRides.get(rideId);
+    let ride = pending?.ride || rideRecords.find(record => record.rideId === rideId);
+    if (!ride && typeof rideId === 'string' && /^\d{4}-\d{2}-\d{2}-/.test(rideId)) {
+      const day = readRideDay(path.join(rideRecordsDir, rideId.slice(0, 10) + '.json'));
+      ride = day.find(record => record.rideId === rideId);
     }
-
-    // 用户端发送的格式是嵌套的：crashInfo.crashInfo 才是真正的炸车信息
-    // crashInfo.rideIdentifier 是联机执行端提供的发车标识
-    const actualCrashInfo = crashInfo.crashInfo || crashInfo;
-    const actualRideIdentifier = rideIdentifier || crashInfo.rideIdentifier;
-
-    let pending = pendingCrashRides.get(actualRideIdentifier);
-    const ride = pending?.ride || rideRecords.find(record => record.rideId === actualRideIdentifier);
-    if (!ride) {
-      emitSocketError(socket, '未找到对应的发车记录');
-      return;
+    if (!ride || !body) return reply(false, '未找到可上报的车次');
+    const owned = ride.riders.filter(seat => seat.accountId === sender.accountId);
+    const uid = body.reporter?.uid == null && owned.length === 1 ? owned[0].uid : String(body.reporter?.uid);
+    if (!owned.some(seat => seat.uid === uid)) return reply(false, '无法验证报告席位');
+    if (ride.status === 'crashed' || ride.crashReports?.length) return reply(true, '该车次已处理');
+    if (!(ride.charged || (ride.charged === undefined && ride.status === 'completed'))) {
+      return reply(false, '该车次没有已结算的发车记录');
     }
-    if (!ride.riders?.some(rider => rider.accountId === socketData.accountId)) {
-      emitSocketError(socket, '无权提交该发车的炸车报告');
-      return;
+    const isHost = uid === ride.riders[0].uid;
+    const type = body.crashType;
+    const isHostReport = type === 'waitForExpectedPlayers' || type === '房主超时未等到预期人数';
+    if ((isHost && !isHostReport) || (!isHost && type !== 'playerTimeoutEnterWorld')) {
+      return reply(false, '报告类型与参车席位不符');
     }
-    if (ride.status === 'crashed' || ride.crashReports?.length) {
-      emitSocketError(socket, '此发车的炸车报告已处理');
-      return;
+    if (pending?.reports.some(r => r.uid === uid)) return reply(true, '此席位报告已记录');
+    if (pending && Date.now() >= ride.crashDeadline) {
+      timerManager.clearTimeout(pending.timeoutId);
+      processCrashReports(rideId);
+      return reply(true, '本次收证已结束');
     }
-    if (!(ride.charged === true || (ride.charged === undefined && ride.status === 'completed'))) {
-      emitSocketError(socket, '该车次没有已结算的发车记录');
-      return;
+    const guests = ride.riders.slice(1);
+    const report = { accountId: sender.accountId, uid, crashType: type, reportId, reportedAt: Date.now() };
+    if (isHost) {
+      const ids = new Set(guests.map(seat => seat.uid));
+      // 旧版按匹配到的名称推测缺席名单，不能据此追责。
+      const entered = body.evidenceVersion === 2 && body.enteredUids;
+      const missing = body.evidenceVersion === 2 && body.missingUids;
+      if (Array.isArray(entered) && entered.length > 0 && new Set(entered).size === entered.length &&
+          entered.every(id => ids.has(id))) report.enteredUids = entered;
+      if (report.enteredUids && Array.isArray(missing)) {
+        const union = [...entered, ...missing];
+        if (union.length === ids.size && new Set(union).size === ids.size && union.every(id => ids.has(id))) {
+          report.missingUids = missing;
+        }
+      }
     }
-    if (pending?.reports.some(report => report.accountId === socketData.accountId)) {
-      emitSocketError(socket, '该账户已提交过此发车的炸车报告');
-      return;
-    }
-    if (typeof actualCrashInfo.crashType !== 'string' && !Array.isArray(actualCrashInfo.rideMembers)) {
-      emitSocketError(socket, '炸车报告信息不完整');
-      return;
-    }
-    if ((actualCrashInfo.rideMembers != null && !Array.isArray(actualCrashInfo.rideMembers)) ||
-        (actualCrashInfo.enteredPlayers != null && !Array.isArray(actualCrashInfo.enteredPlayers)) ||
-        (actualCrashInfo.notEnteredPlayers != null && !Array.isArray(actualCrashInfo.notEnteredPlayers))) {
-      emitSocketError(socket, '炸车报告的玩家列表格式错误');
-      return;
-    }
-
-    if (!pending) {
-      pending = { ride, reports: [], firstReportSequence: ++crashReportSequence, timeoutId: null };
-      pendingCrashRides.set(ride.rideId, pending);
-    }
-    pending.reports.push({
-      ...actualCrashInfo,
-      rideIdentifier: ride.rideId,
-      reportedAt: Date.now(),
-      socketId: socket.id,
-      accountId: socketData.accountId
-    });
-
-    // 最后一份有效报告到达两分钟后统一判责，保留第一份报告的顺序。
-    timerManager.clearTimeout(pending.timeoutId);
-    pending.timeoutId = timerManager.setTimeout(() => processCrashReports(ride.rideId), 2 * 60 * 1000);
-    log(`收到炸车报告，已启动2分钟处理计时器 for ride: ${ride.rideId}`);
+    const reports = [...(pending?.reports || []), report];
+    const patch = { pendingCrashReports: reports, crashDeadline: ride.crashDeadline || Date.now() + 120000 };
+    saveRideRecord(ride, patch);
+    Object.assign(ride, patch);
+    if (pending) pending.reports = reports;
+    else restoreCrashWindow(ride, ++crashReportSequence);
+    reply(true, '炸车报告已记录');
   } catch (error) {
     handleError(error, 'handleReportCrash');
+    reply(false, '炸车报告写入失败', true);
   }
+}
+
+function determineFaultUids(ride, reports) {
+  const [host, ...guests] = ride.riders;
+  const hostReport = reports.find(report => report.uid === host.uid);
+  if (Array.isArray(hostReport?.missingUids)) return new Set(hostReport.missingUids);
+  // 房主未能确认缺席名单时，已核实入场的席位排除；其余使用队员各自的入场失败报告。
+  const entered = new Set(hostReport?.enteredUids || []);
+  const failed = new Set(reports.filter(r => r.crashType === 'playerTimeoutEnterWorld' && !entered.has(r.uid)).map(r => r.uid));
+  return guests.length && guests.every(seat => failed.has(seat.uid)) ? new Set([host.uid]) : failed;
 }
 
 /**
@@ -5116,62 +5074,7 @@ function processCrashReports(rideKey) {
   if (!pending) return;
   const { ride, reports: rideReports, firstReportSequence } = pending;
   try {
-    // 分析炸车报告，确定过错方
-    const atFaultUids = new Set();
-
-    // 检查是否有房主超时的报告 (客户端发送的是英文 crashType)
-    const hostTimeoutReports = rideReports.filter(r => r.crashType === 'waitForExpectedPlayers' || r.crashType === '房主超时未等到预期人数');
-
-    if (hostTimeoutReports.length > 0) {
-      // 使用房主报告的信息
-      const hostReport = hostTimeoutReports[0];
-      const { enteredPlayers, notEnteredPlayers, myPosition } = hostReport;
-
-      if (enteredPlayers && enteredPlayers.length > 0 && notEnteredPlayers && notEnteredPlayers.length > 0) {
-        // 所有未进入的玩家记为可疑
-        notEnteredPlayers.forEach(player => {
-          // 首先从ride对象中根据用户名查找成员，获取其uid
-          const member = ride.riders.find(rider => rider.username === player);
-          if (member) {
-            atFaultUids.add(member.uid);
-          }
-        });
-      } else if (!enteredPlayers || enteredPlayers.length === 0) {
-        // 房主自己记为可疑
-        // 从ride对象中查找房主，因为ride包含所有骑手的完整信息
-        const hostMember = ride.riders.find(rider => {
-          // 找到房主：检查所有炸车报告中是否有位置为1的成员
-          for (const crashReport of rideReports) {
-            const reportMember = crashReport.rideMembers?.find(m => m?.uid === rider.uid);
-            if (reportMember && reportMember.position === '1') {
-              return true;
-            }
-          }
-          return false;
-        });
-        if (hostMember) {
-          atFaultUids.add(hostMember.uid);
-        }
-      }
-      // 如果无法确定过错方，atFaultUids保持为空
-    } else {
-      // 只有队员超时的情况，房主为过错方
-      // 从ride对象中查找房主，因为ride包含所有骑手的完整信息
-      const hostMember = ride.riders.find(rider => {
-        // 查找房主：检查所有炸车报告中是否有位置为1的成员
-        for (const crashReport of rideReports) {
-          const reportMember = crashReport.rideMembers?.find(m => m?.uid === rider.uid);
-          if (reportMember && reportMember.position === '1') {
-            return true;
-          }
-        }
-        return false;
-      });
-      if (hostMember) {
-        atFaultUids.add(hostMember.uid);
-      }
-      // 如果无法确定房主，atFaultUids保持为空
-    }
+    const atFaultUids = determineFaultUids(ride, rideReports);
 
     // 记录炸车信息日志
     const atFaultUsers = Array.from(atFaultUids).map(uid => {
@@ -5210,6 +5113,7 @@ function processCrashReports(rideKey) {
       if (rider?.accountId) atFaultAccountIds.add(rider.accountId);
     }
     for (const accountId of participants) {
+      if (!atFaultAccountIds.size) break;
       if (atFaultAccountIds.has(accountId)) {
         adjustPoints(accountId, -6, `炸车补偿: 过错方 ${accountId} 扣除 6 分`);
       } else {
@@ -5219,7 +5123,7 @@ function processCrashReports(rideKey) {
 
     const countsToCommit = new Map();
     const newlyFrozen = [];
-    if (currentProcessRides.has(ride)) {
+    if (currentProcessRideIds.has(ride.rideId)) {
       for (const accountId of atFaultAccountIds) {
         const account = userAccounts[accountId];
         if (!account || account.isFrozen) continue;
@@ -5237,7 +5141,7 @@ function processCrashReports(rideKey) {
 
     // 积分和自动冻结一起落盘。写入失败时保留待判车次，重试不会重复计数或扣分。
     try {
-      commitRidePoints(ride, { status: 'crashed', crashReports: rideReports }, updatedAccounts);
+      commitRidePoints(ride, { status: 'crashed', crashReports: rideReports, pendingCrashReports: [], crashDeadline: null }, updatedAccounts);
     } catch (error) {
       pending.timeoutId = timerManager.setTimeout(() => processCrashReports(rideKey), 2 * 60 * 1000);
       throw error;
@@ -6126,10 +6030,10 @@ function setupScheduledRestart() {
     await saveAllData();
 
     // 执行重启脚本
-    const { exec } = require('child_process');
+    const { execFile } = require('child_process');
     const restartScript = require('path').join(__dirname, 'restart-server.sh');
 
-    exec(`chmod +x ${restartScript} && ${restartScript}`, (error, stdout, stderr) => {
+    execFile('bash', [restartScript], (error, stdout, stderr) => {
       if (error) {
         console.error(`执行重启脚本错误: ${error.message}`);
         return;
@@ -6977,20 +6881,15 @@ async function handleGetGainRecords(data, socket) {
       return [filePath];
     }
 
-    // 获取日期范围内的所有文件
-    function getDateRangeFiles(startDate, endDate) {
+    // 日榜与周期榜使用同一业务日期，整天递减不会受运行主机的时区或夏令时影响。
+    function getRecentGainFiles(days) {
       const files = [];
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const current = new Date(start);
-
-      while (current <= end) {
-        const dateStr = current.toISOString().split('T')[0];
-        const filePath = path.join(gainRecordsDir, `${dateStr}.json`);
-        if (fs.existsSync(filePath)) {
-          files.push(filePath);
-        }
-        current.setDate(current.getDate() + 1);
+      const day = new Date(getTodayDateStr() + 'T00:00:00Z');
+      for (let i = 0; i < days; i++) {
+        const dateStr = day.toISOString().slice(0, 10);
+        const filePath = path.join(gainRecordsDir, dateStr + '.json');
+        if (fs.existsSync(filePath)) files.push(filePath);
+        day.setUTCDate(day.getUTCDate() - 1);
       }
       return files;
     }
@@ -7014,20 +6913,9 @@ async function handleGetGainRecords(data, socket) {
       }
       filesToRead = getDateFiles(date);
       displayType = date;
-    } else if (type === 'week') {
-      // 周榜：最近7天（北京时间凌晨4点分界）
-      const now = new Date();
-      const today = new Date(now.getTime() - (now.getHours() < 4 ? 1 : 0) * 24 * 60 * 60 * 1000);
-      const weekAgo = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
-      filesToRead = getDateRangeFiles(weekAgo, today);
-      displayType = `最近7天`;
-    } else if (type === 'version') {
-      // 版本榜：最近42天
-      const now = new Date();
-      const today = new Date(now.getTime() - (now.getHours() < 4 ? 1 : 0) * 24 * 60 * 60 * 1000);
-      const versionAgo = new Date(today.getTime() - 41 * 24 * 60 * 60 * 1000);
-      filesToRead = getDateRangeFiles(versionAgo, today);
-      displayType = `最近42天版榜`;
+    } else if (type === 'week' || type === 'version') {
+      filesToRead = getRecentGainFiles(type === 'week' ? 7 : 42);
+      displayType = type === 'week' ? '最近7天' : '最近42天版榜';
     } else {
       socket.emit('message', {
         type: 'error',
@@ -7392,6 +7280,7 @@ function initGainRecordsFile() {
 
 startServer().then(() => {
   initGainRecordsFile();
+  loadGainReportKeys();
   setInterval(cleanupRemoteTransfers, 30000).unref();
   setupDailyOfflineTask();
   setupScheduledRestart();
