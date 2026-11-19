@@ -530,11 +530,14 @@ const userConnections = new Map();
 const adminConnections = new Map();
 const roomUsers = new Map();
 const loginKeys = new Map();
-const crashTimers = new Map();
+const pendingCrashRides = new Map();
 const roomRideCheckTimers = new Map();
 const rideRecords = [];
-const crashReports = [];
-const processedCrashRides = new Set();
+// 发车对象只在创建时加入，磁盘恢复的历史车次不参与本轮冻结计数。
+const currentProcessRides = new WeakSet();
+const crashFreezeState = new WeakMap();
+// 首次上报和解冻按服务端接收顺序划界，避免同一毫秒内的操作混淆。
+let crashReportSequence = 0;
 // 首程加分用户记录（服务端启动时为空，存储已获得首程加分的用户 accountId）
 const firstRideBonusUsers = [];
 
@@ -704,6 +707,39 @@ const RideManager = {
 
 // ==================== 发车管理模块结束 ====================
 
+// 车号按北京时间的自然日分配，与凌晨四点的房间清理分开。
+let dailyRideNumbers;
+
+function getRideDateString(createdAt) {
+  const date = getBeijingTime(new Date(createdAt));
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function getRoomRideNumbers(dateStr) {
+  if (dailyRideNumbers?.date === dateStr) return dailyRideNumbers.byRoom;
+
+  const byRoom = new Map();
+  const filePath = path.join(rideRecordsDir, `${dateStr}.json`);
+  if (fs.existsSync(filePath)) {
+    const content = fs.readFileSync(filePath, 'utf8').trim();
+    const records = content ? JSON.parse(content) : [];
+    for (const record of records) {
+      if (typeof record?.rideId !== 'string') continue;
+      const prefix = `${dateStr}-${record.roomName}-`;
+      if (!record.rideId.startsWith(prefix)) continue;
+
+      const rideNumber = Number(record.rideId.slice(prefix.length));
+      if (Number.isSafeInteger(rideNumber) && rideNumber > (byRoom.get(record.roomName) || 0)) {
+        byRoom.set(record.roomName, rideNumber);
+      }
+    }
+  }
+  dailyRideNumbers = { date: dateStr, byRoom };
+  return byRoom;
+}
+
 // 加载发车记录
 function loadRideRecords() {
   try {
@@ -741,6 +777,8 @@ function loadRideRecords() {
         rideRecords.splice(0, rideRecords.length - 1000);
       }
       
+      // 完整的当日文件用于恢复序号，即使部分发车记录已从内存缓存淘汰。
+      getRoomRideNumbers(getRideDateString(Date.now()));
       log(`加载了 ${rideRecords.length} 条发车记录（来自 ${recentFiles.length} 个最新文件）`, LOG_TYPES.INFO);
     }
   } catch (error) {
@@ -1392,6 +1430,10 @@ async function loadData(filePath, defaultValue) {
  * await saveData(ROOMS_FILE, rooms);
  */
 async function saveData(filePath, data) {
+  saveDataSync(filePath, data);
+}
+
+function saveDataSync(filePath, data) {
   const tempPath = `${filePath}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
@@ -1438,17 +1480,6 @@ function cleanupData() {
       if (storage.startedAt && now - storage.startedAt > UPLOAD_TIMEOUT) {
         resetUploadStorage(key);
         log(`清理过期上传缓存: ${key}`, LOG_TYPES.CLEANUP);
-      }
-    }
-
-    // 清理过期的炸车定时器
-    for (const [rideKey, timerInfo] of crashTimers.entries()) {
-      const { startTime, delay } = timerInfo;
-      // 检查定时器是否到期
-      if (now >= startTime + delay) {
-        timerManager.clearTimeout(timerInfo.timeoutId);
-        crashTimers.delete(rideKey);
-        log(`清理到期的炸车定时器: ${rideKey}`, LOG_TYPES.CLEANUP, { rideKey: rideKey });
       }
     }
 
@@ -2170,14 +2201,15 @@ async function handleResetPassword(data, socket) {
  * 处理冻结/解冻用户（管理员功能）
  * @param {Object} data - 冻结/解冻数据
  * @param {string} data.accountId - 要冻结/解冻的账户ID
+ * @param {boolean} data.isFrozen - 目标冻结状态
  * @param {Object} socket - Socket.io连接对象
  * @returns {Promise<void>}
  * @example
  * // 冻结/解冻用户
- * await handleToggleFreezeUser({ accountId: 'user1' }, socket);
+ * await handleToggleFreezeUser({ accountId: 'user1', isFrozen: false }, socket);
  */
 async function handleToggleFreezeUser(data, socket) {
-  const { accountId } = data;
+  const { accountId, isFrozen } = data;
 
   // 检查是否已登录且是管理员
   const socketData = getConnectionBySocketId(socket.id);
@@ -2189,47 +2221,43 @@ async function handleToggleFreezeUser(data, socket) {
     return;
   }
 
-  if (userAccounts[accountId]) {
-    const isFrozen = !userAccounts[accountId].isFrozen;
-    userAccounts[accountId].isFrozen = isFrozen;
+  if (typeof isFrozen !== 'boolean') {
+    emitSocketError(socket, '请刷新管理页面后再执行冻结或解冻操作');
+    return;
+  }
+  const account = userAccounts[accountId];
+  if (!account) {
+    emitSocketError(socket, '用户不存在');
+    return;
+  }
 
-    // 如果是解冻用户，增加一次豁免次数
-    if (!isFrozen) {
-      userAccounts[accountId].freezeExemption = (userAccounts[accountId].freezeExemption || 0) + 1;
-      log(`解冻用户 ${accountId}，增加豁免次数至 ${userAccounts[accountId].freezeExemption}`, LOG_TYPES.ADMIN, { accountId: accountId, freezeExemption: userAccounts[accountId].freezeExemption });
-    }
-
-    // 如果是冻结用户，下线该用户在所有房间的所有游戏名称-uid对
+  if (Boolean(account.isFrozen) !== isFrozen) {
+    // 先落盘，再发布状态和解冻边界。重复请求不影响解冻后的新计数。
+    saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, [accountId]: { ...account, isFrozen } });
+    account.isFrozen = isFrozen;
     if (isFrozen) {
-      // 遍历所有房间
-      roomUsers.forEach((room, roomName) => {
-        // 查找该账户在房间中的所有用户项
-        const userItems = room.users.filter(item => item.accountId === accountId);
-        userItems.forEach(item => {
-          handleUserOffline({
-            type: 'user-offline',
-            uid: item.uid,
-            room: roomName,
-            operatorAccountId: accountId,
-            reason: '账户冻结自动下线'
-          }, null);
-        });
-      });
+      offlineFrozenAccount(accountId);
+    } else {
+      crashFreezeState.set(account, { count: 0, ignoredThrough: crashReportSequence });
     }
+    log(`${isFrozen ? '冻结' : '解冻'} 用户 ${accountId}`, LOG_TYPES.ADMIN, { accountId, action: isFrozen ? '冻结' : '解冻' });
+  }
+  socket.emit('message', { type: 'freeze-user-success', accountId, isFrozen });
+}
 
-    await saveData(USER_ACCOUNTS_FILE, userAccounts);
-    resetDataChangeTimer();
-    socket.emit('message', {
-      type: 'freeze-user-success',
-      accountId: accountId,
-      isFrozen: isFrozen
-    });
-    log(`${isFrozen ? '冻结' : '解冻'} 用户 ${accountId}`, LOG_TYPES.ADMIN, { accountId: accountId, action: isFrozen ? '冻结' : '解冻' });
-  } else {
-    socket.emit('message', {
-      type: 'error',
-      message: '用户不存在'
-    });
+// 冻结后下线该账户在各房间的所有 UID。
+function offlineFrozenAccount(accountId) {
+  for (const [roomName, room] of roomUsers) {
+    const users = room.users.filter(item => item.accountId === accountId);
+    for (const item of users) {
+      handleUserOffline({
+        type: 'user-offline',
+        uid: item.uid,
+        room: roomName,
+        operatorAccountId: accountId,
+        reason: '账户冻结自动下线'
+      }, null);
+    }
   }
 }
 
@@ -2917,11 +2945,7 @@ function countOnlineUsers(roomName) {
  */
 function saveRideRecord(rideRecord) {
   try {
-    const date = getBeijingTime(new Date(rideRecord.createdAt || Date.now()));
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const dateStr = `${year}-${month}-${day}`;
+    const dateStr = getRideDateString(rideRecord.createdAt || Date.now());
 
     const filePath = path.join(rideRecordsDir, `${dateStr}.json`);
 
@@ -4307,18 +4331,11 @@ async function checkAndHandleRideInternal(roomName) {
     log(`房间 ${roomName} 开始发车，房主: ${host.username} (${host.uid})`, LOG_TYPES.RIDE, { room: roomName, host: host.username, hostUid: host.uid, members: teamMembers.length });
 
     // 生成发车标识：日期-房间-第几次发车
-    const date = getBeijingTime();
-    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; // 格式：YYYY-MM-DD
-
-    // 计算今天该房间的发车次数
-    const todayRides = rideRecords.filter(record => {
-      const recordDate = getBeijingTime(new Date(record.createdAt));
-      const recordDateStr = `${recordDate.getFullYear()}-${String(recordDate.getMonth() + 1).padStart(2, '0')}-${String(recordDate.getDate()).padStart(2, '0')}`;
-      return recordDateStr === dateStr && record.roomName === roomName;
-    });
-    const rideNumber = todayRides.length + 1;
-
-    // 生成发车ID
+    const createdAt = Date.now();
+    const dateStr = getRideDateString(createdAt);
+    const byRoom = getRoomRideNumbers(dateStr);
+    const rideNumber = (byRoom.get(roomName) || 0) + 1;
+    byRoom.set(roomName, rideNumber);
     const rideId = `${dateStr}-${roomName}-${rideNumber}`;
 
     // 创建发车状态并从房间移除骑手
@@ -4335,10 +4352,11 @@ async function checkAndHandleRideInternal(roomName) {
         accountId: rider.accountId
       })),
       rideInfo: rideInfo,
-      createdAt: Date.now(),
+      createdAt,
       status: 'waiting_for_ready',
       crashReports: []
     };
+    currentProcessRides.add(rideRecord);
     rideRecords.push(rideRecord);
 
     // 保存到文件
@@ -5134,84 +5152,51 @@ function handleReportCrash(message, socket) {
     const actualCrashInfo = crashInfo.crashInfo || crashInfo;
     const actualRideIdentifier = rideIdentifier || crashInfo.rideIdentifier;
 
-    // 找到对应的发车记录
-    let relevantRide = null;
-    if (actualRideIdentifier) {
-      // 使用发车标识直接查找
-      relevantRide = rideRecords.find(ride => ride.rideId === actualRideIdentifier);
-      if (!relevantRide) {
-        log(`未找到对应的发车记录: ${actualRideIdentifier}`);
-      }
-    } else {
-      log('炸车报告缺少发车标识，无法归属到具体发车');
-    }
-
-    // 保存炸车报告
-    let finalRideIdentifier = actualRideIdentifier;
-    if (relevantRide) {
-      if (!relevantRide.riders?.some(rider => rider.accountId === socketData.accountId)) {
-        emitSocketError(socket, '无权提交该发车的炸车报告');
-        return;
-      }
-      if (processedCrashRides.has(relevantRide.rideId) || crashReports.some(report => report.rideIdentifier === relevantRide.rideId && report.accountId === socketData.accountId)) {
-        emitSocketError(socket, '该账户已提交过此发车的炸车报告');
-        return;
-      }
-    } else {
+    let pending = pendingCrashRides.get(actualRideIdentifier);
+    const ride = pending?.ride || rideRecords.find(record => record.rideId === actualRideIdentifier);
+    if (!ride) {
       emitSocketError(socket, '未找到对应的发车记录');
       return;
     }
-
-    if (!actualRideIdentifier) {
-      emitSocketError(socket, '炸车报告缺少发车标识');
+    if (!ride.riders?.some(rider => rider.accountId === socketData.accountId)) {
+      emitSocketError(socket, '无权提交该发车的炸车报告');
+      return;
+    }
+    if (ride.status === 'crashed' || ride.crashReports?.length) {
+      emitSocketError(socket, '此发车的炸车报告已处理');
+      return;
+    }
+    if (pending?.reports.some(report => report.accountId === socketData.accountId)) {
+      emitSocketError(socket, '该账户已提交过此发车的炸车报告');
+      return;
+    }
+    if (typeof actualCrashInfo.crashType !== 'string' && !Array.isArray(actualCrashInfo.rideMembers)) {
+      emitSocketError(socket, '炸车报告信息不完整');
+      return;
+    }
+    if ((actualCrashInfo.rideMembers != null && !Array.isArray(actualCrashInfo.rideMembers)) ||
+        (actualCrashInfo.enteredPlayers != null && !Array.isArray(actualCrashInfo.enteredPlayers)) ||
+        (actualCrashInfo.notEnteredPlayers != null && !Array.isArray(actualCrashInfo.notEnteredPlayers))) {
+      emitSocketError(socket, '炸车报告的玩家列表格式错误');
       return;
     }
 
-    if (relevantRide) {
-      finalRideIdentifier = relevantRide.rideId;
+    if (!pending) {
+      pending = { ride, reports: [], firstReportSequence: ++crashReportSequence, timeoutId: null };
+      pendingCrashRides.set(ride.rideId, pending);
     }
-
-    crashReports.push({
+    pending.reports.push({
       ...actualCrashInfo,
-      rideIdentifier: finalRideIdentifier,
+      rideIdentifier: ride.rideId,
       reportedAt: Date.now(),
       socketId: socket.id,
       accountId: socketData.accountId
     });
 
-    // 限制crashReports数组大小，只保留最近的1000条记录
-    if (crashReports.length > 1000) {
-      crashReports.shift();
-    }
-
-    if (relevantRide) {
-      // 使用发车ID作为唯一标识
-      const rideKey = relevantRide.rideId;
-
-      // 启动或刷新5分钟计时器
-      if (crashTimers.has(rideKey)) {
-        // 清除现有计时器
-        timerManager.clearTimeout(crashTimers.get(rideKey).timeoutId);
-      }
-
-      const delay = 2 * 60 * 1000; // 2分钟
-      // 设置新的计时器
-      const timeoutId = timerManager.setTimeout(() => {
-        processCrashReports(rideKey, relevantRide);
-        crashTimers.delete(rideKey);
-      }, delay);
-
-      crashTimers.set(rideKey, {
-        timeoutId,
-        startTime: Date.now(),
-        delay
-      });
-
-      log(`收到炸车报告，已启动2分钟处理计时器 for ride: ${relevantRide.rideId}`);
-    } else {
-      log('未找到对应的发车记录');
-    }
-
+    // 最后一份有效报告到达两分钟后统一判责，保留第一份报告的顺序。
+    timerManager.clearTimeout(pending.timeoutId);
+    pending.timeoutId = timerManager.setTimeout(() => processCrashReports(ride.rideId), 2 * 60 * 1000);
+    log(`收到炸车报告，已启动2分钟处理计时器 for ride: ${ride.rideId}`);
   } catch (error) {
     handleError(error, 'handleReportCrash');
   }
@@ -5220,38 +5205,14 @@ function handleReportCrash(message, socket) {
 /**
  * 处理炸车报告，确定过错方
  * @param {string} rideKey - 发车标识
- * @param {Object} ride - 发车记录对象
- * @example
- * // 处理炸车报告
- * processCrashReports('2024-01-01-大澡堂-1', rideRecord);
  */
-function processCrashReports(rideKey, ride) {
+function processCrashReports(rideKey) {
+  const pending = pendingCrashRides.get(rideKey);
+  if (!pending) return;
+  const { ride, reports: rideReports, firstReportSequence } = pending;
   try {
-    // 检查ride参数是否有效
-    if (!ride) {
-      log(`处理炸车报告失败: 发车记录不存在: ${rideKey}`);
-      return;
-    }
-
-    // 检查ride.riders是否存在
-    if (!ride.riders || !Array.isArray(ride.riders)) {
-      log(`处理炸车报告失败: 发车记录缺少riders字段: ${rideKey}`);
-      return;
-    }
-
-    // 收集该次发车的所有炸车报告
-    const rideReports = crashReports.filter(report => report.rideIdentifier === rideKey);
-
-    if (rideReports.length === 0) {
-      log('没有找到对应的炸车报告');
-      return;
-    }
-
-    if (processedCrashRides.has(rideKey)) return;
-    processedCrashRides.add(rideKey);
-
     // 分析炸车报告，确定过错方
-    let atFaultUids = new Set();
+    const atFaultUids = new Set();
 
     // 检查是否有房主超时的报告 (客户端发送的是英文 crashType)
     const hostTimeoutReports = rideReports.filter(r => r.crashType === 'waitForExpectedPlayers' || r.crashType === '房主超时未等到预期人数');
@@ -5276,7 +5237,7 @@ function processCrashReports(rideKey, ride) {
         const hostMember = ride.riders.find(rider => {
           // 找到房主：检查所有炸车报告中是否有位置为1的成员
           for (const crashReport of rideReports) {
-            const reportMember = crashReport.rideMembers.find(m => m.uid === rider.uid);
+            const reportMember = crashReport.rideMembers?.find(m => m?.uid === rider.uid);
             if (reportMember && reportMember.position === '1') {
               return true;
             }
@@ -5294,7 +5255,7 @@ function processCrashReports(rideKey, ride) {
       const hostMember = ride.riders.find(rider => {
         // 查找房主：检查所有炸车报告中是否有位置为1的成员
         for (const crashReport of rideReports) {
-          const reportMember = crashReport.rideMembers.find(m => m.uid === rider.uid);
+          const reportMember = crashReport.rideMembers?.find(m => m?.uid === rider.uid);
           if (reportMember && reportMember.position === '1') {
             return true;
           }
@@ -5316,205 +5277,89 @@ function processCrashReports(rideKey, ride) {
     log(`炸车处理结果: 发车ID ${ride.rideId}, 过错方: ${atFaultUsers.length > 0 ? atFaultUsers.join(', ') : '无'}`, LOG_TYPES.RIDE, { rideId: ride.rideId, atFault: atFaultUsers });
 
     // 回退发车时的积分变动并执行补偿
-    if (ride.riders && ride.riders.length > 0) {
-      const host = ride.riders[0];
-      const members = ride.riders.slice(1);
-
-      // 1. 回退房主的-3分（房主加回3分）
-      if (host && host.accountId && userAccounts[host.accountId]) {
-        userAccounts[host.accountId].points = (userAccounts[host.accountId].points || 0) + 3;
-        log(`炸车回退: 房主 ${host.accountId} 加回 3 分，当前积分: ${userAccounts[host.accountId].points}`, LOG_TYPES.POINTS, { accountId: host.accountId, points: userAccounts[host.accountId].points, change: 3 });
-      }
-
-      // 2. 回退队员的+1分（队员扣回1分）
-      members.forEach(member => {
-        if (member.accountId && userAccounts[member.accountId]) {
-          userAccounts[member.accountId].points = (userAccounts[member.accountId].points || 0) - 1;
-          log(`炸车回退: 队员 ${member.accountId} 扣回 1 分，当前积分: ${userAccounts[member.accountId].points}`, LOG_TYPES.POINTS, { accountId: member.accountId, points: userAccounts[member.accountId].points, change: -1 });
-        }
-      });
-
-      // 3. 过错方补偿：过错方-6分，其余人+2分
-      const atFaultAccountIds = new Set();
-      atFaultUids.forEach(uid => {
-        const rider = ride.riders.find(r => r.uid === uid);
-        if (rider && rider.accountId) {
-          atFaultAccountIds.add(rider.accountId);
-        }
-      });
-
-      // 记录已处理的账户，避免重复扣分
-      const processedAccounts = new Set();
-      
-      ride.riders.forEach(rider => {
-        if (rider.accountId && userAccounts[rider.accountId] && !processedAccounts.has(rider.accountId)) {
-          processedAccounts.add(rider.accountId);
-          
-          if (atFaultAccountIds.has(rider.accountId)) {
-            // 过错方扣6分
-            userAccounts[rider.accountId].points = (userAccounts[rider.accountId].points || 0) - 6;
-            log(`炸车补偿: 过错方 ${rider.accountId} 扣除 6 分，当前积分: ${userAccounts[rider.accountId].points}`, LOG_TYPES.POINTS, { accountId: rider.accountId, points: userAccounts[rider.accountId].points, change: -6 });
-          } else {
-            // 其余人加2分
-            userAccounts[rider.accountId].points = (userAccounts[rider.accountId].points || 0) + 2;
-            log(`炸车补偿: 非过错方 ${rider.accountId} 获得 2 分，当前积分: ${userAccounts[rider.accountId].points}`, LOG_TYPES.POINTS, { accountId: rider.accountId, points: userAccounts[rider.accountId].points, change: 2 });
-          }
-        }
-      });
-
-      // 保存积分变动
-      saveData(USER_ACCOUNTS_FILE, userAccounts);
+    const updatedAccounts = { ...userAccounts };
+    const participants = new Set(ride.riders.map(rider => rider.accountId).filter(id => userAccounts[id]));
+    for (const accountId of participants) {
+      updatedAccounts[accountId] = { ...userAccounts[accountId] };
     }
 
-    // 更新发车记录状态为炸车
-    updateRideRecordStatus(ride.rideId, 'crashed', rideReports);
+    const pointChanges = [];
+    function adjustPoints(accountId, change, description) {
+      if (!participants.has(accountId)) return;
+      const account = updatedAccounts[accountId];
+      account.points = (account.points || 0) + change;
+      pointChanges.push({ accountId, points: account.points, change, description });
+    }
 
-    // 检查是否需要触发自动冻结机制
-    checkAutoFreeze(Array.from(atFaultUids));
+    // 1. 回退房主的-3分（房主加回3分）
+    const [host, ...members] = ride.riders;
+    adjustPoints(host.accountId, 3, `炸车回退: 房主 ${host.accountId} 加回 3 分`);
 
+    // 2. 回退队员的+1分（队员扣回1分）
+    for (const member of members) {
+      adjustPoints(member.accountId, -1, `炸车回退: 队员 ${member.accountId} 扣回 1 分`);
+    }
+
+    // 3. 过错方补偿：过错方-6分，其余人+2分，每个账户只处理一次。
+    const atFaultAccountIds = new Set();
+    for (const uid of atFaultUids) {
+      const rider = ride.riders.find(rider => rider.uid === uid);
+      if (rider?.accountId) atFaultAccountIds.add(rider.accountId);
+    }
+    for (const accountId of participants) {
+      if (atFaultAccountIds.has(accountId)) {
+        adjustPoints(accountId, -6, `炸车补偿: 过错方 ${accountId} 扣除 6 分`);
+      } else {
+        adjustPoints(accountId, 2, `炸车补偿: 非过错方 ${accountId} 获得 2 分`);
+      }
+    }
+
+    const countsToCommit = new Map();
+    const newlyFrozen = [];
+    if (currentProcessRides.has(ride)) {
+      for (const accountId of atFaultAccountIds) {
+        const account = userAccounts[accountId];
+        if (!account || account.isFrozen) continue;
+        const state = crashFreezeState.get(account) || { count: 0, ignoredThrough: 0 };
+        if (firstReportSequence <= state.ignoredThrough) continue;
+
+        const count = state.count + 1;
+        countsToCommit.set(account, { count, ignoredThrough: state.ignoredThrough });
+        if (count >= (account.safe ? 100 : 2)) {
+          updatedAccounts[accountId].isFrozen = true;
+          newlyFrozen.push(accountId);
+        }
+      }
+    }
+
+    // 积分和自动冻结一起落盘。写入失败时保留待判车次，重试不会重复计数或扣分。
+    try {
+      saveDataSync(USER_ACCOUNTS_FILE, updatedAccounts);
+    } catch (error) {
+      pending.timeoutId = timerManager.setTimeout(() => processCrashReports(rideKey), 2 * 60 * 1000);
+      throw error;
+    }
+    for (const accountId of participants) {
+      Object.assign(userAccounts[accountId], updatedAccounts[accountId]);
+    }
+    for (const [account, state] of countsToCommit) {
+      crashFreezeState.set(account, state);
+    }
+    ride.status = 'crashed';
+    ride.crashReports = rideReports;
+    pendingCrashRides.delete(rideKey);
+    saveRideRecord(ride);
+
+    for (const { accountId, points, change, description } of pointChanges) {
+      log(`${description}，当前积分: ${points}`, LOG_TYPES.POINTS, { accountId, points, change });
+    }
+    for (const accountId of newlyFrozen) {
+      const { count } = crashFreezeState.get(userAccounts[accountId]);
+      log(`自动冻结账户: ${accountId}，本轮累计 ${count} 次有责炸车`, LOG_TYPES.ADMIN, { accountId, rideId: rideKey, crashCount: count });
+      offlineFrozenAccount(accountId);
+    }
   } catch (error) {
     handleError(error, 'processCrashReports');
-  }
-}
-
-/**
- * 检查自动冻结机制
- * @param {Array} atFaultUids - 本次炸车的过错方UID列表
- * @returns {void}
- * @example
- * // 检查自动冻结机制
- * checkAutoFreeze(['123456789']);
- */
-function checkAutoFreeze(atFaultUids = []) {
-  try {
-    // 统计每个账户的炸车次数（当天）
-    const today = getBeijingTime();
-    today.setHours(0, 0, 0, 0);
-    const todayTime = today.getTime();
-
-    // 只有当有过错方时才进行统计和冻结检查
-    if (atFaultUids.length === 0) {
-      return;
-    }
-
-    // 统计每个账户作为过错方的炸车次数
-    const accountCrashCount = new Map();
-    const processedRides = new Set(); // 用于去重，避免同一发车多次统计
-
-    // 统计每个账户作为过错方的炸车次数
-    crashReports.forEach(report => {
-      if (report.reportedAt >= todayTime && report.rideIdentifier) {
-        // 直接使用rideIdentifier查找相关发车记录
-        const relevantRide = rideRecords.find(ride => ride.rideId === report.rideIdentifier);
-
-        if (relevantRide && !processedRides.has(report.rideIdentifier)) {
-          processedRides.add(report.rideIdentifier);
-
-          // 分析该发车的过错方
-          let rideAtFaultUids = new Set();
-
-          // 检查是否有房主超时的报告 (客户端发送的是英文 crashType)
-          const hostTimeoutReports = crashReports.filter(r => r.rideIdentifier === report.rideIdentifier && (r.crashType === 'waitForExpectedPlayers' || r.crashType === '房主超时未等到预期人数'));
-
-          if (hostTimeoutReports.length > 0) {
-            // 使用房主报告的信息
-            const hostReport = hostTimeoutReports[0];
-            const { enteredPlayers, notEnteredPlayers } = hostReport;
-
-            if (enteredPlayers && enteredPlayers.length > 0 && notEnteredPlayers && notEnteredPlayers.length > 0) {
-              // 所有未进入的玩家记为可疑
-              notEnteredPlayers.forEach(player => {
-                // 首先从ride对象中根据用户名查找成员，获取其uid
-                const member = relevantRide.riders.find(r => r.username === player);
-                if (member) {
-                  rideAtFaultUids.add(member.uid);
-                }
-              });
-            } else if (!enteredPlayers || enteredPlayers.length === 0) {
-              // 房主自己记为可疑
-              // 从ride对象中查找房主
-              const hostMember = relevantRide.riders.find(rider => {
-                // 找到房主：检查所有炸车报告中是否有位置为1的成员
-                for (const crashReport of crashReports.filter(cr => cr.rideIdentifier === report.rideIdentifier)) {
-                  const reportMember = crashReport.rideMembers.find(m => m.uid === rider.uid);
-                  if (reportMember && reportMember.position === '1') {
-                    return true;
-                  }
-                }
-                return false;
-              });
-              if (hostMember) {
-                rideAtFaultUids.add(hostMember.uid);
-              }
-            }
-          } else {
-            // 只有队员超时的情况，房主为过错方
-            // 从ride对象中查找房主
-            const hostMember = relevantRide.riders.find(rider => {
-              // 查找房主：检查所有炸车报告中是否有位置为1的成员
-              for (const crashReport of crashReports.filter(cr => cr.rideIdentifier === report.rideIdentifier)) {
-                const reportMember = crashReport.rideMembers.find(m => m.uid === rider.uid);
-                if (reportMember && reportMember.position === '1') {
-                  return true;
-                }
-              }
-              return false;
-            });
-            if (hostMember) {
-              rideAtFaultUids.add(hostMember.uid);
-            }
-          }
-
-          // 统计该发车中作为过错方的队员的账户ID（去重，避免同一账户多次统计）
-          const rideAtFaultAccounts = new Set();
-          rideAtFaultUids.forEach(uid => {
-            const rider = relevantRide.riders.find(r => r.uid === uid);
-            if (rider && rider.accountId) {
-              rideAtFaultAccounts.add(rider.accountId);
-            }
-          });
-          
-          // 每个账户在每次发车中只统计一次
-          rideAtFaultAccounts.forEach(accountId => {
-            accountCrashCount.set(accountId, (accountCrashCount.get(accountId) || 0) + 1);
-          });
-        }
-      }
-    });
-
-    // 检查是否有账户需要冻结（当天作为过错方参与炸车）
-    for (const [accountId, count] of accountCrashCount.entries()) {
-      // 信任用户的临界值为100次，普通用户为2次
-      const threshold = userAccounts[accountId]?.safe ? 100 : 2;
-      // 获取豁免次数，炸车次数减去豁免次数大于等于临界值时才触发冻结
-      const exemption = userAccounts[accountId]?.freezeExemption || 0;
-      const effectiveCount = count - exemption;
-      if (effectiveCount >= threshold) {
-        // 冻结该账户
-        if (userAccounts[accountId]) {
-          userAccounts[accountId].isFrozen = true; // 使用正确的属性名
-          log(`自动冻结账户: ${accountId}，原因: 当天作为过错方参与 ${count} 次炸车（豁免 ${exemption} 次，有效 ${effectiveCount} 次），临界值: ${threshold}`, LOG_TYPES.ADMIN, { accountId: accountId, crashCount: count, exemption: exemption, effectiveCount: effectiveCount, threshold: threshold });
-
-          // 下线该账户的所有在线用户
-          for (const [roomName, room] of roomUsers.entries()) {
-            // 查找该账户在房间中的所有用户项
-            const userItems = room.users.filter(item => item.accountId === accountId);
-            userItems.forEach(item => {
-              handleUserOffline({
-                type: 'user-offline',
-                uid: item.uid,
-                room: roomName,
-                operatorAccountId: accountId,
-                reason: '账户冻结自动下线'
-              }, null);
-            });
-          }
-        }
-      }
-    }
-
-  } catch (error) {
-    handleError(error, 'checkAutoFreeze');
   }
 }
 
@@ -6155,8 +6000,7 @@ const timerManager = {
 // userConnections: accountId -> { userInfo, connections: [{ socketId, roomName, username, uid }] }
 // adminConnections: accountId -> { adminInfo, connections: [{ socketId, roomName }] }
 // rideRecords: 存储每次发车的信息
-// crashReports: 存储炸车报告
-// crashTimers: { rideKey: timeoutId }
+// pendingCrashRides: 按车次暂存判责所需的报告及定时器
 
 // 启动服务器
 async function startServer() {
@@ -6299,18 +6143,7 @@ function setupDailyOfflineTask() {
       }
     }
 
-    // 清空发车记录和炸车信息
-    rideRecords.length = 0;
-    crashReports.length = 0;
-
-    // 清除所有炸车处理计时器
-    for (const timerInfo of crashTimers.values()) {
-      clearTimeout(timerInfo.timeoutId);
-    }
-    crashTimers.clear();
-
-    log('已清空发车记录和炸车信息', LOG_TYPES.CLEANUP);
-
+    // 发车历史由容量上限管理；待判责报告和冻结计数持续到实际重启。
     log('自动下线任务执行完成', LOG_TYPES.CLEANUP);
 
     // 安排下一次执行

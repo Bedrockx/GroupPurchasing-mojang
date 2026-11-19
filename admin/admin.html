@@ -1661,7 +1661,7 @@
                         <div class="flex-row user-actions" style="flex-wrap: wrap; gap: 10px;">
                             <button class="button" onclick="loadAllAccounts()">刷新列表</button>
                             <button class="button" onclick="resetPassword()">重置密码</button>
-                            <button id="freeze-user-btn" class="button button-danger" onclick="toggleFreezeUser()">冻结用户</button>
+                            <button id="freeze-user-btn" class="button button-danger" disabled>冻结用户</button>
                             <button id="safe-user-btn" class="button" onclick="toggleSafeUser(document.getElementById('admin-user-select').value)">信任用户</button>
                             <button class="button button-danger" onclick="deleteUser()">删除用户</button>
                         </div>
@@ -2486,8 +2486,13 @@
                     filterUsers();
                 } else if (data.type === 'user-info') {
                     const output = document.getElementById('user-info-output');
+                    const freezeBtn = document.getElementById('freeze-user-btn');
                     if (!data.data) {
                         output.innerHTML = '请选择用户';
+                        freezeBtn.disabled = true;
+                        return;
+                    }
+                    if (data.data.account !== document.getElementById('admin-user-select').value) {
                         return;
                     }
 
@@ -2520,9 +2525,9 @@
                     safeBtn.className = `button ${data.data.safe ? 'button-danger' : ''}`;
                     
                     // 更新冻结用户按钮状态
-                    const freezeBtn = document.getElementById('freeze-user-btn');
                     freezeBtn.textContent = data.data.isFrozen ? '取消冻结' : '冻结用户';
-                    freezeBtn.className = 'button button-danger';
+                    freezeBtn.onclick = () => toggleFreezeUser(data.data.account, !data.data.isFrozen);
+                    freezeBtn.disabled = false;
                     
                     // 显示房间权限
                     loadRoomPermissions(data.data.account, data.data.rooms);
@@ -3759,6 +3764,7 @@
             const userSelect = document.getElementById('admin-user-select');
             
             userSelect.innerHTML = '<option value="">-- 选择用户 --</option>';
+            loadUserInfo();
             
             if (!window.allUsers) {
                 return;
@@ -3786,6 +3792,8 @@
         // 加载用户信息
         function loadUserInfo() {
             const accountId = document.getElementById('admin-user-select').value;
+            const freezeBtn = document.getElementById('freeze-user-btn');
+            freezeBtn.disabled = true;
             if (!accountId) {
                 document.getElementById('user-info-output').innerHTML = '请选择用户';
                 document.getElementById('room-permissions-output').innerHTML = '请选择用户';
@@ -3794,9 +3802,7 @@
                 safeBtn.textContent = '信任用户';
                 safeBtn.className = 'button';
                 // 重置冻结用户按钮
-                const freezeBtn = document.getElementById('freeze-user-btn');
                 freezeBtn.textContent = '冻结用户';
-                freezeBtn.className = 'button button-danger';
                 return;
             }
             
@@ -3881,14 +3887,12 @@
         }
         
         // 冻结/解冻用户
-        function toggleFreezeUser() {
-            const accountId = document.getElementById('admin-user-select').value;
-            if (!accountId) {
-                showAlertModal('提示', '请选择用户');
+        function toggleFreezeUser(accountId, isFrozen) {
+            if (accountId !== document.getElementById('admin-user-select').value) {
                 return;
             }
             
-            socket.emit('message', { type: 'toggle-freeze-user', accountId });
+            socket.emit('message', { type: 'toggle-freeze-user', accountId, isFrozen });
         }
         
         // 切换信任用户状态
