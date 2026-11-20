@@ -1,0 +1,49 @@
+{
+  "info": {
+    "authors": [
+      {
+        "links": "",
+        "name": "烏兎"
+      }
+    ],
+    "bgi_version": "0.45.0",
+    "description": "  路线信息：该路线预计用时16秒，包含以下怪物：3只精英传奇倍率五。",
+    "enable_monster_loot_split": false,
+    "last_modified_time": 1787766230027,
+    "map_match_method": "",
+    "map_name": "Teyvat",
+    "name": "AF2传奇-拳王",
+    "tags": [],
+    "type": "collect",
+    "version": "1.0"
+  },
+  "positions": [
+    {
+      "action": "",
+      "action_params": "",
+      "id": 1,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 3102.25,
+      "y": 3942.3125
+    },
+    {
+      "action": "combat_script",
+      "action_params": ";wait(0.01),e,e,wait(0.1),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2);keypress(e),wait(0.05),keydown(e),wait(0.05),attack(0.82),keyup(e),wait(0.6),keypress(1)",
+      "id": 2,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 3090.9375,
+      "y": 3942
+    },
+    {
+      "action": "fight",
+      "action_params": "",
+      "id": 3,
+      "move_mode": "dash",
+      "type": "orientation",
+      "x": 3090.9375,
+      "y": 3942
+    }
+  ]
+}

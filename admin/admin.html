@@ -1887,6 +1887,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script>
         let socket;
+        let roomsData = Object.create(null);
         const SERVER_URL = 'http://121.41.2.163:41013';
         let activeUpload = null;
         let currentAccount = null;
@@ -2117,6 +2118,7 @@
                 }
                 
                 if (data.type === 'rooms-status') {
+                    roomsData = data.data || Object.create(null);
                     const roomsContainer = document.getElementById('rooms-container');
                     
                     roomsContainer.innerHTML = '';
@@ -2161,7 +2163,9 @@
                             
                             // 根据房间模式决定是否显示发车人数
                             let roomPropertiesHTML = `<span>${escapeHtml(modeText)}</span>`;
-                            if (roomInfo.mode !== 'none') {
+                            if (roomInfo.roomType === 'laicai') {
+                                roomPropertiesHTML = escapeHtml(laicaiRoomSummary(roomInfo.laicai));
+                            } else if (roomInfo.mode !== 'none') {
                                 roomPropertiesHTML += `<span>${escapeHtml(roomInfo.count)}人发车</span>`;
                             }
                             
@@ -2196,7 +2200,9 @@
                                     userItem.innerHTML = `
                                         <span>${escapeHtml(user.accountId)}-${escapeHtml(user.connectionId)}-${escapeHtml(user.username)} (UID: ${escapeHtml(user.uid)})${hostIcon}</span>
                                     `;
-                                    userItem.onclick = function(e) {
+                                    if (roomInfo.roomType === 'laicai') {
+                                        userItem.textContent = [user.role === 'host' ? '主用户' : '大号', user.accountId, user.username, user.uid].filter(Boolean).join(' · ');
+                                    } else userItem.onclick = function(e) {
                                         e.stopPropagation(); // 防止事件冒泡
                                         showActionMenu(e, user, roomName);
                                     };
@@ -2307,7 +2313,10 @@
                                 <p><strong>房间名称：</strong>${escapeHtml(data.roomProperties.name)}</p>
                                 <p><strong>发车模式：</strong>${escapeHtml(modeText)}</p>
                         `;
-                        if (data.roomProperties.mode !== 'none') {
+                        if (data.roomProperties.roomType === 'laicai') {
+                            roomsData[data.roomProperties.name] = data.roomProperties;
+                            propertiesHTML = '<div>' + escapeHtml(laicaiRoomSummary(data.roomProperties.laicai)) + '</div><p>世界 UID：' + escapeHtml(data.roomProperties.laicai.worldUids.join('、')) + '</p>';
+                        } else if (data.roomProperties.mode !== 'none') {
                             propertiesHTML += `<p><strong>发车人数：</strong>${escapeHtml(data.roomProperties.count)}</p>`;
                         }
                         propertiesHTML += `</div>`;
@@ -2339,7 +2348,11 @@
                                     强制下线
                                 </button>
                             `;
-                            userItem.querySelector('button').onclick = () => toggleUserStatus(user.uid, roomName);
+                            const button = userItem.querySelector('button');
+                            if (data.roomProperties?.roomType === 'laicai') {
+                                button.remove();
+                                userItem.querySelector('small').textContent = user.role === 'host' ? '主用户 · 在线' : '大号 · 在线';
+                            } else button.onclick = () => toggleUserStatus(user.uid, roomName);
                             output.appendChild(userItem);
                         });
                     }
@@ -4153,6 +4166,44 @@
             }
         };
         
+        function laicaiRoomSummary(value) {
+            return '来财 · ' + value.bigCount + ' 个大号 + 主用户 · ' + value.worldUids.length +
+                ' 个世界 · ' + value.timeoutSeconds + ' 秒 · ' + (value.allowMissing ? '允许中途缺人' : '中途缺人终止');
+        }
+
+        function setRoomTypeFields(prefix, room = {}) {
+            const el = id => document.getElementById(prefix + '-room-' + id);
+            el('type').value = room.roomType === 'laicai' ? 'laicai' : 'group';
+            el('big-count').value = room.laicai?.bigCount ?? 1;
+            el('worlds').value = (room.laicai?.worldUids || []).join('\n');
+            el('allow-missing').checked = room.laicai?.allowMissing === true;
+            el('timeout').value = room.laicai?.timeoutSeconds ?? 120;
+            toggleRoomType(prefix);
+        }
+
+        function toggleRoomType(prefix) {
+            const el = id => document.getElementById(prefix + '-room-' + id);
+            const enabled = el('type').value === 'laicai';
+            el('settings').hidden = !enabled;
+            el('mode').parentElement.hidden = enabled;
+            el('count').parentElement.hidden = enabled;
+        }
+
+        function readRoomTypeFields(prefix) {
+            const el = id => document.getElementById(prefix + '-room-' + id);
+            if (el('type').value !== 'laicai') return { roomType: 'group' };
+            const worldUids = el('worlds').value.trim().split(/[\s,，、]+/);
+            const bigCount = Number(el('big-count').value);
+            const timeoutSeconds = Number(el('timeout').value);
+            if (worldUids.length > 45 || worldUids.some(uid => !/^\d{9,10}$/.test(uid)) ||
+                new Set(worldUids).size !== worldUids.length || ![1,2,3].includes(bigCount) ||
+                !Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 86400) {
+                showAlertModal('配置有误', '请设置 1–3 个大号、1–45 个互不重复的世界 UID，以及 1–86400 秒的等待时间');
+                return null;
+            }
+            return { roomType: 'laicai', laicai: { bigCount, worldUids, allowMissing: el('allow-missing').checked, timeoutSeconds } };
+        }
+
         // 打开编辑房间属性模态框
         function openEditRoomModal() {
             const roomName = document.getElementById('admin-room-select').value;
@@ -4167,6 +4218,7 @@
             // 设置当前房间名称
             document.getElementById('edit-room-name').value = roomName;
             
+            setRoomTypeFields('edit', roomsData[roomName]);
             // 从roomsData中获取房间属性并填充
             if (roomsData && roomsData[roomName]) {
                 const roomInfo = roomsData[roomName];
@@ -4186,6 +4238,7 @@
         
         // 打开新增房间模态框
         function openCreateRoomModal() {
+            setRoomTypeFields('new');
             document.getElementById('create-room-modal').style.display = 'flex';
         }
         
@@ -4206,8 +4259,11 @@
                 return;
             }
             
+            const fields = readRoomTypeFields('edit');
+            if (!fields) return;
             // 发送保存请求
             sendAdminMessage({
+                ...fields,
                 type: 'edit-room-properties',
                 roomName: roomName,
                 newRoomName: newRoomName,
@@ -4250,8 +4306,11 @@
                 return;
             }
             
+            const fields = readRoomTypeFields('new');
+            if (!fields) return;
             sendAdminMessage({
-                type: 'create-room', 
+                ...fields,
+                type: 'create-room',
                 roomName: roomName,
                 roomMode: roomMode,
                 roomCount: roomCount
@@ -4280,6 +4339,13 @@
             <div class="form-group">
                 <label for="edit-room-name">房间名称：</label>
                 <input type="text" id="edit-room-name" placeholder="请输入房间名称" style="width: 100%;">
+            </div>
+            <div class="form-group"><label>房间类型 <select id="edit-room-type" onchange="toggleRoomType('edit')"><option value="group">团购</option><option value="laicai">来财</option></select></label></div>
+            <div id="edit-room-settings" hidden>
+                <label>大号人数 <input id="edit-room-big-count" type="number" min="1" max="3" value="1"></label>
+                <label>世界 UID（空格、逗号或换行分隔）<textarea id="edit-room-worlds" rows="3"></textarea></label>
+                <label>中途等待秒数 <input id="edit-room-timeout" type="number" min="1" max="86400" value="120"></label>
+                <label><input id="edit-room-allow-missing" type="checkbox">允许中途缺人继续</label>
             </div>
             <div class="form-group">
                 <label for="edit-room-mode">发车模式：</label>
@@ -4312,6 +4378,13 @@
             <div class="form-group">
                 <label for="new-room-name">房间名称：</label>
                 <input type="text" id="new-room-name" placeholder="请输入房间名称" style="width: 100%;">
+            </div>
+            <div class="form-group"><label>房间类型 <select id="new-room-type" onchange="toggleRoomType('new')"><option value="group">团购</option><option value="laicai">来财</option></select></label></div>
+            <div id="new-room-settings" hidden>
+                <label>大号人数 <input id="new-room-big-count" type="number" min="1" max="3" value="1"></label>
+                <label>世界 UID（空格、逗号或换行分隔）<textarea id="new-room-worlds" rows="3"></textarea></label>
+                <label>中途等待秒数 <input id="new-room-timeout" type="number" min="1" max="86400" value="120"></label>
+                <label><input id="new-room-allow-missing" type="checkbox">允许中途缺人继续</label>
             </div>
             <div class="form-group">
                 <label for="new-room-mode">发车模式：</label>

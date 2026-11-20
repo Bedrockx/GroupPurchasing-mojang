@@ -1,0 +1,11 @@
+{
+  "manifest_version": 1,
+  "name": "来财",
+  "version": "1.0.0",
+  "description": "受莫酱客户端调度，在大号或小号的游戏会话中执行联机传三。",
+  "authors": [{ "name": "莫酱妙妙屋" }],
+  "tags": ["联机"],
+  "saved_files": ["mailbox", "account"],
+  "settings_ui": "settings.json",
+  "main": "main.js"
+}

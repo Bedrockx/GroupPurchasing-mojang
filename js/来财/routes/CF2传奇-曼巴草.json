@@ -1,0 +1,59 @@
+{
+  "info": {
+    "authors": [
+      {
+        "links": "",
+        "name": "烏兎"
+      }
+    ],
+    "bgi_version": "0.45.0",
+    "description": "  路线信息：该路线预计用时40秒，包含以下怪物：3只精英传奇倍率五。",
+    "enable_monster_loot_split": false,
+    "last_modified_time": 1787766436203,
+    "map_match_method": "SIFT",
+    "map_name": "Teyvat",
+    "name": "CF2传奇-曼巴草",
+    "tags": [],
+    "type": "collect",
+    "version": "1.0"
+  },
+  "positions": [
+    {
+      "action": "",
+      "action_params": "",
+      "id": 1,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 9697.3746,
+      "y": 5406.6406
+    },
+    {
+      "action": "stop_flying",
+      "action_params": "",
+      "id": 2,
+      "move_mode": "fly",
+      "type": "path",
+      "x": 9687.2754,
+      "y": 5383.748
+    },
+    {
+      "action": "combat_script",
+      "action_params": "e,q,ready,e,wait(0.1),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2),wait(0.05),keypress(2);keypress(e),wait(0.08),keypress(e),wait(0.08),keypress(e),wait(0.08),keypress(e),wait(0.08),keypress(e),wait(0.08),attack(0.82),wait(0.18),keypress(1)",
+      "id": 3,
+      "locked": false,
+      "move_mode": "dash",
+      "type": "path",
+      "x": 9668.3274,
+      "y": 5349.3198
+    },
+    {
+      "action": "fight",
+      "action_params": "",
+      "id": 4,
+      "move_mode": "dash",
+      "type": "orientation",
+      "x": 9668.3274,
+      "y": 5349.3198
+    }
+  ]
+}

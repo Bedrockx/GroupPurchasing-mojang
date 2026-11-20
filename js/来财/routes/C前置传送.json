@@ -1,0 +1,15 @@
+{
+  "info": {
+    "name": "C前置传送",
+    "map_name": "Teyvat"
+  },
+  "positions": [
+    {
+      "id": 1,
+      "type": "teleport",
+      "action": "force_tp",
+      "x": 9724.212890625,
+      "y": 5444.53515625
+    }
+  ]
+}

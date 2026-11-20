@@ -1,117 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-
-const filename = path.join(__dirname, '..', 'server', 'server.js');
-const source = fs.readFileSync(filename, 'utf8');
-const seats = ['A', 'B', 'C', 'D'].map(uid => ({
-  uid, username: uid, socketId: uid, accountId: uid === 'C' ? 'B' : uid, notHost: uid !== 'A'
-}));
-
-function temporaryData(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mojang-server-test-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-// 每次创建独立的服务端运行环境。账本使用临时目录，监听、网络和定时任务由测试接管。
-async function boot(dir, { now = Date.parse('2024-03-01T04:30:00+08:00'), execFile, onTimeout } = {}) {
-  const clock = { now };
-  class ClockDate extends Date {
-    constructor(...args) { super(...(args.length ? args : [clock.now])); }
-    static now() { return clock.now; }
-  }
-  const messages = [];
-  const sockets = new Map(seats.map(({ uid }) => [uid, {
-    id: uid, connected: true,
-    emit(_event, data) { messages.push({ uid, data }); }
-  }]));
-  let started, failed, onConnection;
-  const ready = new Promise((resolve, reject) => { started = resolve; failed = reject; });
-  const noop = () => {};
-  const express = Object.assign(() => ({ get: noop, use: noop }), { static: noop });
-  const disk = Object.create(fs);
-  disk.appendFile = (_file, _data, callback) => callback(null);
-  const modules = {
-    express, fs: disk, path, crypto: require('node:crypto'),
-    ...(execFile ? { child_process: { execFile } } : {}),
-    http: { createServer: () => ({ listen: started }) },
-    'socket.io': () => ({
-      sockets: { sockets },
-      on(event, handler) { if (event === 'connection') onConnection = handler; }
-    })
-  };
-  const ctx = vm.createContext({
-    __dirname: dir, Date: ClockDate, Buffer,
-    require(name) { assert(Object.hasOwn(modules, name), name); return modules[name]; },
-    console: { log: noop, error: noop, warn: noop },
-    process: { pid: process.pid, on: noop, exit: code => failed(new Error('初始化退出 ' + code)) },
-    setTimeout(callback, delay) {
-      onTimeout?.(callback, delay);
-      if (delay === 2000) queueMicrotask(callback); // 图片传输后的发车延时
-      return { unref: noop };
-    },
-    setInterval: () => ({ unref: noop }), clearTimeout: noop, clearInterval: noop
-  });
-  vm.runInContext(source, ctx, { filename });
-  await ready;
-  const get = name => vm.runInContext(name, ctx);
-  for (const seat of seats) {
-    const accounts = get('userAccounts');
-    accounts[seat.accountId] ||= { points: 20, rooms: ['测试房间'] };
-    const connections = get('userConnections');
-    if (!connections.has(seat.accountId)) {
-      connections.set(seat.accountId, { userInfo: { username: seat.accountId }, connections: [] });
-    }
-    connections.get(seat.accountId).connections.push({ ...seat });
-  }
-  return {
-    clock, disk, get, messages,
-    connect(id) {
-      const handlers = new Map();
-      const socket = {
-        id, connected: true,
-        emit(_event, data) { messages.push({ uid: id, data }); },
-        on(event, handler) { handlers.set(event, handler); },
-        disconnect() {
-          this.connected = false;
-          sockets.delete(id);
-          handlers.get('disconnect')?.();
-        }
-      };
-      sockets.set(id, socket);
-      onConnection(socket);
-      return socket;
-    },
-    async send(uid, message) { await get('handleReceivedMessage')(sockets.get(uid), message); },
-    async openRide() {
-      const room = { name: '测试房间', mode: 'random', count: 4, users: [...seats] };
-      if (!get('rooms').some(r => r.name === room.name)) get('rooms').push(room);
-      get('roomUsers').set(room.name, room);
-      await get('checkAndHandleRideInternal')(room.name);
-      const ride = [...get('RideManager').activeRides.values()][0];
-      assert(ride, '房间应已匹配');
-      return ride.record.rideId;
-    },
-    report(uid, rideId, evidence = {}) {
-      get('handleReportCrash')({
-        rideIdentifier: rideId, reportId: rideId + '-' + uid,
-        crashInfo: { reporter: { uid }, crashType: uid === 'A' ? 'waitForExpectedPlayers' : 'playerTimeoutEnterWorld', ...evidence }
-      }, sockets.get(uid));
-      assert.equal(messages.at(-1).data.type, 'report-ack');
-      assert.equal(messages.at(-1).data.success, true);
-    },
-    async ranking(gainType, date) {
-      await get('handleGetGainRecords')({ gainType, date }, sockets.get('A'));
-      const response = messages.at(-1).data;
-      assert.equal(response.type, 'gain-records');
-      return new Map(response.data.map(row => [row.gameAccount, row.expGain + row.moraGain]));
-    }
-  };
-}
+const { boot, temporaryData, seats } = require('./helpers/server-fixture.cjs');
+const { createRoom } = require('./helpers/laicai-room.cjs');
 
 async function prepare(app, id, ackUids) {
   for (const { uid } of seats) {
@@ -236,6 +128,160 @@ test('收益回执丢失后跨重启、跨四点重试保留真零且只落盘�
   assert.equal(readDay('2024-02-29').B[0].expGain, 0);
   assert(!Object.hasOwn(readDay('2024-02-29').B[0], 'moraGain'));
   assert.equal(readDay('2024-03-01').B, undefined);
+});
+
+const lcRoom = '测试房间';
+const uid1 = '100000010';
+let lcSequence = 0;
+async function lcSend(app, socket, op, payload, scope = {}) {
+  const m = {type:'laicai', version:1, messageId:'m' + (++lcSequence), roomName:lcRoom, op, payload, ...scope};
+  await app.send(socket, m);
+  return app.messages.filter(entry => entry.uid === socket && entry.data.replyTo === m.messageId).at(-1)?.data;
+}
+function lcReady(role, clientId, data = {}) {
+  return {role,clientId, laicaiVersion:'1.0.0', ...(role === 'big' ? {gameName:clientId, uid:'100000001'} :
+    {workers:[{workerId:'worker_1',uids:[uid1]}]}), ...data};
+}
+function lcRoomSetup(app, config = {}, name = lcRoom) {
+  const laicai = {bigCount:1, worldUids:[uid1], allowMissing:true, timeoutSeconds:120, ...config};
+  app.get('rooms').push({name, mode:'random', count:laicai.bigCount+1, roomType:'laicai', laicai});
+}
+
+async function freezeAccount(app, accountId, isFrozen) {
+  app.get('adminConnections').set('冻管', {adminInfo:{username:'冻管'}, connections:[{socketId:'freeze-admin'}]});
+  let reply;
+  await app.get('handleReceivedMessage')({id:'freeze-admin', emit:(_, m) => { reply = m; }},
+    {type:'toggle-freeze-user', accountId, isFrozen});
+  assert.equal(reply.type, 'freeze-user-success');
+}
+
+test('冻结移除同账号的所有等待席，重传旧报名或解冻均不能直接发车', async t => {
+  const app = await boot(temporaryData(t));
+  lcRoomSetup(app, {bigCount:2});
+  const big = lcReady('big','pc_B');
+  const other = lcReady('big','pc_C',{uid:'100000002'});
+  const first = await lcSend(app, 'B', 'seat-ready', big);
+  const second = await lcSend(app, 'C', 'seat-ready', other);
+  await freezeAccount(app, 'B', true); // B、C 是同一账号的两个连接。
+  const view = () => app.get('laicaiRoomsView')(app.get('rooms').find(r => r.name === lcRoom));
+  assert.equal(view().users.length, 0);
+  for (const receipt of [first, second]) {
+    assert.ok(app.messages.some(r => r.data.replyTo === receipt.replyTo && r.data.payload?.status === 'rejected'));
+  }
+  assert.equal((await lcSend(app, 'B', 'seat-ready', big, {messageId:first.replyTo})).payload.status, 'rejected');
+  const frozenReply = await lcSend(app, 'C', 'seat-ready', other);
+  assert.equal(frozenReply.payload.status, 'rejected');
+  assert.equal((await lcSend(app, 'B', 'seat-withdraw', {clientId:'pc_B'})).payload.status, 'applied');
+  await freezeAccount(app, 'B', false);
+  await lcSend(app, 'D', 'seat-ready', lcReady('host','pc_D'));
+  for (const [socket, registration, replyTo] of [['B', big, first.replyTo], ['C', other, frozenReply.replyTo]]) {
+    assert.equal((await lcSend(app, socket, 'seat-ready', registration, {messageId:replyTo})).payload.status, 'rejected');
+  }
+  assert.equal(app.get('laicaiTasks').size, 0);
+  await lcSend(app, 'B', 'seat-ready', big);
+  await lcSend(app, 'C', 'seat-ready', other);
+  assert.equal(app.get('laicaiTasks').size, 1);
+});
+
+test('来财满员检查重新核验等待席的冻结状态，冻结的主用户也不能报名', async t => {
+  const app = await boot(temporaryData(t));
+  lcRoomSetup(app);
+  await lcSend(app, 'D', 'seat-ready', lcReady('host','pc_D'));
+  app.get('userAccounts').D.isFrozen = true; // 模拟等待表仍残留已冻结席位。
+  await lcSend(app, 'A', 'seat-ready', lcReady('big','pc_A'));
+  assert.equal(app.get('laicaiTasks').size, 0);
+  assert.equal((await lcSend(app, 'D', 'seat-ready', lcReady('host','pc_D'))).payload.status, 'rejected');
+  assert.deepEqual(Array.from(app.get('laicaiWaiting').get(lcRoom), s => s.accountId), ['A']);
+});
+
+test('团购炸车自动冻结会撤销该账号在另一个来财房的报名', async t => {
+  const app = await boot(temporaryData(t));
+  const name = '来财联机';
+  const laicai = {bigCount:1, worldUids:[uid1], allowMissing:false, timeoutSeconds:120};
+  app.get('rooms').push({name, mode:'random', count:2, roomType:'laicai', laicai});
+  app.get('userAccounts').B.rooms.push(name);
+  await lcSend(app, 'B', 'seat-ready', lcReady('big','pc_B'), {roomName:name});
+  for (let i = 0; i < 2; i++) {
+    const rideId = await app.openRide();
+    await prepare(app, rideId, []);
+    app.report('B', rideId);
+    app.get('processCrashReports')(rideId);
+  }
+  assert.equal(app.get('userAccounts').B.isFrozen, true);
+  assert.equal(app.get('laicaiWaiting').get(name)?.length || 0, 0);
+});
+
+test('已经发车的来财账号被冻结后仍能恢复原任务、回报退场和清场', async t => {
+  const r = await createRoom(t, [{workerId:'w',uids:[uid1]}], {bigCount:1});
+  const start = r.sent('task-start');
+  for (const item of start) await r.reply(item, 'ack', {status:'applied'});
+  await r.reply(start.find(s => s.uid === 'A'), 'executor-ready', {role:'big', laicaiVersion:'1.0.0'});
+  await r.reply(r.sent('prepare-world')[0], 'world-ready', {observedUid:uid1, exactReads:2});
+  await r.reply(r.sent('open-admission')[0], 'admission-opened', {});
+  const arm = r.sent('admit-seat')[0];
+  await r.reply(arm, 'seat-armed', {members:[]});
+  await r.reply(r.sent('join-world')[0], 'join-result', {status:'joined', fromSingle:true, position:2});
+  await r.reply(arm, 'world-members', {stable:true, ambiguous:false, members:[{seatId:arm.data.seatId, position:2}]});
+  await r.reply(r.sent('route-release')[0], 'route-result', {status:'success', evidence:'reward', isLast:true});
+
+  await freezeAccount(r.app, 'A', true);
+  await freezeAccount(r.app, 'D', true);
+  const state = await lcSend(r.app, 'A', 'state-request', {clientId:'pc_A'});
+  assert.equal(state.payload.task.taskId, arm.data.taskId);
+  await r.reply(r.sent('leave-world')[0], 'seat-left', {single:true});
+  await r.reply(r.sent('check-clear')[0], 'world-cleared', {stable:true, memberCount:0});
+  await r.reply(r.sent('release-world')[0], 'ack', {status:'applied'});
+  assert.equal(r.sent('task-end')[0].data.payload.worldResults[0].status, 'completed');
+});
+
+test('来财认证报名与撤销，兼容旧房并只在角色全部就绪时启动一次', async t => {
+  const dir = temporaryData(t);
+  const app = await boot(dir);
+  lcRoomSetup(app);
+  const bad = await lcSend(app,'B','seat-ready', lcReady('host','pc_B',{workers:[{workerId:'w',uids:[uid1,uid1]}]}));
+  assert.ok(bad, JSON.stringify(app.messages.slice(-2)));
+  assert.equal(bad.payload.status,'rejected');
+  await lcSend(app,'A','seat-ready',lcReady('big','pc_A'));
+  await lcSend(app,'A','seat-withdraw',{clientId:'pc_A'});
+  await lcSend(app,'B','seat-ready',lcReady('host','pc_B'));
+  assert.equal(app.get('laicaiTasks').size,0);
+  assert.equal((await lcSend(app,'A','seat-ready',lcReady('big','pc_A',{laicaiVersion:'2'}))).payload.status,'rejected');
+  assert.equal((await lcSend(app,'A','seat-ready',lcReady('big','pc_A'))).payload.status,'applied');
+  const start = app.messages.filter(o => o.data.op === 'task-start');
+  assert.equal(start.length,2);
+  assert.equal(start[0].data.taskId,start[1].data.taskId);
+  await app.get('checkAndHandleRideInternal')(lcRoom);
+  assert.equal(app.get('RideManager').activeRides.size,0);
+  app.get('adminConnections').set('管理员', {adminInfo:{username:'管理员'},connections:[{socketId:'adminSocket'}]});
+  let details;
+  app.get('handleGetRoomUsers')({roomName:lcRoom},{id:'adminSocket', emit:(_, msg) => {details=msg;}});
+  assert.equal(details.roomProperties.roomType,'laicai');
+  assert.equal(details.roomProperties.laicai.worldUids[0],uid1);
+  assert.ok(details.users.some(s => s.role === 'host' && s.online && s.uid === ''));
+  assert.equal((await lcSend(app,'D','state-request',{clientId:'pc_A'})).payload.task,null);
+  const next = await boot(dir);
+  lcRoomSetup(next);
+  const state = await lcSend(next,'A','state-request',{clientId:'pc_A'});
+  assert.equal(state.payload.task.taskId,start[0].data.taskId);
+  assert.equal(next.messages.filter(o => o.data.op === 'task-start').length,1);
+});
+
+test('管理员创建及编辑来财参数经房间查询回显，旧房不被自动转换', async t => {
+  const app = await boot(temporaryData(t));
+  app.get('adminConnections').set('管理', {adminInfo:{username:'管理'},connections:[{socketId:'q'}]});
+  const replies = [];
+  const socket = {id:'q',emit:(_, m) => replies.push(m)};
+  const admin = m => app.get('handleReceivedMessage')(socket,m);
+  const config = {bigCount:3,worldUids:[uid1],allowMissing:false,timeoutSeconds:15};
+  await admin({type:'create-room',roomName:lcRoom,roomType:'laicai',laicai:config});
+  await admin({type:'get-rooms-status'});
+  assert.equal(replies.at(-1).data[lcRoom].count,4);
+  assert.equal(replies.at(-1).data[lcRoom].laicai.timeoutSeconds,15);
+  await admin({type:'edit-room-properties',roomName:lcRoom,newRoomName:lcRoom,roomMode:'random',roomCount:4,roomType:'laicai',laicai:{...config,bigCount:4}});
+  assert.equal(replies.at(-1).type,'error');
+  await admin({type:'edit-room-properties',roomName:lcRoom,newRoomName:lcRoom,roomMode:'random',roomCount:4,roomType:'group'});
+  await admin({type:'get-rooms-status'});
+  assert.equal(replies.at(-1).data[lcRoom].roomType,undefined);
 });
 
 test('管理请求按连接鉴权，账户列表脱敏且房权落盘后回执', async t => {
@@ -555,4 +601,66 @@ test('北京时间 03:50 和手动重启合并等待，停服失败恢复撮合�
   await fire(timers.slice(start).find(timer => timer.delay === 1000));
   assert.equal(scripts.length, 2);
   scripts[1].callback(null, '', '');
+});
+
+test('重启同时等待团购和来财，停服失败后可重试原来财报名', async t => {
+  const timers = [];
+  const scripts = [];
+  const app = await boot(temporaryData(t), {
+    onTimeout(callback, delay) { timers.push({ callback, delay }); },
+    execFile(_command, _args, callback) { scripts.push(callback); }
+  });
+  app.connect('control');
+  app.get('adminConnections').set('admin', {
+    adminInfo: { username: '管理员' }, connections: [{ socketId: 'control' }]
+  });
+  const rideId = await app.openRide();
+  const activeRoom = '已发车的来财';
+  const waitingRoom = '待发车的来财';
+  lcRoomSetup(app, {}, activeRoom);
+  lcRoomSetup(app, {}, waitingRoom);
+  const accounts = app.get('userAccounts');
+  for (const id of ['A', 'D']) accounts[id].rooms.push(activeRoom);
+  accounts.B.rooms.push(waitingRoom);
+  await lcSend(app, 'A', 'seat-ready', lcReady('big', 'pc_A'), { roomName: activeRoom });
+  await lcSend(app, 'D', 'seat-ready', lcReady('host', 'pc_D'), { roomName: activeRoom });
+  await lcSend(app, 'B', 'seat-ready', lcReady('big', 'pc_B'), { roomName: waitingRoom });
+  const tasks = app.get('laicaiTasks');
+  const active = tasks.get(activeRoom);
+  assert(active);
+
+  const restart = { type: 'restart-server' };
+  let nextTimer = timers.length;
+  await app.send('control', restart);
+  async function fire(delay) {
+    const timer = timers.slice(nextTimer).find(item => item.delay === delay);
+    assert(timer, `应已安排 ${delay}ms 后的重启检查`);
+    nextTimer = timers.length;
+    timer.callback();
+    await new Promise(setImmediate);
+  }
+  await fire(1000);
+  assert.equal(scripts.length, 0);
+  const scope = { roomName: waitingRoom, messageId: 'retry_seat_ready' };
+  const waitingHost = lcReady('host', 'pc_C');
+  const rejected = await lcSend(app, 'C', 'seat-ready', waitingHost, scope);
+  assert.equal(rejected.payload.status, 'rejected');
+  assert.equal(rejected.payload.retryable, true);
+  assert(!tasks.has(waitingRoom));
+
+  await prepare(app, rideId, ['A']);
+  await app.send('A', { type: 'ride-started', rideId, uid: 'A', success: true });
+  assert.equal(app.get('RideManager.activeRides').size, 0);
+  await fire(30000);
+  assert.equal(scripts.length, 0, '团购结束后仍须等待来财');
+  app.clock.now = active.startUntil + 1;
+  app.get('lcTick')();
+  assert(!tasks.has(activeRoom));
+  await fire(30000);
+  assert.equal(scripts.length, 1);
+
+  scripts[0](new Error('模拟重启失败'), '', '');
+  const accepted = await lcSend(app, 'C', 'seat-ready', waitingHost, scope);
+  assert.equal(accepted.payload.status, 'applied');
+  assert(tasks.has(waitingRoom));
 });
