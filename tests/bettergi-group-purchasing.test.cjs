@@ -116,6 +116,50 @@ test('F2 实际进场顺序可不同于发车席位，重名、未识别或名�
     assert.equal((await observe(rows)).missingUids, undefined);
 });
 
+test('队员按目标 UID 入场后直接占位，期间无需再次打开 F2、核验名片或主动退队', async () => {
+    const { ctx, run } = loadScript(group);
+    ctx.settings.groupMode = '使用JSON配置文件';
+    ctx.settings.runExtra = false;
+    ctx.file.ReadTextSync = () => JSON.stringify({
+        myPosition: '2',
+        teamMembers: [
+            { position: '1', uid: '100000001', username: '房主' },
+            { position: '2', uid: '100000002', username: '队员' }
+        ],
+        onlineInfo: { gameName: '队员', rideIdentifier: '测试车次' }
+    });
+    const steps = [];
+    const signs = [0, 2, 2, 0, 0];
+    ctx.readOnlineRecord = ctx.switchPartyIfNeeded = ctx.loadTargetItems = noop;
+    ctx.getPlayerSign = () => {
+        assert.ok(signs.length, '队员不应反复申请入场或退队');
+        return signs.shift();
+    };
+    ctx.keyPress = key => steps.push(key);
+    ctx.inputText = uid => steps.push(uid);
+    ctx.findAndClick = target => {
+        if (target.endsWith('/requestEnter.png')) steps.push('申请加入');
+        if (target.endsWith('/leaveTeam.png')) steps.push('主动退队');
+        return true;
+    };
+    ctx.captureGameRegion = () => ({
+        find: () => ({ isExist: () => false }),
+        findMulti: () => assert.fail('入场成功后不应 OCR 核验房主名片'),
+        dispose: noop
+    });
+    ctx.waitForMainUI = ctx.isMainUI = () => true;
+    ctx.genshin.getPositionFromMap = () => ({ x: 14031, y: 440 });
+    ctx.readFolder = folder => folder === 'targets' ? [] : [{ fullPath: folder + '/路线.json' }];
+    ctx.runPath = file => steps.push(file);
+    ctx.handleOnlineRecordAndReonline = crashed => {
+        assert.equal(crashed, false);
+        steps.push('成功收尾');
+    };
+
+    await run('runMain()');
+    assert.deepEqual(steps, ['F2', '100000001', '申请加入', 'assets/ArtifactsPath/度假村/占位/路线.json', '成功收尾']);
+});
+
 test('凌晨四点跨日、重复回执与只当队员偏好共同决定是否重新上线', async () => {
     const { ctx, run } = loadScript(group);
     const now = Date.parse('2026-11-18T20:00:01Z');

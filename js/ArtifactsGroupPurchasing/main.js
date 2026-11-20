@@ -181,23 +181,14 @@ let skipLog = false;
                 log.info(`将要进入序号${idx}，uid为${settings[`p${idx}UID`]}的世界`);
                 notification.send(`将要进入序号${idx}，uid为${settings[`p${idx}UID`]}，名称为${settings[`p${idx}Name`]}的世界`);
             }
-            let attempts = 0;
-            let enterSuccess = false;
-            while (attempts < 5) {
-                attempts++;
-                enterSuccess = await autoEnter(autoEnterSettings);
-                if (autoEnterSettings.enterMode !== "进入他人世界" || !enterSuccess) break;
-                if (await checkHostIdentity(settings[`p${idx}Name`], settings[`p${idx}UID`])) {
-                    notification.send(`已确认进入${idx}号的世界`);
-                    break;
+            const enterSuccess = await autoEnter(autoEnterSettings);
+            if (autoEnterSettings.enterMode === "进入他人世界") {
+                // 禁止在进入房主世界后进行任何形式的核验。入场成功后直接占位。
+                if (enterSuccess) {
+                    notification.send(`已进入${idx}号的世界`);
+                } else if (!crashType) {
+                    throw new Error("未能进入目标世界，已停止本次路线");
                 }
-                log.warn("无法确认当前房主，退出后重新申请");
-                await leaveCurrentWorld();
-                enterSuccess = false;
-            }
-            if (autoEnterSettings.enterMode === "进入他人世界" && !enterSuccess && !crashType) {
-                // 界面识别失败不能作为队员或房主的过错证据。
-                throw new Error("未能确认目标房主，已停止本次路线");
             }
             //执行对应的联机狗粮
             await runGroupPurchasing(false);
@@ -296,21 +287,6 @@ function currentRoster() {
     return [1, 2, 3, 4].map(position => ({
         position, uid: String(settings[`p${position}UID`] || ''), username: settings[`p${position}Name`]
     })).filter(member => member.uid || member.username);
-}
-
-async function checkHostIdentity(name, uid) {
-    const roster = currentRoster();
-    await genshin.returnMainUi();
-    await keyPress("F2");
-    await sleep(1500);
-    const frame = captureGameRegion();
-    try {
-        const host = identifyPlayerCard(readCardLines(frame, 0), roster);
-        return !!host && (uid ? host.uid === String(uid) : host.username === name);
-    } finally {
-        frame.dispose();
-        await genshin.returnMainUi();
-    }
 }
 
 async function leaveCurrentWorld() {
