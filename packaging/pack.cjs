@@ -9,6 +9,7 @@ const fromClient = createRequire(path.join(client, 'package.json'));
 const group = 'js/ArtifactsGroupPurchasing';
 const output = path.join(__dirname, 'out');
 const release = path.join(output, 'upload');
+const fullRelease = path.join(output, 'full');
 const names = ['mojang.zip', 'ArtifactsGroupPurchasing.zip', 'app.asar'];
 
 function trackedFiles(...paths) {
@@ -27,7 +28,7 @@ function makeZip(tool, folder, dest) {
     execFileSync(tool, ['t', '-bso0', dest], { stdio: 'inherit' });
 }
 
-function buildPackages(work, ready) {
+function buildPackages(work, ready, fullZip) {
     const zip = fromClient('7zip-bin').path7za;
     const builder = fromClient.resolve('electron-builder/cli.js');
     const electron = path.join(path.dirname(fromClient.resolve('electron/package.json')), 'dist');
@@ -36,17 +37,23 @@ function buildPackages(work, ready) {
         '--config.directories.output=' + build, '--config.electronDist=' + electron,
         '--config.win.signAndEditExecutable=false'], { cwd: client, stdio: 'inherit' });
 
-    const asar = path.join(build, 'win-unpacked', 'resources', 'app.asar');
-    const desktop = path.join(work, 'desktop');
-    copy(asar, path.join(desktop, 'resources', 'app.asar'));
+    const desktopFull = path.join(build, 'win-unpacked');
+    const desktopUpdate = path.join(work, 'desktop-update');
+    const asar = path.join(desktopFull, 'resources', 'app.asar');
+    copy(asar, path.join(desktopUpdate, 'resources', 'app.asar'));
     copy(asar, path.join(ready, 'app.asar'));
     for (const file of trackedFiles('client/updater.ps1', 'client/modelUser', 'client/modelUserLcb')) {
-        copy(path.join(repo, file), path.join(desktop, file.slice('client/'.length)));
+        const relative = file.slice('client/'.length);
+        copy(path.join(repo, file), path.join(desktopUpdate, relative));
+        copy(path.join(repo, file), path.join(desktopFull, relative));
     }
     for (const required of ['updater.ps1', 'modelUser', 'modelUserLcb']) {
-        fs.accessSync(path.join(desktop, required));
+        fs.accessSync(path.join(desktopUpdate, required));
     }
-    makeZip(zip, desktop, path.join(ready, 'mojang.zip'));
+    fs.accessSync(path.join(desktopFull, 'mojang.exe'));
+    fs.mkdirSync(path.join(desktopFull, 'namePng'), { recursive: true });
+    makeZip(zip, desktopUpdate, path.join(ready, 'mojang.zip'));
+    makeZip(zip, desktopFull, fullZip);
 
     const groupFolder = path.join(work, 'group');
     const manifest = JSON.parse(fs.readFileSync(path.join(repo, group, 'manifest.json'), 'utf8'));
@@ -68,17 +75,15 @@ function buildPackages(work, ready) {
     for (const dir of ['records', 'targets']) fs.mkdirSync(path.join(groupFolder, dir));
     fs.writeFileSync(path.join(groupFolder, 'command.json'), '{}');
     makeZip(zip, groupFolder, path.join(ready, 'ArtifactsGroupPurchasing.zip'));
-    return [fromClient('./package.json').version, manifest.version];
+    return manifest.version;
 }
 
-function run() {
-    fs.mkdirSync(output, { recursive: true });
-    const work = fs.mkdtempSync(path.join(output, '.work-'));
-    const ready = path.join(work, 'ready');
-    const previous = path.join(work, 'previous');
+function publishPackages(ready, previous, fullZip, fullTarget) {
+    // 并行构建各用临时目录，发布时只允许一批替换输出。
+    const lockPath = path.join(output, '.publish-lock');
+    const lock = fs.openSync(lockPath, 'wx');
     try {
-        const [desktopVersion, groupVersion] = buildPackages(work, ready);
-        // 两个包和独立 asar 一起发布；构建失败时原上传目录仍然可用。
+        fs.mkdirSync(fullRelease, { recursive: true });
         if (fs.existsSync(release)) {
             if (!fs.lstatSync(release).isDirectory() || fs.readdirSync(release).some(file => !names.includes(file))) {
                 throw new Error('out/upload 有额外文件，请先移出后重新打包');
@@ -87,14 +92,42 @@ function run() {
         }
         try {
             fs.renameSync(ready, release);
+            // 同版本重建替换单个完整 ZIP，其他版本的完整包仍留在 full。
+            fs.renameSync(fullZip, fullTarget);
         } catch (error) {
+            if (!fs.existsSync(ready)) fs.renameSync(release, ready);
             if (fs.existsSync(previous)) fs.renameSync(previous, release);
             throw error;
         }
-        console.log('桌面版本 %s，团购版本 %s。上传文件位于 %s', desktopVersion, groupVersion, release);
+    } finally {
+        fs.closeSync(lock);
+        fs.unlinkSync(lockPath);
+    }
+}
+
+function run() {
+    const desktopVersion = fromClient('./package.json').version;
+    if (typeof desktopVersion !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.+-]+)?$/.test(desktopVersion)) {
+        throw new Error('桌面版本无法用于完整包文件名');
+    }
+    const fullName = `mojang-${desktopVersion}-full.zip`;
+    fs.mkdirSync(output, { recursive: true });
+    const work = fs.mkdtempSync(path.join(output, '.work-'));
+    const ready = path.join(work, 'ready');
+    const previous = path.join(work, 'previous');
+    const fullZip = path.join(work, fullName);
+    const fullTarget = path.join(fullRelease, fullName);
+    let published = false;
+    try {
+        const groupVersion = buildPackages(work, ready, fullZip);
+        publishPackages(ready, previous, fullZip, fullTarget);
+        published = true;
+        console.log('桌面版本 %s，团购版本 %s。', desktopVersion, groupVersion);
+        console.log('桌面完整包 %s', fullTarget);
+        console.log('上传文件目录 %s', release);
     } finally {
         // 恢复失败时保留上一批文件供取回。
-        if (!fs.existsSync(previous) || !fs.existsSync(ready)) fs.rmSync(work, { recursive: true, force: true });
+        if (published || !fs.existsSync(previous)) fs.rmSync(work, { recursive: true, force: true });
         else console.error('已保留上一批文件：', previous);
     }
 }
