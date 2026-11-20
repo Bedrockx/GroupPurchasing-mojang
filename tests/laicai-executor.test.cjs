@@ -5,7 +5,7 @@ const { createExecutor } = require("../js/来财/main.js");
 function fakeFile() {
     const files = new Map();
     return {
-        files, CreateDirectory: () => true,
+        files, IsFolder: dir => [...files.keys()].some(k => k.startsWith(dir + "/")),
         ReadTextSync: path => files.get(path), IsExists: path => files.has(path),
         WriteTextSync(path, body) { files.set(path, body); return true; },
         ReadPathSync(dir) { return [...files.keys()].filter(k => k.startsWith(dir + "/")); }

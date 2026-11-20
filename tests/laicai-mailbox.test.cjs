@@ -134,11 +134,15 @@ test('两个来财实例并行收件，主进程读取完整事件，重启后�
       }},
     });
     const executor = create();
+    executor.poll();
+    assert.equal(fs.existsSync(path.join(directory, 'mailbox')), false);
     desktop.publish(directory,command);
     worlds.push({directory, command, executor, create, game});
   }
   await Promise.all(worlds.map(async ({executor}) => { await executor.poll(); await executor.settle(); }));
   for (const {directory, command, game} of worlds) {
+    assert(fs.existsSync(path.join(directory, 'mailbox/state/executor0.json')));
+    assert(fs.existsSync(path.join(directory, 'mailbox/out')));
     const received = desktop.events(directory);
     const ready = received.find(m => m.op === 'world-ready');
     assert(ready, 'B 应读取 C 的正式 world-ready 事件');

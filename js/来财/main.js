@@ -8,14 +8,12 @@ const bigOnly = ["join-world", "run-route", "cancel-route", "leave-world"];
 
 function createExecutor({ role, file, now = Date.now, actions = {} }) {
     if (!["big", "host"].includes(role)) throw new Error("需要设置来财角色");
-    for (const dir of ["mailbox", "mailbox/in", "mailbox/out", "mailbox/state"]) {
-        if (!file.CreateDirectory(dir)) throw new Error("无法创建 " + dir);
-    }
     function read(path) { return JSON.parse(file.ReadTextSync(path)); }
     function write(path, data) {
+        // BetterGI 的 WriteTextSync 会创建缺失的父目录。
         if (!file.WriteTextSync(path, JSON.stringify(data))) throw new Error("无法写入 " + path);
     }
-    // LimitedFile 没有文件改名接口。交替写两份状态，断电时保留上次完整提交。
+    // 交替写两份状态，保留上次完整提交。
     const copies = [0, 1].map(i => {
         const path = "mailbox/state/executor" + i + ".json";
         if (!file.IsExists(path)) return null;
@@ -357,7 +355,9 @@ function createExecutor({ role, file, now = Date.now, actions = {} }) {
         if (fatal) throw fatal;
         if (!busy && recovery.length) run(recovery.shift(), true);
         const current = new Set();
-        for (const entry of Array.from(file.ReadPathSync("mailbox/in"))) {
+        // 首条指令由桌面客户端投递，投递前收件目录可能还未创建。
+        const inbox = file.IsFolder("mailbox/in") ? Array.from(file.ReadPathSync("mailbox/in")) : [];
+        for (const entry of inbox) {
             const path = String(entry).replace(/\\/g, "/");
             const match = /^mailbox\/in\/([a-zA-Z0-9_-]{1,128})\.json$/.exec(path);
             if (!match) continue;
@@ -428,7 +428,6 @@ function createGameUI() {
             const mat = file.ReadImageMatSync(path);
             const ro = RecognitionObject.TemplateMatch(mat, ...region);
             ro.Threshold = threshold;
-            ro.InitTemplate();
             patterns.set(key, ro);
         }
         return patterns.get(key);
@@ -1050,7 +1049,6 @@ function createRouteEnvironment(ui) {
 async function startLaicai() {
     const role = settings.role || "big";
     setGameMetrics(1920, 1080, 1);
-    if (role === "host" && !file.CreateDirectory("account")) throw new Error("无法创建本机账号目录");
     const ui = worldUI(createGameUI());
     const actions = createWorldActions(ui);
     if (role === "big") {

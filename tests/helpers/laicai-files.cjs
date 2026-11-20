@@ -42,9 +42,12 @@ function limitedFile(root, fs = require('node:fs')) {
     return file;
   }
   return {
+    IsFolder(name) {
+      try { return fs.lstatSync(resolve(name)).isDirectory(); } catch { return false; }
+    },
     ReadPathSync(name) {
       const directory = resolve(name);
-      return fs.existsSync(directory) ? fs.readdirSync(directory).map(child => path.join(name,child)) : [];
+      try { return fs.readdirSync(directory).map(child => path.join(name,child)); } catch { return []; }
     },
     ReadTextSync(name) {
       try { return fs.readFileSync(resolve(name),'utf8'); } catch { return ''; }
@@ -52,11 +55,12 @@ function limitedFile(root, fs = require('node:fs')) {
     WriteTextSync(name,value,append=false) {
       if (!/\.(?:txt|json)$/i.test(name)) return false;
       try {
-        fs.writeFileSync(resolve(name), value, {flag:append?'a':'w'});
+        const target = resolve(name);
+        fs.mkdirSync(path.dirname(target), {recursive:true});
+        fs.writeFileSync(target, value, {flag:append?'a':'w'});
         return true;
       } catch { return false; }
     },
-    CreateDirectory(name) { fs.mkdirSync(resolve(name), {recursive:true}); return true; },
     IsExists:name => fs.existsSync(resolve(name)),
   };
 }
