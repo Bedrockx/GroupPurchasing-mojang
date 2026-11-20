@@ -181,23 +181,14 @@ let skipLog = false;
                 log.info(`将要进入序号${idx}，uid为${settings[`p${idx}UID`]}的世界`);
                 notification.send(`将要进入序号${idx}，uid为${settings[`p${idx}UID`]}，名称为${settings[`p${idx}Name`]}的世界`);
             }
-            let attempts = 0;
-            let enterSuccess = false;
-            while (attempts < 5) {
-                attempts++;
-                enterSuccess = await autoEnter(autoEnterSettings);
-                if (autoEnterSettings.enterMode !== "进入他人世界" || !enterSuccess) break;
-                if (await checkHostIdentity(settings[`p${idx}Name`], settings[`p${idx}UID`])) {
-                    notification.send(`已确认进入${idx}号的世界`);
-                    break;
+            const enterSuccess = await autoEnter(autoEnterSettings);
+            if (autoEnterSettings.enterMode === "进入他人世界") {
+                // 禁止在进入房主世界后进行任何形式的核验。入场成功后直接占位。
+                if (enterSuccess) {
+                    notification.send(`已进入${idx}号的世界`);
+                } else if (!crashType) {
+                    throw new Error("未能进入目标世界，已停止本次路线");
                 }
-                log.warn("无法确认当前房主，退出后重新申请");
-                await leaveCurrentWorld();
-                enterSuccess = false;
-            }
-            if (autoEnterSettings.enterMode === "进入他人世界" && !enterSuccess && !crashType) {
-                // 界面识别失败不能作为队员或房主的过错证据。
-                throw new Error("未能确认目标房主，已停止本次路线");
             }
             //执行对应的联机狗粮
             await runGroupPurchasing(false);
@@ -296,21 +287,6 @@ function currentRoster() {
     return [1, 2, 3, 4].map(position => ({
         position, uid: String(settings[`p${position}UID`] || ''), username: settings[`p${position}Name`]
     })).filter(member => member.uid || member.username);
-}
-
-async function checkHostIdentity(name, uid) {
-    const roster = currentRoster();
-    await genshin.returnMainUi();
-    await keyPress("F2");
-    await sleep(1500);
-    const frame = captureGameRegion();
-    try {
-        const host = identifyPlayerCard(readCardLines(frame, 0), roster);
-        return !!host && (uid ? host.uid === String(uid) : host.username === name);
-    } finally {
-        frame.dispose();
-        await genshin.returnMainUi();
-    }
 }
 
 async function leaveCurrentWorld() {
@@ -969,8 +945,7 @@ async function autoEnter(autoEnterSettings) {
     const start = new Date();
     log.info(`当前模式为：${enterMode}`);
 
-    // 加载目标 PNG（按 baseName 从长到短排序，避免短名称先匹配）
-    // 忽略以"备注"结尾的图片
+    // 加载目标 PNG，忽略以“备注”结尾的图片
     const targetPngs = await readFolder(targetsPath, ".png");
     for (const f of targetPngs) {
         const baseName = f.fileName.replace(/\.png$/i, '');
@@ -985,7 +960,6 @@ async function autoEnter(autoEnterSettings) {
         const ro = RecognitionObject.TemplateMatch(mat, 664, 481, 1355 - 668, 588 - 484);
         targetsRo.push({ ro, baseName });
     }
-    targetsRo.sort((a, b) => b.baseName.length - a.baseName.length);
     log.info(`加载完成共 ${targetsRo.length} 个目标`);
     const selectedTargets = selectTemplates(targetList, targetsRo);
     log.info(useAllTargetImages ? "放人模板匹配使用全部图片" : "放人模板匹配使用白名单名称最相似图片");
@@ -1152,6 +1126,11 @@ async function autoEnter(autoEnterSettings) {
     }
 
     function recognizeRequest(frame) {
+        const matches = selectedTargets.filter(item => frame.find(item.ro).isExist())
+            .sort((a, b) => b.nameSimilarity - a.nameSimilarity ||
+                targetList.indexOf(a.targetName) - targetList.indexOf(b.targetName));
+        if (matches.length) return { method: '模板匹配', result: matches[0].targetName };
+
         const names = targetList.filter(name => targetList.indexOf(name) === targetList.lastIndexOf(name));
         let lines = [];
         try {
@@ -1160,13 +1139,9 @@ async function autoEnter(autoEnterSettings) {
             log.warn(`申请昵称识别失败：${error.message}`);
         }
         const exact = names.filter(name => lines.includes(name));
-        if (exact.length > 1 || lines.some(line => targetList.includes(line) && !names.includes(line))) return { result: null };
-        const matches = selectedTargets.filter(item => frame.find(item.ro).isExist());
-        const candidates = [...new Set(matches.map(item => item.targetName))];
-        if (exact.length === 1) {
-            return candidates.every(name => name === exact[0]) ? { method: 'OCR识别', result: exact[0] } : { result: null };
-        }
-        return candidates.length === 1 ? { method: '模板匹配', result: candidates[0] } : { result: null };
+        const hasDuplicateName = lines.some(line => targetList.includes(line) && !names.includes(line));
+        const recognizedName = exact.length === 1 && !hasDuplicateName ? exact[0] : null;
+        return recognizedName ? { method: 'OCR识别', result: recognizedName } : { result: null };
     }
 
     function selectTemplates(names, templates) {

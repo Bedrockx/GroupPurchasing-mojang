@@ -9,14 +9,14 @@ const solo = 'AAA-Artifacts-Bulk-Supply';
 const noop = () => {};
 
 // 只延迟脚本入口，测试直接调用发布脚本的主流程和函数。文件读写均在内存中。
-function loadScript(name) {
+function loadScript(name, settings = {}) {
     const writes = new Map();
     const filename = path.join(__dirname, '..', 'js', name, 'main.js');
     const source = fs.readFileSync(filename, 'utf8');
     const script = source.replace('(async function () {', 'const runMain = (async function () {')
         .replace(/\n\}\)\(\);/, '\n});');
     const ctx = vm.createContext({
-        settings: { groupMode: '手动进入后运行', runExtra: true, autoOnline: '测试-100000001-房间', accountName: '测试' },
+        settings: { groupMode: '手动进入后运行', runExtra: true, autoOnline: '测试-100000001-房间', accountName: '测试', ...settings },
         file: {
             ReadImageMatSync: name => name,
             ReadTextSync: () => JSON.stringify({ onlineInfo: { gameName: '测试' } }),
@@ -114,6 +114,98 @@ test('F2 实际进场顺序可不同于发车席位，重名、未识别或名�
     assert.equal((await observe([])).missingUids, undefined);
     ctx.settings.p3Name = '乙';
     assert.equal((await observe(rows)).missingUids, undefined);
+});
+
+test('队员按目标 UID 入场后直接占位，期间无需再次打开 F2、核验名片或主动退队', async () => {
+    const { ctx, run } = loadScript(group);
+    ctx.settings.groupMode = '使用JSON配置文件';
+    ctx.settings.runExtra = false;
+    ctx.file.ReadTextSync = () => JSON.stringify({
+        myPosition: '2',
+        teamMembers: [
+            { position: '1', uid: '100000001', username: '房主' },
+            { position: '2', uid: '100000002', username: '队员' }
+        ],
+        onlineInfo: { gameName: '队员', rideIdentifier: '测试车次' }
+    });
+    const steps = [];
+    const signs = [0, 2, 2, 0, 0];
+    ctx.readOnlineRecord = ctx.switchPartyIfNeeded = ctx.loadTargetItems = noop;
+    ctx.getPlayerSign = () => {
+        assert.ok(signs.length, '队员不应反复申请入场或退队');
+        return signs.shift();
+    };
+    ctx.keyPress = key => steps.push(key);
+    ctx.inputText = uid => steps.push(uid);
+    ctx.findAndClick = target => {
+        if (target.endsWith('/requestEnter.png')) steps.push('申请加入');
+        if (target.endsWith('/leaveTeam.png')) steps.push('主动退队');
+        return true;
+    };
+    ctx.captureGameRegion = () => ({
+        find: () => ({ isExist: () => false }),
+        findMulti: () => assert.fail('入场成功后不应 OCR 核验房主名片'),
+        dispose: noop
+    });
+    ctx.waitForMainUI = ctx.isMainUI = () => true;
+    ctx.genshin.getPositionFromMap = () => ({ x: 14031, y: 440 });
+    ctx.readFolder = folder => folder === 'targets' ? [] : [{ fullPath: folder + '/路线.json' }];
+    ctx.runPath = file => steps.push(file);
+    ctx.handleOnlineRecordAndReonline = crashed => {
+        assert.equal(crashed, false);
+        steps.push('成功收尾');
+    };
+
+    await run('runMain()');
+    assert.deepEqual(steps, ['F2', '100000001', '申请加入', 'assets/ArtifactsPath/度假村/占位/路线.json', '成功收尾']);
+});
+
+test('房主按模板文件名相似度放行，最高分并列时优先白名单顺序', async () => {
+    for (const [templates, lines, expected, expectedOcrCalls] of [
+        [['甲.png'], ['乙乙'], '模板匹配允许 甲 加入', 0],
+        [['甲.png', '长名队员X.png'], ['甲'], '模板匹配允许 甲 加入', 0],
+        [['长名队员X.png'], ['甲'], '模板匹配允许 长名队员 加入', 0],
+        [['甲.png', '乙乙.png'], ['乙乙'], '模板匹配允许 甲 加入', 0],
+        [[], [' 乙乙 '], 'OCR识别允许 乙乙 加入', 1],
+        [[], ['甲', '乙乙'], null, 5],
+        [[], ['丙'], null, 5]
+    ]) {
+        const { ctx } = loadScript(group, { useAllTargetImages: true });
+        let now = 0;
+        let ocrCalls = 0;
+        let clicks = 0;
+        const allowed = [];
+        ctx.Date = class extends Date {
+            constructor() { super(now); }
+            static now() { return now; }
+        };
+        ctx.sleep = ms => { now += ms; };
+        ctx.settings.disableStrictMode = true;
+        ctx.notification.error = noop;
+        ctx.getPlayerSign = () => 1;
+        ctx.waitForMainUI = noop;
+        ctx.readFolder = () => ['长名队员X.png', '乙乙.png', '甲.png'].map(fileName => ({ fileName, fullPath: 'targets/' + fileName }));
+        ctx.log.info = message => {
+            if (message.includes('允许')) allowed.push(message);
+        };
+        ctx.captureGameRegion = () => ({
+            find: target => ({
+                isExist: () => target.endsWith('/yUI.png') || target.endsWith('/allowEnter.png') ||
+                    templates.includes(path.basename(target)),
+                click() { clicks++; }
+            }),
+            findMulti: () => {
+                ocrCalls++;
+                return lines.map(text => ({ text }));
+            },
+            dispose: noop
+        });
+        await ctx.autoEnter({ enterMode: '等待他人进入', permissionMode: '白名单', timeout: 0.01,
+            maxEnterCount: 3, nameToPermit1: '甲', nameToPermit2: '乙乙', nameToPermit3: '长名队员' });
+        assert.deepEqual(allowed, expected ? [expected] : []);
+        assert.equal(clicks, expected ? 1 : 0);
+        assert.equal(ocrCalls, expectedOcrCalls);
+    }
 });
 
 test('凌晨四点跨日、重复回执与只当队员偏好共同决定是否重新上线', async () => {

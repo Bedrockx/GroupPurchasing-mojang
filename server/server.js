@@ -604,6 +604,8 @@ let crashReportSequence = 0;
 const firstRideBonusUsers = [];
 
 // ==================== 发车管理模块 ====================
+let groupPurchasingFrozen = false;
+
 const RideManager = {
   activeRides: new Map(),
   roomLocks: new Map(),
@@ -886,9 +888,11 @@ function getConnectionBySocketId(socketId) {
   return null;
 }
 
-function emitSocketError(socket, message) {
+function emitSocketError(socket, message, requestType) {
   if (socket && socket.connected !== false) {
-    socket.emit('message', { type: 'error', message });
+    const error = { type: 'error', message };
+    if (requestType) error.requestType = requestType;
+    socket.emit('message', error);
   }
 }
 
@@ -908,6 +912,40 @@ function requireAdmin(socket) {
     return null;
   }
   return connection;
+}
+
+function sendServerControlStatus(socket, requestType) {
+  const status = { type: 'server-control-status', groupPurchasingFrozen };
+  if (requestType) status.requestType = requestType;
+  socket.emit('message', status);
+}
+
+function handleSetGroupPurchasingFrozen({ frozen }, socket) {
+  const requestType = 'set-group-purchasing-frozen';
+  const admin = requireAdmin(socket);
+  if (!admin) return;
+  if (typeof frozen !== 'boolean') {
+    emitSocketError(socket, '请指定是否冻结团购发车', requestType);
+    return;
+  }
+
+  if (groupPurchasingFrozen === frozen) {
+    sendServerControlStatus(socket, requestType);
+    return;
+  }
+
+  groupPurchasingFrozen = frozen;
+  log(`管理员 ${admin.accountId} ${frozen ? '冻结' : '解冻'}团购发车`, LOG_TYPES.ADMIN);
+  if (!frozen) scheduleQueuedRideChecks();
+
+  sendServerControlStatus(socket, requestType);
+  for (const adminAccount of adminConnections.values()) {
+    for (const connection of adminAccount.connections) {
+      if (connection.socketId === socket.id) continue;
+      const adminSocket = io.sockets.sockets.get(connection.socketId);
+      if (adminSocket) sendServerControlStatus(adminSocket);
+    }
+  }
 }
 
 function resolvePathWithin(baseDir, relativePath) {
@@ -2263,15 +2301,41 @@ async function handleToggleFreezeUser(data, socket) {
   if (Boolean(account.isFrozen) !== isFrozen) {
     // 先落盘，再发布状态和解冻边界。重复请求不影响解冻后的新计数。
     saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, [accountId]: { ...account, isFrozen } });
-    account.isFrozen = isFrozen;
     if (isFrozen) {
+      account.isFrozen = true;
       offlineFrozenAccount(accountId);
     } else {
-      crashFreezeState.set(account, { count: 0, ignoredThrough: crashReportSequence });
+      unfreezeAccount(account);
     }
     log(`${isFrozen ? '冻结' : '解冻'} 用户 ${accountId}`, LOG_TYPES.ADMIN, { accountId, action: isFrozen ? '冻结' : '解冻' });
   }
   socket.emit('message', { type: 'freeze-user-success', accountId, isFrozen });
+}
+
+function unfreezeAccount(account) {
+  account.isFrozen = false;
+  crashFreezeState.set(account, { count: 0, ignoredThrough: crashReportSequence });
+}
+
+function handleUnfreezeAllUsers(socket) {
+  if (!requireAdmin(socket)) return;
+
+  const frozenAccounts = Object.entries(userAccounts).filter(([, account]) => account.isFrozen);
+  if (frozenAccounts.length > 0) {
+    const updatedAccounts = { ...userAccounts };
+    for (const [accountId, account] of frozenAccounts) {
+      updatedAccounts[accountId] = { ...account, isFrozen: false };
+    }
+    try {
+      saveDataSync(USER_ACCOUNTS_FILE, updatedAccounts);
+    } catch (_) {
+      emitSocketError(socket, '批量解冻失败，请稍后重试', 'unfreeze-all-users');
+      return;
+    }
+    for (const [, account] of frozenAccounts) unfreezeAccount(account);
+  }
+  socket.emit('message', { type: 'unfreeze-all-users-success', count: frozenAccounts.length });
+  log(`管理员批量解冻 ${frozenAccounts.length} 个用户`, LOG_TYPES.ADMIN);
 }
 
 // 冻结后下线该账户在各房间的所有 UID。
@@ -4050,6 +4114,9 @@ function lcHandleAuthenticated(socket, identity, m, ack) {
     const reason = receipts.get(m.messageId);
     if (reason) return ack('rejected', reason);
     if (!receipts.has(m.messageId)) {
+      if (m.op === 'seat-ready' && restartPending) {
+        return ack('rejected', '服务端正在等待重启，请稍后重试来财报名', true);
+      }
       laicaiRegister(socket, identity.accountId, room, m);
       receipts.set(m.messageId, null);
       sendRoomsStatusToAll();
@@ -4361,6 +4428,12 @@ async function handleReceivedMessage(socket, message) {
           log(`发送可用房间列表给用户 ${accountId}`, LOG_TYPES.INFO, { accountId: accountId });
           break;
         // 管理员相关事件
+        case 'get-server-control':
+          if (requireAdmin(socket)) sendServerControlStatus(socket, 'get-server-control');
+          break;
+        case 'set-group-purchasing-frozen':
+          handleSetGroupPurchasingFrozen(message, socket);
+          break;
         case 'register-user':
           await handleRegisterUser(message, socket);
           break;
@@ -4369,6 +4442,12 @@ async function handleReceivedMessage(socket, message) {
           break;
         case 'toggle-freeze-user':
           await handleToggleFreezeUser(message, socket);
+          break;
+        case 'unfreeze-all-users':
+          handleUnfreezeAllUsers(socket);
+          break;
+        case 'restart-server':
+          handleRestartServer(socket);
           break;
         case 'toggle-safe-user':
           await handleToggleSafeUser(message, socket);
@@ -4839,7 +4918,7 @@ async function handleMoveUser(data, socket) {
   
   if (!hasRoomPermission) {
     // 用户没有目标房间权限
-    if (!confirmGrantPermission) {
+    if (confirmGrantPermission !== true) {
       // 未确认，返回需要确认的消息
       socket.emit('message', {
         type: 'move-user-permission-required',
@@ -4853,12 +4932,9 @@ async function handleMoveUser(data, socket) {
     }
     // 已确认，先赋予权限
     if (userAccount) {
-      if (!userAccount.rooms) {
-        userAccount.rooms = [];
-      }
-      userAccount.rooms.push(toRoom);
-      // 保存用户账户数据
-      await saveData(USER_ACCOUNTS_FILE, userAccounts);
+      const updatedRooms = [...(userAccount.rooms || []), toRoom];
+      saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, [userAccountId]: { ...userAccount, rooms: updatedRooms } });
+      userAccount.rooms = updatedRooms;
       log(`管理员为用户 ${userAccountId} 赋予房间 ${toRoom} 的权限`, LOG_TYPES.ADMIN, { accountId: userAccountId, room: toRoom, action: '赋予房间权限' });
     }
   }
@@ -4876,6 +4952,10 @@ async function handleMoveUser(data, socket) {
   
   // 添加用户到目标房间
   toRoomObj.users.push(userToMove);
+  const userConnection = getConnectionBySocketId(userToMove.socketId);
+  if (userConnection?.uid === uid && userConnection.roomName === fromRoom) {
+    setConnectionUserInfo(userToMove.socketId, { roomName: toRoom });
+  }
   
   socket.emit('message', {
     type: 'user-moved',
@@ -5107,6 +5187,7 @@ async function handleEditRoomProperties(data, socket) {
  * @param {string} roomName - 房间名称
  */
 function scheduleRideCheck(roomName) {
+  if (groupPurchasingFrozen || restartPending) return;
   if (roomRideCheckTimers.has(roomName)) {
     const existingTimer = roomRideCheckTimers.get(roomName);
     timerManager.clearTimeout(existingTimer);
@@ -5123,11 +5204,19 @@ function scheduleRideCheck(roomName) {
   log(`房间 ${roomName} 的发车检查已安排，1秒后执行`);
 }
 
+function scheduleQueuedRideChecks() {
+  for (const [roomName, room] of roomUsers) {
+    if (room.users.length > 0) scheduleRideCheck(roomName);
+  }
+}
+
 /**
  * 实际执行发车检查（带锁机制）
  * @param {string} roomName - 房间名称
  */
 async function checkAndHandleRideInternal(roomName) {
+  // 已排定的检查可能在冻结发车或受理重启后才执行。
+  if (groupPurchasingFrozen || restartPending) return;
   if (rooms.some(room => room.name === roomName && room.roomType === 'laicai')) return;
   if (RideManager.roomLocks.get(roomName)) {
     log(`房间 ${roomName} 正在检查发车中，跳过`);
@@ -6511,9 +6600,19 @@ function handleGetAllAccounts(socket) {
     return;
   }
 
+  const accounts = Object.fromEntries(Object.entries(userAccounts).map(([accountId, account]) => [
+    accountId,
+    {
+      username: account.username,
+      isAdmin: Boolean(account.isAdmin),
+      isFrozen: Boolean(account.isFrozen),
+      lastRide: account.lastRide
+    }
+  ]));
+
   socket.emit('message', {
     type: 'all-accounts',
-    data: userAccounts
+    data: accounts
   });
   log('发送所有用户列表给管理员');
 }
@@ -6543,7 +6642,7 @@ async function handleUpdateRoomPermission(data, socket) {
 
   const { accountId, room, isGranted } = data;
 
-  if (!accountId || !room) {
+  if (!accountId || !room || typeof isGranted !== 'boolean') {
     socket.emit('message', {
       type: 'error',
       message: '参数不足'
@@ -6576,39 +6675,30 @@ async function handleUpdateRoomPermission(data, socket) {
   }
 
   const account = userAccounts[accountId];
-
-  if (isGranted) {
-    // 授予权限
-    if (!account.rooms.includes(room)) {
-      account.rooms.push(room);
-      socket.emit('message', {
-        type: 'permission-updated',
-        message: '房间权限已添加'
-      });
-    } else {
-      socket.emit('message', {
-        type: 'error',
-        message: '用户已拥有该房间权限'
-      });
-    }
-  } else {
-    // 移除权限
-    const roomIndex = account.rooms.indexOf(room);
-    if (roomIndex > -1) {
-      account.rooms.splice(roomIndex, 1);
-      socket.emit('message', {
-        type: 'permission-updated',
-        message: '房间权限已移除'
-      });
-    } else {
-      socket.emit('message', {
-        type: 'error',
-        message: '用户没有该房间权限'
-      });
-    }
+  const currentRooms = Array.isArray(account.rooms) ? account.rooms : [];
+  const roomIndex = currentRooms.indexOf(room);
+  const currentlyGranted = roomIndex !== -1;
+  if (isGranted === currentlyGranted) {
+    emitSocketError(socket, isGranted ? '用户已拥有该房间权限' : '用户没有该房间权限');
+    return;
   }
 
-  await saveData(USER_ACCOUNTS_FILE, userAccounts);
+  const updatedRooms = [...currentRooms];
+  if (isGranted) {
+    updatedRooms.push(room);
+  } else {
+    updatedRooms.splice(roomIndex, 1);
+  }
+
+  saveDataSync(USER_ACCOUNTS_FILE, { ...userAccounts, [accountId]: { ...account, rooms: updatedRooms } });
+  account.rooms = updatedRooms;
+  socket.emit('message', {
+    type: 'permission-updated',
+    accountId,
+    room,
+    isGranted,
+    message: isGranted ? '房间权限已添加' : '房间权限已移除'
+  });
   resetDataChangeTimer();
   log(`更新用户 ${accountId} 的房间 ${room} 权限为 ${isGranted}`);
 }
@@ -6979,6 +7069,65 @@ function setupDailyOfflineTask() {
 }
 
 
+let restartPending = false;
+const restartRequesters = new Set();
+
+function handleRestartServer(socket) {
+  if (!requireAdmin(socket)) return;
+  requestServerRestart(socket);
+  socket.emit('message', { type: 'restart-server-accepted' });
+}
+
+function requestServerRestart(socket) {
+  if (socket) {
+    for (const requester of restartRequesters) {
+      if (requester.connected === false) restartRequesters.delete(requester);
+    }
+    restartRequesters.add(socket);
+  }
+  if (restartPending) return;
+  restartPending = true;
+  // 留出时间传送管理端回执，再让脚本向当前进程发送 SIGTERM。
+  timerManager.setTimeout(executeServerRestart, 1000);
+}
+
+function finishServerRestart(error) {
+  restartPending = false;
+  if (error) {
+    handleError(error, 'executeServerRestart');
+    for (const socket of restartRequesters) {
+      if (getConnectionBySocketId(socket.id)?.isAdmin) {
+        emitSocketError(socket, '服务端重启失败，请查看服务端日志', 'restart-server');
+      }
+    }
+  }
+  restartRequesters.clear();
+  scheduleQueuedRideChecks();
+}
+
+async function executeServerRestart() {
+  if (RideManager.activeRides.size > 0 || laicaiTasks.size > 0) {
+    log('仍有发车任务，延迟重启', LOG_TYPES.INFO, { activeRides: RideManager.activeRides.size, laicaiTasks: laicaiTasks.size });
+    timerManager.setTimeout(executeServerRestart, 30000);
+    return;
+  }
+
+  try {
+    log('开始执行重启任务', LOG_TYPES.INFO);
+    await saveAllData();
+    const { execFile } = require('child_process');
+    const restartScript = path.join(__dirname, 'restart-server.sh');
+    execFile('bash', [restartScript], (error, stdout, stderr) => {
+      finishServerRestart(error);
+      if (error) return;
+      if (stderr) console.error(`重启脚本 stderr: ${stderr}`);
+      console.log(`重启脚本 stdout: ${stdout}`);
+    });
+  } catch (error) {
+    finishServerRestart(error);
+  }
+}
+
 // 设置定时重启任务
 function setupScheduledRestart() {
   // 定义重启时间：3:50
@@ -7016,43 +7165,7 @@ function setupScheduledRestart() {
     return nextTime;
   }
 
-  // 执行重启任务
-  async function executeRestart() {
-    log('开始执行定时重启任务...', LOG_TYPES.INFO);
-
-    // 检查是否有正在进行的发车任务
-    if (RideManager.activeRides.size > 0 || laicaiTasks.size > 0) {
-      log('仍有发车任务，延迟重启', LOG_TYPES.INFO, { activeRides: RideManager.activeRides.size, laicaiTasks:laicaiTasks.size });
-
-      // 等待30秒后再次检查
-      timerManager.setTimeout(async () => {
-        await executeRestart();
-      }, 30000);
-
-      return;
-    }
-
-    // 保存所有数据
-    await saveAllData();
-
-    // 执行重启脚本
-    const { execFile } = require('child_process');
-    const restartScript = require('path').join(__dirname, 'restart-server.sh');
-
-    execFile('bash', [restartScript], (error, stdout, stderr) => {
-      if (error) {
-        console.error(`执行重启脚本错误: ${error.message}`);
-        return;
-      }
-      if (stderr) {
-        console.error(`重启脚本 stderr: ${stderr}`);
-      }
-      console.log(`重启脚本 stdout: ${stdout}`);
-    });
-
-    // 安排下一次执行
-    scheduleNextRestart();
-  }
+  // 定时与手动请求共用重启执行入口。
 
   // 安排下一次执行
   function scheduleNextRestart() {
@@ -7061,9 +7174,8 @@ function setupScheduledRestart() {
     const delay = nextTime - now;
     log(`安排下次重启任务在: ${nextTime.toLocaleString()}`, LOG_TYPES.INFO, { nextTime: nextTime.toLocaleString() });
     timerManager.setTimeout(() => {
-      executeRestart().catch(error => {
-        handleError(error, 'scheduleNextRestart');
-      });
+      requestServerRestart();
+      scheduleNextRestart();
     }, delay);
   }
 
@@ -7197,6 +7309,7 @@ async function handleUpdateVersions(data, socket) {
  * @param {Object} socket - Socket.io连接对象
  */
 async function handleUploadClientPackage(data, socket) {
+  const requestType = 'upload-client-package';
   try {
     if (!requireAdmin(socket)) return;
     const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize } = data;
@@ -7204,10 +7317,7 @@ async function handleUploadClientPackage(data, socket) {
     // 验证文件名
     if (fileName !== 'mojang.zip') {
       log(`文件名验证失败: ${fileName}, 期望: mojang.zip`, LOG_TYPES.ERROR);
-      socket.emit('message', {
-        type: 'error',
-        message: '文件名必须为 mojang.zip'
-      });
+      emitSocketError(socket, '文件名必须为 mojang.zip', requestType);
       return;
     }
     
@@ -7217,7 +7327,7 @@ async function handleUploadClientPackage(data, socket) {
 
     if (!validateUploadChunk(data, storage, 'mojang.zip', socket)) {
       if (!storage.ownerSocketId) downloadLocks.client = false;
-      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
+      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传', requestType);
       return;
     }
     if (isFirstChunk) {
@@ -7238,7 +7348,7 @@ async function handleUploadClientPackage(data, socket) {
       const fullBuffer = assembleUploadBuffer(storage);
       if (!fullBuffer) {
         resetUploadStorage('clientPackage');
-        emitSocketError(socket, '上传分片不完整');
+        emitSocketError(socket, '上传分片不完整', requestType);
         return;
       }
       downloadLocks.client = false;
@@ -7269,10 +7379,7 @@ async function handleUploadClientPackage(data, socket) {
   } catch (error) {
     resetUploadStorage('clientPackage');
     handleError(error, 'handleUploadClientPackage');
-    socket.emit('message', {
-      type: 'error',
-      message: '上传用户端安装包失败'
-    });
+    emitSocketError(socket, '上传用户端安装包失败', requestType);
   }
 }
 
@@ -7288,6 +7395,7 @@ async function handleUploadClientPackage(data, socket) {
  * @param {Object} socket - Socket.io连接对象
  */
 async function handleUploadGroupPurchasingPackage(data, socket) {
+  const requestType = 'upload-group-purchasing-package';
   try {
     if (!requireAdmin(socket)) return;
     const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize } = data;
@@ -7295,10 +7403,7 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
     // 验证文件名
     if (fileName !== 'ArtifactsGroupPurchasing.zip') {
       log(`文件名验证失败: ${fileName}, 期望: ArtifactsGroupPurchasing.zip`, LOG_TYPES.ERROR);
-      socket.emit('message', {
-        type: 'error',
-        message: '文件名必须为 ArtifactsGroupPurchasing.zip'
-      });
+      emitSocketError(socket, '文件名必须为 ArtifactsGroupPurchasing.zip', requestType);
       return;
     }
     
@@ -7308,7 +7413,7 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
 
     if (!validateUploadChunk(data, storage, 'ArtifactsGroupPurchasing.zip', socket)) {
       if (!storage.ownerSocketId) downloadLocks.groupPurchasing = false;
-      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
+      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传', requestType);
       return;
     }
     if (isFirstChunk) {
@@ -7329,7 +7434,7 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
       const fullBuffer = assembleUploadBuffer(storage);
       if (!fullBuffer) {
         resetUploadStorage('groupPurchasingPackage');
-        emitSocketError(socket, '上传分片不完整');
+        emitSocketError(socket, '上传分片不完整', requestType);
         return;
       }
       downloadLocks.groupPurchasing = false;
@@ -7360,10 +7465,7 @@ async function handleUploadGroupPurchasingPackage(data, socket) {
   } catch (error) {
     resetUploadStorage('groupPurchasingPackage');
     handleError(error, 'handleUploadGroupPurchasingPackage');
-    socket.emit('message', {
-      type: 'error',
-      message: '上传团购安装包失败'
-    });
+    emitSocketError(socket, '上传团购安装包失败', requestType);
   }
 }
 
@@ -7462,17 +7564,18 @@ function extractAsarSources(asarBuffer, wantedFiles) {
  * 处理上传 app.asar
  */
 async function handleUploadAsar(data, socket) {
+  const requestType = 'upload-asar';
   try {
     if (!requireAdmin(socket)) return;
     const { fileName, fileData, isFirstChunk, isLastChunk, offset, totalSize, version } = data;
     
     if (fileName !== 'app.asar') {
-      socket.emit('message', { type: 'error', message: '文件名必须为 app.asar' });
+      emitSocketError(socket, '文件名必须为 app.asar', requestType);
       return;
     }
     
     if (!isValidVersion(version)) {
-      socket.emit('message', { type: 'error', message: '版本号格式无效' });
+      emitSocketError(socket, '版本号格式无效', requestType);
       return;
     }
 
@@ -7484,7 +7587,7 @@ async function handleUploadAsar(data, socket) {
 
     if (!validateUploadChunk(data, storage, 'app.asar', socket)) {
       if (!storage.ownerSocketId && isValidVersion(version)) resetUploadStorage(`asar_${version}`);
-      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传');
+      emitSocketError(socket, '上传分片无效、已过期或未按顺序上传', requestType);
       return;
     }
     const currentChunk = storage.chunks[storage.chunks.length - 1].data;
@@ -7499,7 +7602,7 @@ async function handleUploadAsar(data, socket) {
       const fullBuffer = assembleUploadBuffer(storage);
       if (!fullBuffer) {
         resetUploadStorage(storageKey);
-        emitSocketError(socket, '上传分片不完整');
+        emitSocketError(socket, '上传分片不完整', requestType);
         return;
       }
       
@@ -7535,7 +7638,7 @@ async function handleUploadAsar(data, socket) {
   } catch (error) {
     if (data && isValidVersion(data.version)) resetUploadStorage(`asar_${data.version}`);
     handleError(error, 'handleUploadAsar');
-    socket.emit('message', { type: 'error', message: '上传 app.asar 失败' });
+    emitSocketError(socket, '上传 app.asar 失败', requestType);
   }
 }
 
@@ -8123,54 +8226,22 @@ io.on('connection', (socket) => {
         }
       }
     }
-    // 从用户连接管理中移除
-    const connData = getConnectionBySocketId(socket.id);
-    if (connData) {
-      const { accountId } = connData;
+    if (socket.authTimeout) timerManager.clearTimeout(socket.authTimeout);
+    loginKeys.delete(socket.id);
 
-      // 从userConnections或adminConnections中移除连接
-      if (userConnections.has(accountId)) {
-        const userConnection = userConnections.get(accountId);
-        const connectionIndex = userConnection.connections.findIndex(conn => conn.socketId === socket.id);
-        if (connectionIndex !== -1) {
-          userConnection.connections.splice(connectionIndex, 1);
-          // 如果用户没有其他连接，从userConnections中移除
-          if (userConnection.connections.length === 0) {
-            userConnections.delete(accountId);
-          }
-        }
-      } else if (adminConnections.has(accountId)) {
-        const adminConnection = adminConnections.get(accountId);
-        const connectionIndex = adminConnection.connections.findIndex(conn => conn.socketId === socket.id);
-        if (connectionIndex !== -1) {
-          adminConnection.connections.splice(connectionIndex, 1);
-          // 如果管理员没有其他连接，从adminConnections中移除
-          if (adminConnection.connections.length === 0) {
-            adminConnections.delete(accountId);
-          }
-        }
-      }
+    // 按连接 ID 清理，管理员和普通账号可能同名。
+    if (hasConnection(socket.id)) {
+      deleteConnection(socket.id);
 
       // 计算当前连接数
       const totalConnections = getTotalConnections();
       log(`用户断开连接: ${socket.id}，当前总数: ${totalConnections}`);
-
-      // 清除认证超时
-      if (socket.authTimeout) {
-        timerManager.clearTimeout(socket.authTimeout);
-      }
-
-      // 清理loginKeys
-      loginKeys.delete(socket.id);
 
       for (const [key, storage] of Object.entries(uploadStorage)) {
         if (storage.ownerSocketId === socket.id) {
           resetUploadStorage(key);
         }
       }
-
-      // 保存账户ID用于后续操作
-      const operatorAccountId = accountId;
 
       // 查找该socket对应的所有上线用户（从roomUsers）
       const usersToOffline = findUsersBySocketId(socket.id);

@@ -1525,6 +1525,7 @@
             <button class="button" onclick="switchToRoomsOverview()">房间总览</button>
             <button class="button" onclick="switchToPointsRanking()">积分排行榜</button>
             <button class="button" onclick="switchToGainRecords()">收益排行榜</button>
+            <button class="button" onclick="switchToServerControl()">服务器总控</button>
             <button class="button" onclick="switchToRoomManagement()">房间管理</button>
             <button class="button" onclick="switchToUserManagement()">用户管理</button>
             <button class="button" onclick="switchToOnlineUsers()">在线用户</button>
@@ -1573,6 +1574,20 @@
             </div>
         </div>
         
+        <!-- 服务器总控面板 -->
+        <div id="server-control-panel" class="panel">
+            <h2>服务器总控</h2>
+            <p id="group-purchasing-status" role="status">团购发车状态未知</p>
+            <p>冻结后暂停触发新车次，已经触发的车次继续。服务器重启后恢复开放。</p>
+            <div class="flex-row" style="flex-wrap: wrap; gap: 10px;">
+                <button id="group-purchasing-freeze-btn" class="button" onclick="confirmGroupPurchasingFreeze()" disabled>冻结团购发车</button>
+                <button id="server-control-refresh-btn" class="button button-secondary" onclick="refreshServerControl()">刷新状态</button>
+                <button id="unfreeze-all-users-btn" class="button" onclick="confirmUnfreezeAllUsers()">全体解冻</button>
+                <button id="restart-server-btn" class="button button-danger" onclick="confirmRestartServer()">重启服务端</button>
+            </div>
+            <p id="server-control-notice" role="status"></p>
+        </div>
+
         <!-- 房间管理面板 -->
         <div id="room-management-panel" class="panel">
             <h2>房间管理</h2>
@@ -1874,14 +1889,16 @@
         let socket;
         let roomsData = Object.create(null);
         const SERVER_URL = 'http://121.41.2.163:41013';
-        let activeUploadContinuation = null;
-        let activeUploadInProgress = false;
-        let activeUploadComplete = null;
+        let activeUpload = null;
         let currentAccount = null;
-        let currentPassword = null;
+        let adminAuthenticated = false;
         let currentUser = null; // 当前操作的用户
         let currentRoom = null; // 当前操作的房间
         let moveUserInfo = null; // 移动用户的信息
+        let roomPermissionView = null;
+        let groupPurchasingFrozen = null;
+        let serverControlRequest = null;
+        let serverRestartAccepted = false;
         
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -1946,63 +1963,8 @@
                 return;
             }
             
-            // 创建登录连接
-            const loginSocket = io(SERVER_URL, { reconnection: false });
-            
-            loginSocket.on('connect', function() {
-                // 发送管理员登录请求
-                loginSocket.emit('message', {
-                    type: 'login',
-                    accountId: account,
-                    isAdminLogin: true
-                });
-            });
-            
-            // 统一监听消息事件
-            loginSocket.on('message', function(data) {
-                if (data.type === 'login-key') {
-                    const hashedPassword = CryptoJS.SHA256(password + data.key).toString();
-                    loginSocket.emit('message', {
-                        type: 'login',
-                        accountId: account,
-                        password: hashedPassword,
-                        key: data.key,
-                        isAdminLogin: true
-                    });
-                } else if (data.type === 'login-success') {
-                    if (data.isAdmin) {
-                        currentAccount = account;
-                        currentPassword = password;
-                        
-                        // 保存登录信息到localStorage
-                        localStorage.setItem('admin_account', account);
-                        if (rememberPassword) {
-                            localStorage.setItem('admin_password', password);
-                        } else {
-                            localStorage.removeItem('admin_password');
-                        }
-                        localStorage.setItem('admin_remember_password', rememberPassword);
-                        localStorage.setItem('admin_auto_login', autoLogin);
-                        
-                        document.getElementById('login-container').classList.add('hidden');
-                        document.getElementById('main-container').classList.remove('hidden');
-                        // 重新连接socket并初始化
-                        loginSocket.disconnect();
-                        init();
-                    } else {
-                        loginError.textContent = '该账号不是管理员账号';
-                        loginSocket.disconnect();
-                    }
-                } else if (data.type === 'login-failed' || data.type === 'login-error') {
-                    loginError.textContent = '账号或密码错误';
-                    loginSocket.disconnect();
-                }
-            });
-            
-            loginSocket.on('connect_error', function() {
-                loginError.textContent = '连接服务器失败';
-                loginSocket.disconnect();
-            });
+            closeAdminConnection('正在连接服务器…');
+            connectAdmin(account, password, rememberPassword, autoLogin);
         }
         
         // 加载保存的登录信息
@@ -2033,75 +1995,125 @@
             localStorage.removeItem('admin_auto_login');
             document.getElementById('auto-login').checked = false;
             
-            // 断开socket连接
-            if (socket) {
-                socket.disconnect();
-                socket = null;
+            closeAdminConnection('');
+            document.getElementById('admin-login-password').value = '';
+        }
+
+        function suspendAdminOperations(message) {
+            const wasAuthenticated = adminAuthenticated;
+            adminAuthenticated = false;
+            if (wasAuthenticated) {
+                abortAdminUpload('上传已中断，请重新上传');
+                window.isDownloadingLog = false;
+                window.modalCallback = null;
+                document.getElementById('custom-modal').style.display = 'none';
+                document.getElementById('action-menu').classList.add('hidden');
+                closeMoveDialog();
+                closeEditRoomModal();
+                closeCreateRoomModal();
+                currentUser = null;
+                currentRoom = null;
+                document.getElementById('admin-user-select').value = '';
+                document.getElementById('admin-room-select').value = '';
+                loadUserInfo();
+                loadRoomUsers();
+                resetServerControl();
             }
-            
-            // 显示登录界面，隐藏主界面
             document.getElementById('main-container').classList.add('hidden');
             document.getElementById('login-container').classList.remove('hidden');
-            
-            // 清空当前账号
-            currentAccount = null;
-            
-            // 清空密码输入框（如果用户想重新输入）
-            document.getElementById('admin-login-password').value = '';
-            
-            // 清空错误信息
-            document.getElementById('admin-login-error').textContent = '';
+            document.getElementById('admin-login-error').textContent = message;
         }
-        
-        // 初始化
-        function init() {
-            // 连接服务器
-            socket = io(SERVER_URL, { reconnection: false });
-            
-            socket.on('connect', function() {
-                console.log('Admin connected to server');
-                // 主连接必须再次完成管理员认证，不使用未校验的握手参数重连
-                socket.emit('message', {
+
+        function closeAdminConnection(message) {
+            const connection = socket;
+            socket = null;
+            currentAccount = null;
+            suspendAdminOperations(message);
+            if (connection) connection.disconnect();
+        }
+
+        function sendAdminMessage(message) {
+            if (!adminAuthenticated || !socket?.connected) return false;
+            socket.emit('message', message);
+            return true;
+        }
+
+        function connectAdmin(account, password, rememberPassword, autoLogin) {
+            const connection = io(SERVER_URL, { autoConnect: false });
+            socket = connection;
+            let authenticatedBefore = false;
+            let challengeAnswered = false;
+
+            connection.on('connect', function() {
+                if (socket !== connection) return;
+                suspendAdminOperations(authenticatedBefore ? '已重新连接，正在验证管理员身份…' : '正在验证管理员身份…');
+                connection.emit('message', {
                     type: 'login',
-                    accountId: currentAccount,
+                    accountId: account,
                     isAdminLogin: true
                 });
             });
-            
-            socket.on('connect_error', function(error) {
-                console.error('Connection error:', error);
-            });
 
-            socket.on('disconnect', function() {
-                if (!activeUploadInProgress) return;
-                activeUploadContinuation = null;
-                activeUploadInProgress = false;
-                activeUploadComplete = null;
-
-                const progressText = document.getElementById('upload-progress-text');
-                if (progressText) progressText.textContent = '上传已中断，请重新上传';
-            });
-            
-            // 统一监听消息事件
-            socket.on('message', function(data) {
-                console.log('收到消息:', data);
-
-                if (data.type === 'login-key') {
-                    const hashedPassword = CryptoJS.SHA256(currentPassword + data.key).toString();
-                    socket.emit('message', {
-                        type: 'login',
-                        accountId: currentAccount,
-                        password: hashedPassword,
-                        key: data.key,
-                        isAdminLogin: true
-                    });
-                    return;
+            connection.on('connect_error', function() {
+                if (socket !== connection) return;
+                if (authenticatedBefore && connection.active) {
+                    suspendAdminOperations('连接中断，正在尝试恢复…');
+                } else {
+                    closeAdminConnection('连接服务器失败');
                 }
+            });
 
-                if (data.type === 'login-success' && data.isAdmin) {
-                    refreshRoomsStatus();
-                    loadAllAccounts();
-                    loadAllRooms();
+            connection.on('disconnect', function() {
+                if (socket !== connection) return;
+                challengeAnswered = false;
+                // 丢弃传输中断时进入 Socket.IO 缓冲区的旧消息，重连后先重新认证。
+                connection.sendBuffer.length = 0;
+                if (authenticatedBefore && connection.active) {
+                    suspendAdminOperations('连接中断，正在尝试恢复…');
+                } else {
+                    closeAdminConnection('连接已断开，请重新登录');
+                }
+            });
+
+            connection.on('message', function(data) {
+                if (socket !== connection || !connection.connected || !data) return;
+                if (!adminAuthenticated) {
+                    if (data.type === 'login-key' && !challengeAnswered && typeof data.key === 'string' && data.key) {
+                        challengeAnswered = true;
+                        connection.emit('message', {
+                            type: 'login',
+                            accountId: account,
+                            password: CryptoJS.SHA256(password + data.key).toString(),
+                            key: data.key,
+                            isAdminLogin: true
+                        });
+                    } else if (data.type === 'login-success') {
+                        if (!challengeAnswered || data.isAdmin !== true || data.accountId !== account) {
+                            closeAdminConnection('管理员身份校验失败，请重新登录');
+                            return;
+                        }
+                        if (!authenticatedBefore) {
+                            localStorage.setItem('admin_account', account);
+                            if (rememberPassword) {
+                                localStorage.setItem('admin_password', password);
+                            } else {
+                                localStorage.removeItem('admin_password');
+                            }
+                            localStorage.setItem('admin_remember_password', rememberPassword);
+                            localStorage.setItem('admin_auto_login', autoLogin);
+                        }
+                        authenticatedBefore = true;
+                        currentAccount = account;
+                        adminAuthenticated = true;
+                        document.getElementById('admin-login-error').textContent = '';
+                        document.getElementById('login-container').classList.add('hidden');
+                        document.getElementById('main-container').classList.remove('hidden');
+                        switchToRoomsOverview();
+                        loadAllAccounts();
+                        loadAllRooms();
+                    } else if (data.type === 'login-failed' || data.type === 'login-error' || data.type === 'error') {
+                        closeAdminConnection(data.message || '管理员登录失败');
+                    }
                     return;
                 }
                 
@@ -2280,6 +2292,8 @@
                     });
                 }
                 } else if (data.type === 'room-users') {
+                    const roomName = data.roomProperties?.name;
+                    if (!roomName || roomName !== document.getElementById('admin-room-select').value) return;
                     const output = document.getElementById('room-users-output');
                     const propertiesOutput = document.getElementById('room-properties-output');
                     output.innerHTML = '';
@@ -2338,7 +2352,7 @@
                             if (data.roomProperties?.roomType === 'laicai') {
                                 button.remove();
                                 userItem.querySelector('small').textContent = user.role === 'host' ? '主用户 · 在线' : '大号 · 在线';
-                            } else button.onclick = () => toggleUserStatus(user.uid, data.roomName, user.username);
+                            } else button.onclick = () => toggleUserStatus(user.uid, roomName);
                             output.appendChild(userItem);
                         });
                     }
@@ -2398,10 +2412,10 @@
                         }
                     });
                     
-                    // 检查是否有待处理的权限管理请求
-                    const tempData = window.tempPermissionData;
-                    if (tempData) {
-                        const { accountId, userRooms } = tempData;
+                    const permissionView = roomPermissionView;
+                    if (isCurrentRoomPermissionView(permissionView) && permissionView.awaitingRooms) {
+                        permissionView.awaitingRooms = false;
+                        const { userRooms } = permissionView;
                         const output = document.getElementById('room-permissions-output');
                         
                         if (data.data && data.data.length > 0) {
@@ -2432,7 +2446,7 @@
                                         <span>${escapeHtml(room)}</span>
                                         <button class="button button-danger" style="white-space: nowrap;">移除</button>
                                     `;
-                                    permissionItem.querySelector('button').onclick = () => removeRoomPermission(accountId, room);
+                                    permissionItem.querySelector('button').onclick = () => removeRoomPermission(permissionView, room);
                                     existingList.appendChild(permissionItem);
                                 });
                                 
@@ -2464,9 +2478,9 @@
                                 </div>
                             `;
                             
-                            addPermissionDiv.querySelector('button').onclick = () => addRoomPermission(accountId);
                             // 填充房间选择下拉框
                             const roomSelect = addPermissionDiv.querySelector('#add-room-select');
+                            addPermissionDiv.querySelector('button').onclick = () => addRoomPermission(permissionView, roomSelect.value);
                             data.data.forEach(room => {
                                 // 只显示用户尚未拥有的房间
                                 if (!userRooms.includes(room)) {
@@ -2481,9 +2495,6 @@
                         } else {
                             output.innerHTML = '暂无房间';
                         }
-                        
-                        // 清除临时数据
-                        window.tempPermissionData = null;
                     }
                 } else if (data.type === 'all-accounts') {
                     const userSelect = document.getElementById('admin-user-select');
@@ -2508,6 +2519,9 @@
                     const output = document.getElementById('user-info-output');
                     const freezeBtn = document.getElementById('freeze-user-btn');
                     if (!data.data) {
+                        if (isCurrentRoomPermissionView(roomPermissionView)) {
+                            return;
+                        }
                         output.innerHTML = '请选择用户';
                         freezeBtn.disabled = true;
                         return;
@@ -2586,12 +2600,12 @@
                     showAlertModal('成功', '密码已重置为123456');
                 } else if (data.type === 'freeze-user-success') {
                     showAlertModal('成功', data.isFrozen ? '用户已冻结' : '用户已解冻');
-                    // 重新加载用户信息
-                    loadUserInfo();
+                    const user = (window.allUsers || []).find(user => user.accountId === data.accountId);
+                    if (user) user.isFrozen = data.isFrozen;
+                    refreshSelectedUser(data.accountId);
                 } else if (data.type === 'safe-user-success') {
                     showAlertModal('成功', data.safe ? '用户已设为信任' : '已取消用户信任');
-                    // 重新加载用户信息
-                    loadUserInfo();
+                    refreshSelectedUser(data.accountId);
                 } else if (data.type === 'delete-user-success') {
                     showAlertModal('成功', '用户已删除');
                     // 重新加载用户列表
@@ -2601,7 +2615,7 @@
                     showConfirmModal('权限确认', data.message, function(confirmed) {
                         if (confirmed) {
                             // 确认赋予权限并移动
-                            socket.emit('message', {
+                            sendAdminMessage({
                                 type: 'move-user',
                                 uid: data.uid,
                                 fromRoom: data.fromRoom,
@@ -2610,36 +2624,59 @@
                             });
                         }
                     });
-                } else if (data.type === 'move-success' || data.type === 'user-moved') {
+                } else if (data.type === 'user-moved') {
                     showAlertModal('成功', '用户移动成功');
                     // 刷新房间状态
                     refreshRoomsStatus();
                     // 重新加载房间用户
                     loadRoomUsers();
-                } else if (data.type === 'offline-success' || data.type === 'user-status-changed') {
+                } else if (data.type === 'user-offline-success') {
                     // 强制下线成功，刷新状态
                     refreshRoomsStatus();
                     loadRoomUsers();
                 } else if (data.type === 'permission-updated') {
-                    showAlertModal('成功', '权限更新成功');
-                    // 重新加载用户信息
-                    loadUserInfo();
-                } else if (data.type === 'success') {
-                    if (data.operationId) {
-                        const pending = readPendingPointChanges();
-                        savePendingPointChanges(pending.filter(item => item.operationId !== data.operationId));
-                    }
-                    // 积分编辑成功
                     showAlertModal('成功', data.message);
-                    // 重新加载用户信息
-                    loadUserInfo();
-                } else if (data.type === 'error') {
-                    if (activeUploadInProgress) {
-                        activeUploadContinuation = null;
-                        activeUploadInProgress = false;
-                        activeUploadComplete = null;
+                    refreshSelectedUser(data.accountId);
+                } else if (data.type === 'success' && data.operationId) {
+                    const pending = readPendingPointChanges();
+                    const operation = pending.find(item => item.operationId === data.operationId);
+                    if (!operation) return;
+                    savePendingPointChanges(pending.filter(item => item.operationId !== data.operationId));
+                    showAlertModal('成功', data.message);
+                    refreshSelectedUser(operation.accountId);
+                } else if (data.type === 'server-control-status') {
+                    if (data.requestType === undefined && typeof data.groupPurchasingFrozen === 'boolean') {
+                        // 其他管理员的操作广播只更新状态，当前请求仍等待自己的回执。
+                        groupPurchasingFrozen = data.groupPurchasingFrozen;
+                        renderServerControl();
+                    } else if (data.requestType === serverControlRequest && (serverControlRequest === 'get-server-control' || serverControlRequest === 'set-group-purchasing-frozen')) {
+                        const wasSetting = serverControlRequest === 'set-group-purchasing-frozen';
+                        serverControlRequest = null;
+                        groupPurchasingFrozen = typeof data.groupPurchasingFrozen === 'boolean' ? data.groupPurchasingFrozen : null;
+                        showServerControlNotice(groupPurchasingFrozen === null ? '未收到有效的团购发车状态，请刷新。' : wasSetting ? '团购发车状态已更新。' : '');
+                        renderServerControl();
                     }
-                    showAlertModal('错误', '错误：' + data.message);
+                } else if (data.type === 'unfreeze-all-users-success') {
+                    if (serverControlRequest === 'unfreeze-all-users') {
+                        serverControlRequest = null;
+                        showServerControlNotice(`全体解冻已完成，共解除 ${data.count} 个账号的冻结。`);
+                        renderServerControl();
+                    }
+                } else if (data.type === 'restart-server-accepted') {
+                    if (serverControlRequest === 'restart-server') {
+                        serverControlRequest = null;
+                        serverRestartAccepted = true;
+                        showServerControlNotice('重启请求已受理。服务端会等待进行中的车次处理完毕，重启时连接将断开。');
+                        renderServerControl();
+                    }
+                } else if (data.type === 'error') {
+                    if (data.message === '请先登录' || data.message === '权限不足') {
+                        closeAdminConnection(data.message + '，请重新验证管理员身份');
+                        return;
+                    }
+                    if (activeUpload && data.requestType === activeUpload.type) abortAdminUpload(data.message);
+                    handleServerControlError(data);
+                    showAlertModal('错误', data.message);
                 } else if (data.type === 'points-ranking') {
                     console.log('收到积分排行榜数据:', data.data);
                     updatePointsRanking(data.data);
@@ -2648,6 +2685,8 @@
                     handleAdminGainRecords(data);
                 } else if (data.type === 'log-files') {
                     // 处理日志文件列表
+                    const isDownloading = window.isDownloadingLog;
+                    window.isDownloadingLog = false;
                     const date = document.getElementById('log-date').value;
                     const container = document.getElementById('log-content-container');
                     
@@ -2663,15 +2702,9 @@
                         return;
                     }
                     
-                    // 检查是否是下载操作
-                    const isDownloading = window.isDownloadingLog;
-                    
-                    // 重置下载标记
-                    window.isDownloadingLog = false;
-                    
                     if (isDownloading) {
                         // 下载第一个匹配的日志文件
-                        socket.emit('message', { type: 'download-log-file', fileName: filteredFiles[0] });
+                        sendAdminMessage({ type: 'download-log-file', fileName: filteredFiles[0] });
                     } else {
                         // 加载第一个匹配的日志文件
                         loadLogFileContent(filteredFiles[0]);
@@ -2701,29 +2734,27 @@
                 } else if (data.type === 'update-versions-result') {
                     // 处理更新版本结果
                     handleUpdateVersionsResult(data.data);
-                } else if (data.type === 'upload-client-package-result' || data.type === 'upload-group-purchasing-package-result' || data.type === 'upload-asar-result') {
-                    // 处理上传结果
-                    activeUploadContinuation = null;
-                    activeUploadInProgress = false;
-                    const uploadComplete = activeUploadComplete;
-                    activeUploadComplete = null;
+                } else if (activeUpload && data.type === activeUpload.type + '-result') {
+                    const upload = activeUpload;
+                    activeUpload = null;
                     handleUploadResult(data.data);
-                    if (typeof uploadComplete === 'function') uploadComplete();
-                } else if (data.type === 'upload-progress') {
+                    if (data.data.success) upload.onComplete();
+                } else if (data.type === 'upload-progress' && activeUpload) {
                     // 处理上传进度
                     const progressBar = document.getElementById('upload-progress-bar');
                     const progressText = document.getElementById('upload-progress-text');
                     progressBar.value = data.data.progress;
                     progressText.textContent = `上传中... ${data.data.progress}%`;
-                    if (activeUploadContinuation) {
-                        const continueUpload = activeUploadContinuation;
-                        activeUploadContinuation = null;
+                    if (activeUpload.continueUpload) {
+                        const continueUpload = activeUpload.continueUpload;
+                        activeUpload.continueUpload = null;
                         setTimeout(continueUpload, 0);
                     }
                 }
             });
+            connection.connect();
         }
-        
+
         // 显示操作菜单
         function showActionMenu(e, user, roomName) {
             const menu = document.getElementById('action-menu');
@@ -2748,7 +2779,7 @@
         // 强制下线
         function forceOffline() {
             if (currentUser && currentRoom) {
-                socket.emit('message', { type: 'toggle-user-status', uid: currentUser.uid, roomName: currentRoom });
+                sendAdminMessage({ type: 'toggle-user-status', uid: currentUser.uid, roomName: currentRoom });
                 // 关闭菜单
                 closeActionMenu();
             }
@@ -2784,7 +2815,7 @@
             }
             
             if (moveUserInfo) {
-                socket.emit('message', {
+                sendAdminMessage({
                     type: 'move-user',
                     uid: moveUserInfo.user.uid,
                     fromRoom: moveUserInfo.fromRoom,
@@ -2799,7 +2830,7 @@
         
         // 刷新房间状态
         function refreshRoomsStatus() {
-            socket.emit('message', { type: 'get-rooms-status' });
+            sendAdminMessage({ type: 'get-rooms-status' });
         }
         
         // 切换到房间总览面板
@@ -2808,6 +2839,90 @@
             document.getElementById('rooms-status-panel').classList.add('active');
             // 刷新房间状态
             refreshRoomsStatus();
+        }
+
+        function switchToServerControl() {
+            hideAllPanels();
+            document.getElementById('server-control-panel').classList.add('active');
+            refreshServerControl();
+        }
+
+        function resetServerControl() {
+            groupPurchasingFrozen = null;
+            serverControlRequest = null;
+            serverRestartAccepted = false;
+            showServerControlNotice('');
+            renderServerControl();
+        }
+
+        function renderServerControl() {
+            const busy = serverControlRequest !== null;
+            const status = document.getElementById('group-purchasing-status');
+            if (serverControlRequest === 'get-server-control') {
+                status.textContent = '正在读取团购发车状态…';
+            } else if (groupPurchasingFrozen === null) {
+                status.textContent = '团购发车状态未知';
+            } else {
+                status.textContent = groupPurchasingFrozen ? '团购发车已冻结' : '团购发车已开放';
+            }
+            const freezeButton = document.getElementById('group-purchasing-freeze-btn');
+            freezeButton.disabled = busy || groupPurchasingFrozen === null;
+            freezeButton.textContent = groupPurchasingFrozen ? '解冻团购发车' : '冻结团购发车';
+            document.getElementById('server-control-refresh-btn').disabled = busy;
+            document.getElementById('unfreeze-all-users-btn').disabled = busy;
+            const restartButton = document.getElementById('restart-server-btn');
+            restartButton.disabled = busy || serverRestartAccepted;
+            restartButton.textContent = serverRestartAccepted ? '已请求重启' : '重启服务端';
+        }
+
+        function showServerControlNotice(message) {
+            document.getElementById('server-control-notice').textContent = message;
+        }
+
+        function sendServerControlRequest(message, notice = '') {
+            if (serverControlRequest || !sendAdminMessage(message)) return;
+            serverControlRequest = message.type;
+            showServerControlNotice(notice);
+            renderServerControl();
+        }
+
+        function handleServerControlError(data) {
+            const failedRequest = data.requestType;
+            if (!failedRequest || (failedRequest !== serverControlRequest && !(failedRequest === 'restart-server' && serverRestartAccepted))) return;
+            if (failedRequest === 'restart-server') serverRestartAccepted = false;
+            if (failedRequest === serverControlRequest) serverControlRequest = null;
+            if (failedRequest === 'get-server-control' || failedRequest === 'set-group-purchasing-frozen') groupPurchasingFrozen = null;
+            showServerControlNotice(data.message);
+            renderServerControl();
+        }
+
+        function refreshServerControl() {
+            sendServerControlRequest({ type: 'get-server-control' });
+        }
+
+        function confirmGroupPurchasingFreeze() {
+            if (groupPurchasingFrozen === null || serverControlRequest) return;
+            const frozen = !groupPurchasingFrozen;
+            const title = frozen ? '冻结团购发车' : '解冻团购发车';
+            const message = frozen ? '确定暂停触发新的团购车次？已经触发的车次会继续。' : '确定恢复团购发车？';
+            showConfirmModal(title, message, confirmed => {
+                if (confirmed && groupPurchasingFrozen === !frozen) {
+                    sendServerControlRequest({ type: 'set-group-purchasing-frozen', frozen }, '正在更新团购发车状态…');
+                }
+            });
+        }
+
+        function confirmUnfreezeAllUsers() {
+            showConfirmModal('全体解冻', '确定解除所有已冻结账号的冻结？', confirmed => {
+                if (confirmed) sendServerControlRequest({ type: 'unfreeze-all-users' }, '正在解除账号冻结…');
+            });
+        }
+
+        function confirmRestartServer() {
+            if (serverRestartAccepted) return;
+            showConfirmModal('重启服务端', '确定请求重启服务端？服务端会等待进行中的车次处理完毕，重启时客户端和管理端将断开连接。', confirmed => {
+                if (confirmed && !serverRestartAccepted) sendServerControlRequest({ type: 'restart-server' }, '已发送重启请求，正在等待服务端确认…');
+            });
         }
         
         // 切换到房间管理面板
@@ -2922,7 +3037,7 @@
                 requestData.date = date;
             }
 
-            socket.emit('message', requestData);
+            sendAdminMessage(requestData);
         }
 
         // 处理收益记录数据
@@ -2979,7 +3094,7 @@
 
         // 加载版本信息
         function loadVersions() {
-            socket.emit('message', { type: 'get-versions' });
+            sendAdminMessage({ type: 'get-versions' });
         }
 
         // 更新版本信息
@@ -2992,7 +3107,7 @@
                 return;
             }
 
-            socket.emit('message', {
+            sendAdminMessage({
                 type: 'update-versions',
                 clientVersion: clientVersion || undefined,
                 groupPurchasingVersion: groupVersion || undefined
@@ -3075,19 +3190,25 @@
             });
         }
 
+        function abortAdminUpload(message) {
+            if (!activeUpload) return;
+            activeUpload = null;
+            document.getElementById('upload-progress-text').textContent = message;
+        }
+
         // 上传文件：每个分片等待服务端流量调度确认后再继续。
         function uploadFile(file, type, onComplete) {
-            if (activeUploadInProgress) {
+            if (!adminAuthenticated || !socket?.connected) return;
+            if (activeUpload) {
                 showAlertModal('提示', '已有文件正在上传，请等待当前上传完成');
                 return;
             }
-            activeUploadInProgress = true;
-            activeUploadComplete = onComplete;
+            const upload = { type, onComplete, continueUpload: null };
+            activeUpload = upload;
+            const version = type === 'upload-asar' ? document.getElementById('asar-version').value.trim() : null;
             const CHUNK_SIZE = 350 * 1024; // 350KB per chunk
             const totalSize = file.size;
             let offset = 0;
-            let chunkIndex = 0;
-            let startTime = Date.now();
             let lastTime = Date.now();
             let lastOffset = 0;
 
@@ -3098,13 +3219,14 @@
             progressDiv.style.display = 'block';
             progressBar.value = 0;
             progressText.textContent = `上传中... 0%`;
-            activeUploadContinuation = null;
 
             function sendChunk() {
+                if (activeUpload !== upload) return;
                 const chunk = file.slice(offset, offset + CHUNK_SIZE);
                 const reader = new FileReader();
 
                 reader.onload = function(e) {
+                    if (activeUpload !== upload) return;
                     const base64 = e.target.result.split(',')[1];
                     const isLastChunk = offset + CHUNK_SIZE >= totalSize;
 
@@ -3119,11 +3241,11 @@
                     };
                     
                     // 如果是上传 asar，添加版本号
-                    if (type === 'upload-asar') {
-                        message.version = document.getElementById('asar-version').value.trim();
+                    if (version !== null) message.version = version;
+                    if (!sendAdminMessage(message)) {
+                        abortAdminUpload('上传已中断，请重新上传');
+                        return;
                     }
-
-                    socket.emit('message', message);
 
                     // 计算上传速度
                     const currentTime = Date.now();
@@ -3142,14 +3264,13 @@
 
                     if (!isLastChunk) {
                         offset += CHUNK_SIZE;
-                        activeUploadContinuation = sendChunk;
+                        upload.continueUpload = sendChunk;
                     }
                 };
 
                 reader.onerror = function() {
-                    activeUploadContinuation = null;
-                    activeUploadInProgress = false;
-                    activeUploadComplete = null;
+                    if (activeUpload !== upload) return;
+                    abortAdminUpload('读取上传文件失败');
                     showAlertModal('错误', '读取上传文件失败');
                 };
 
@@ -3180,12 +3301,12 @@
             const progressDiv = document.getElementById('upload-progress');
             const progressBar = document.getElementById('upload-progress-bar');
             const progressText = document.getElementById('upload-progress-text');
-            progressBar.value = 100;
-            progressText.textContent = '上传完成！';
-            setTimeout(function() {
+            if (data.success) {
+                progressBar.value = 100;
+                progressText.textContent = '上传完成';
                 progressDiv.style.display = 'none';
-                alert(data.message);
-            }, 500);
+            }
+            showAlertModal(data.success ? '成功' : '错误', data.message);
         }
         
         // 根据日期加载日志内容
@@ -3201,7 +3322,7 @@
             container.innerHTML = '<p>正在加载日志内容...</p>';
             
             // 加载所有日志文件，然后在前端筛选
-            socket.emit('message', { type: 'get-log-files' });
+            sendAdminMessage({ type: 'get-log-files' });
         }
         
         // 隐藏所有面板
@@ -3214,7 +3335,7 @@
         
         // 刷新积分排行榜
         function refreshPointsRanking() {
-            socket.emit('message', { type: 'get-points-ranking' });
+            sendAdminMessage({ type: 'get-points-ranking' });
         }
         
         // 格式化上次发车时间
@@ -3268,12 +3389,12 @@
         
         // 加载所有房间
         function loadAllRooms() {
-            socket.emit('message', { type: 'get-all-rooms' });
+            sendAdminMessage({ type: 'get-all-rooms' });
         }
         
         // 加载在线用户
         function loadOnlineUsers() {
-            socket.emit('message', { type: 'get-online-users' });
+            sendAdminMessage({ type: 'get-online-users' });
         }
         
 
@@ -3286,7 +3407,7 @@
                 return;
             }
             
-            socket.emit('message', { 
+            sendAdminMessage({
                 type: 'get-ride-records',
                 date: date 
             });
@@ -3510,7 +3631,7 @@
         
         // 加载日志文件内容
         function loadLogFileContent(fileName) {
-            socket.emit('message', { type: 'get-log-file-content', fileName });
+            sendAdminMessage({ type: 'get-log-file-content', fileName });
             // 存储当前选中的日志文件
             window.currentLogFile = fileName;
         }
@@ -3697,7 +3818,7 @@
             window.isDownloadingLog = true;
             
             // 首先获取日志文件列表
-            socket.emit('message', { type: 'get-log-files' });
+            sendAdminMessage({ type: 'get-log-files' });
         }
         
         // 处理文件下载
@@ -3743,7 +3864,7 @@
             
             showConfirmModal('确认修改', `确定要将房间 ${roomName} 改名为 ${newRoomName} 吗？`, function(confirmed) {
                 if (confirmed) {
-                    socket.emit('message', { type: 'edit-room-name', roomName, newRoomName });
+                    sendAdminMessage({ type: 'edit-room-name', roomName, newRoomName });
                 }
             });
         }
@@ -3763,23 +3884,20 @@
             
             showConfirmModal('确认删除', `确定要删除房间 ${roomName} 吗？`, function(confirmed) {
                 if (confirmed) {
-                    socket.emit('message', { type: 'delete-room', roomName });
+                    sendAdminMessage({ type: 'delete-room', roomName });
                 }
             });
         }
         
         // 切换用户状态
-        function toggleUserStatus(uid, roomName, username) {
-            socket.emit('message', { type: 'toggle-user-status', uid, roomName });
-            // 重新加载房间用户
-            loadRoomUsers();
-            // 刷新房间状态显示
-            refreshRoomsStatus();
+        function toggleUserStatus(uid, roomName) {
+            if (document.getElementById('admin-room-select').value !== roomName) return;
+            sendAdminMessage({ type: 'toggle-user-status', uid, roomName });
         }
         
         // 加载所有用户
         function loadAllAccounts() {
-            socket.emit('message', { type: 'get-all-accounts' });
+            sendAdminMessage({ type: 'get-all-accounts' });
         }
         
         // 过滤用户
@@ -3819,6 +3937,7 @@
         // 加载用户信息
         function loadUserInfo() {
             const accountId = document.getElementById('admin-user-select').value;
+            clearRoomPermissionView();
             const freezeBtn = document.getElementById('freeze-user-btn');
             freezeBtn.disabled = true;
             document.getElementById('safe-user-btn').disabled = true;
@@ -3834,52 +3953,69 @@
                 return;
             }
             
-            socket.emit('message', { type: 'get-user-info', accountId });
+            document.getElementById('user-info-output').textContent = '正在加载用户信息…';
+            sendAdminMessage({ type: 'get-user-info', accountId });
+        }
+
+        function refreshSelectedUser(accountId) {
+            if (accountId === undefined || accountId === document.getElementById('admin-user-select').value) {
+                loadUserInfo();
+            }
         }
         
+        function clearRoomPermissionView() {
+            roomPermissionView = null;
+            document.getElementById('room-permissions-output').innerHTML = '';
+        }
+
+        function isCurrentRoomPermissionView(view) {
+            return view !== null && view === roomPermissionView
+                && view.accountId === document.getElementById('admin-user-select').value;
+        }
+
         // 加载房间权限
         function loadRoomPermissions(accountId, userRooms) {
-            const output = document.getElementById('room-permissions-output');
-            output.innerHTML = '';
-            
-            // 临时存储accountId和userRooms
-            window.tempPermissionData = { accountId, userRooms };
-            
-            // 获取所有房间
-            socket.emit('message', { type: 'get-all-rooms' });
+            clearRoomPermissionView();
+            roomPermissionView = { accountId, userRooms: userRooms || [], awaitingRooms: true };
+            sendAdminMessage({ type: 'get-all-rooms' });
         }
-        
 
-        
-        // 更新房间权限
-        function updateRoomPermission(accountId, room, isGranted) {
-            socket.emit('message', {
+        function updateRoomPermission(view, room, isGranted) {
+            // 确认框打开期间可能已经切换或刷新了账号。
+            if (!isCurrentRoomPermissionView(view)) {
+                return;
+            }
+            sendAdminMessage({
                 type: 'update-room-permission',
-                accountId: accountId,
-                room: room,
-                isGranted: isGranted
+                accountId: view.accountId,
+                room,
+                isGranted
             });
         }
         
         // 移除房间权限
-        function removeRoomPermission(accountId, room) {
+        function removeRoomPermission(view, room) {
+            if (!isCurrentRoomPermissionView(view)) {
+                return;
+            }
             showConfirmModal('确认移除', '确定要移除该房间的权限吗？', function(confirmed) {
                 if (confirmed) {
-                    socket.emit('message', { type: 'update-room-permission', accountId, room, isGranted: false });
+                    updateRoomPermission(view, room, false);
                 }
             });
         }
         
         // 添加房间权限
-        function addRoomPermission(accountId) {
-            const roomSelect = document.getElementById('add-room-select');
-            const room = roomSelect.value;
+        function addRoomPermission(view, room) {
+            if (!isCurrentRoomPermissionView(view)) {
+                return;
+            }
             if (!room) {
                 showAlertModal('提示', '请选择要添加的房间');
                 return;
             }
             
-            socket.emit('message', { type: 'update-room-permission', accountId, room, isGranted: true });
+            updateRoomPermission(view, room, true);
         }
         
         // 注册用户
@@ -3896,7 +4032,7 @@
             }
             
             console.log('发送注册请求:', { accountId, username: accountId });
-            socket.emit('message', { type: 'register-user', accountId, username: accountId });
+            sendAdminMessage({ type: 'register-user', accountId, username: accountId });
         }
         
         // 重置密码
@@ -3909,7 +4045,7 @@
             
             showConfirmModal('确认重置', '确定要重置该用户的密码为123456吗？', function(confirmed) {
                 if (confirmed) {
-                    socket.emit('message', { type: 'reset-password', accountId });
+                    sendAdminMessage({ type: 'reset-password', accountId });
                 }
             });
         }
@@ -3920,13 +4056,13 @@
                 return;
             }
             
-            socket.emit('message', { type: 'toggle-freeze-user', accountId, isFrozen });
+            sendAdminMessage({ type: 'toggle-freeze-user', accountId, isFrozen });
         }
         
         // 切换信任用户状态
         function toggleSafeUser(accountId, safe) {
             if (accountId !== document.getElementById('admin-user-select').value) return;
-            socket.emit('message', { type: 'toggle-safe-user', accountId, safe });
+            sendAdminMessage({ type: 'toggle-safe-user', accountId, safe });
         }
         
         // 删除用户
@@ -3939,7 +4075,7 @@
             
             showConfirmModal('确认删除', `确定要删除用户 ${accountId} 吗？此操作不可恢复。`, function(confirmed) {
                 if (confirmed) {
-                    socket.emit('message', { type: 'delete-user', accountId });
+                    sendAdminMessage({ type: 'delete-user', accountId });
                 }
             });
         }
@@ -3972,6 +4108,7 @@
             // 显示确认对话框
             showConfirmModal('确认修改', `确定要对用户 ${accountId} 的积分进行 ${pointsChange > 0 ? '增加' : '减少'} ${Math.abs(pointsChange)} 分的操作吗？`, function(confirmed) {
                 if (confirmed) {
+                    if (!adminAuthenticated || document.getElementById('admin-user-select').value !== accountId) return;
                     const pending = readPendingPointChanges();
                     let operation = pending.find(item => item.accountId === accountId && item.pointsChange === pointsChange);
                     if (!operation) {
@@ -3980,7 +4117,7 @@
                         operation = { accountId, pointsChange, operationId };
                         savePendingPointChanges([...pending, operation]);
                     }
-                    socket.emit('message', { type: 'edit-user-points', ...operation });
+                    sendAdminMessage({ type: 'edit-user-points', ...operation });
                 }
             });
         }
@@ -4124,7 +4261,8 @@
             
             const fields = readRoomTypeFields('edit');
             if (!fields) return;
-            socket.emit('message', {
+            // 发送保存请求
+            sendAdminMessage({
                 ...fields,
                 type: 'edit-room-properties',
                 roomName: roomName,
@@ -4151,8 +4289,10 @@
                 document.getElementById('room-properties-output').innerHTML = '请选择房间';
                 return;
             }
-            
-            socket.emit('message', { type: 'get-room-users', roomName });
+
+            document.getElementById('room-users-output').textContent = '正在加载房间用户…';
+            document.getElementById('room-properties-output').textContent = '正在加载房间属性…';
+            sendAdminMessage({ type: 'get-room-users', roomName });
         }
         
         // 修改创建房间函数
@@ -4168,9 +4308,9 @@
             
             const fields = readRoomTypeFields('new');
             if (!fields) return;
-            socket.emit('message', { 
+            sendAdminMessage({
                 ...fields,
-                type: 'create-room', 
+                type: 'create-room',
                 roomName: roomName,
                 roomMode: roomMode,
                 roomCount: roomCount

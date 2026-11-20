@@ -17,8 +17,8 @@ function temporaryData(t) {
 }
 
 // 每次创建独立的服务端运行环境。账本使用临时目录，监听、网络和定时任务由测试接管。
-async function boot(dir) {
-  const clock = { now: Date.parse('2024-03-01T04:30:00+08:00') };
+async function boot(dir, { now = Date.parse('2024-03-01T04:30:00+08:00'), execFile, onTimeout } = {}) {
+  const clock = { now };
   class ClockDate extends Date {
     constructor(...args) { super(...(args.length ? args : [clock.now])); }
     static now() { return clock.now; }
@@ -28,7 +28,7 @@ async function boot(dir) {
     id: uid, connected: true,
     emit(_event, data) { messages.push({ uid, data }); }
   }]));
-  let started, failed;
+  let started, failed, onConnection;
   const ready = new Promise((resolve, reject) => { started = resolve; failed = reject; });
   const noop = () => {};
   const express = Object.assign(() => ({ get: noop, use: noop }), { static: noop });
@@ -36,8 +36,12 @@ async function boot(dir) {
   disk.appendFile = (_file, _data, callback) => callback(null);
   const modules = {
     express, fs: disk, path, crypto: require('node:crypto'),
+    ...(execFile ? { child_process: { execFile } } : {}),
     http: { createServer: () => ({ listen: started }) },
-    'socket.io': () => ({ sockets: { sockets }, on: noop })
+    'socket.io': () => ({
+      sockets: { sockets },
+      on(event, handler) { if (event === 'connection') onConnection = handler; }
+    })
   };
   const ctx = vm.createContext({
     __dirname: dir, Date: ClockDate, Buffer,
@@ -45,6 +49,7 @@ async function boot(dir) {
     console: { log: noop, error: noop, warn: noop },
     process: { pid: process.pid, on: noop, exit: code => failed(new Error('初始化退出 ' + code)) },
     setTimeout(callback, delay) {
+      onTimeout?.(callback, delay);
       if (delay === 2000) queueMicrotask(callback); // 图片传输后的发车延时
       return { unref: noop };
     },
@@ -60,10 +65,26 @@ async function boot(dir) {
     if (!connections.has(seat.accountId)) {
       connections.set(seat.accountId, { userInfo: { username: seat.accountId }, connections: [] });
     }
-    connections.get(seat.accountId).connections.push(seat);
+    connections.get(seat.accountId).connections.push({ ...seat });
   }
   return {
     clock, disk, get, messages,
+    connect(id) {
+      const handlers = new Map();
+      const socket = {
+        id, connected: true,
+        emit(_event, data) { messages.push({ uid: id, data }); },
+        on(event, handler) { handlers.set(event, handler); },
+        disconnect() {
+          this.connected = false;
+          sockets.delete(id);
+          handlers.get('disconnect')?.();
+        }
+      };
+      sockets.set(id, socket);
+      onConnection(socket);
+      return socket;
+    },
     async send(uid, message) { await get('handleReceivedMessage')(sockets.get(uid), message); },
     async openRide() {
       const room = { name: '测试房间', mode: 'random', count: 4, users: [...seats] };
