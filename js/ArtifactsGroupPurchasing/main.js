@@ -945,8 +945,7 @@ async function autoEnter(autoEnterSettings) {
     const start = new Date();
     log.info(`当前模式为：${enterMode}`);
 
-    // 加载目标 PNG（按 baseName 从长到短排序，避免短名称先匹配）
-    // 忽略以"备注"结尾的图片
+    // 加载目标 PNG，忽略以“备注”结尾的图片
     const targetPngs = await readFolder(targetsPath, ".png");
     for (const f of targetPngs) {
         const baseName = f.fileName.replace(/\.png$/i, '');
@@ -961,7 +960,6 @@ async function autoEnter(autoEnterSettings) {
         const ro = RecognitionObject.TemplateMatch(mat, 664, 481, 1355 - 668, 588 - 484);
         targetsRo.push({ ro, baseName });
     }
-    targetsRo.sort((a, b) => b.baseName.length - a.baseName.length);
     log.info(`加载完成共 ${targetsRo.length} 个目标`);
     const selectedTargets = selectTemplates(targetList, targetsRo);
     log.info(useAllTargetImages ? "放人模板匹配使用全部图片" : "放人模板匹配使用白名单名称最相似图片");
@@ -1128,6 +1126,11 @@ async function autoEnter(autoEnterSettings) {
     }
 
     function recognizeRequest(frame) {
+        const matches = selectedTargets.filter(item => frame.find(item.ro).isExist())
+            .sort((a, b) => b.nameSimilarity - a.nameSimilarity ||
+                targetList.indexOf(a.targetName) - targetList.indexOf(b.targetName));
+        if (matches.length) return { method: '模板匹配', result: matches[0].targetName };
+
         const names = targetList.filter(name => targetList.indexOf(name) === targetList.lastIndexOf(name));
         let lines = [];
         try {
@@ -1136,13 +1139,9 @@ async function autoEnter(autoEnterSettings) {
             log.warn(`申请昵称识别失败：${error.message}`);
         }
         const exact = names.filter(name => lines.includes(name));
-        if (exact.length > 1 || lines.some(line => targetList.includes(line) && !names.includes(line))) return { result: null };
-        const matches = selectedTargets.filter(item => frame.find(item.ro).isExist());
-        const candidates = [...new Set(matches.map(item => item.targetName))];
-        if (exact.length === 1) {
-            return candidates.every(name => name === exact[0]) ? { method: 'OCR识别', result: exact[0] } : { result: null };
-        }
-        return candidates.length === 1 ? { method: '模板匹配', result: candidates[0] } : { result: null };
+        const hasDuplicateName = lines.some(line => targetList.includes(line) && !names.includes(line));
+        const recognizedName = exact.length === 1 && !hasDuplicateName ? exact[0] : null;
+        return recognizedName ? { method: 'OCR识别', result: recognizedName } : { result: null };
     }
 
     function selectTemplates(names, templates) {
