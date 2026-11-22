@@ -1054,7 +1054,7 @@
     <script src="./node_modules/socket.io/client-dist/socket.io.min.js"></script>
     <script>
         // 注意：更新用户端版本号时需要同步更新 package.json 中的版本号
-        const VERSION = '2.2.0';
+        const VERSION = '2.2.1';
         let socket;
         let isLoggedIn = false;
         let isLoggingIn = false; // 登录状态标志，防止重复登录
@@ -3280,7 +3280,7 @@
         }
 
         // 一条龙任务管理机制
-        let dragonLaunching = false;
+        let activeDragonLaunch = null; // 当前关闭旧进程并启动新配置的操作
         let pendingDragonTask = null; // 待执行的一条龙任务（单任务位）
         let dragonTimer = null; // 当前运行的计时器
         let timerType = null; // 计时器类型: null(无) | 'cooldown'(30秒冷却) | 'protection'(2分钟保护)
@@ -3297,7 +3297,7 @@
                 ? Boolean(options.closeGame)
                 : Boolean(document.getElementById('close-genshin-checkbox')?.checked);
             // 如果存在计时器，根据计时器类型处理
-            if (dragonTimer || dragonLaunching) {
+            if (dragonTimer || activeDragonLaunch) {
                 if (timerType === 'protection') {
                     // 保护期内忽略所有任务
                     addLog(`保护期内，忽略一条龙任务: ${configName}`, 'warning');
@@ -3341,16 +3341,17 @@
             }
             
             // 执行一条龙启动
-            dragonLaunching = true;
+            activeDragonLaunch = executeDragonLaunch(configName, closeGame, task.ride);
             try {
-                await executeDragonLaunch(configName, closeGame, task.ride);
+                await activeDragonLaunch;
             } catch (error) {
+                activeDragonLaunch = null;
                 timerType = null;
                 dragonTimer = null;
+                resumePendingDragonTask();
                 throw error;
-            } finally {
-                dragonLaunching = false;
             }
+            activeDragonLaunch = null;
             
             // 启动计时器
             addLog(`一条龙已启动，进入${timerMs / 1000}秒${isRideTask ? '保护' : '冷却'}`, 'info');
@@ -3360,14 +3361,16 @@
                 
                 addLog(isRideTask ? '保护期结束' : '冷却期结束', 'info');
                 
-                // 计时器结束后，如果有待执行任务，继续处理
-                if (pendingDragonTask) {
-                    const pending = pendingDragonTask;
-                    pendingDragonTask = null;
-                    addLog(`检测到待执行任务: ${pending.configName}，继续处理`, 'info');
-                    executeDragonWithTimer(pending).catch(error => addLog('启动失败：' + error.message, 'error'));
-                }
+                resumePendingDragonTask();
             }, timerMs);
+        }
+
+        function resumePendingDragonTask() {
+            if (!pendingDragonTask || preparedRide || activeDragonLaunch || dragonTimer) return;
+            const pending = pendingDragonTask;
+            pendingDragonTask = null;
+            addLog(`检测到待执行任务: ${pending.configName}，继续处理`, 'info');
+            executeDragonWithTimer(pending).catch(error => addLog('启动失败：' + error.message, 'error'));
         }
 
         // 实际执行一条龙启动
@@ -3375,7 +3378,10 @@
             const bgiFolder = getBgiFolderPath();
             if (!bgiFolder) throw new Error('请先选择 BetterGI 文件夹');
             if (!await closeBGI()) throw new Error('无法关闭旧 BetterGI 进程');
-            if (closeGame && !await closeGenshin(true)) throw new Error('无法关闭旧原神进程');
+            if (closeGame) {
+                if (ride && preparedRide !== ride) throw new Error('发车已取消');
+                if (!await closeGenshin(true)) throw new Error('无法关闭旧原神进程');
+            }
             if (ride && preparedRide !== ride) throw new Error('发车已取消');
             const pid = await window.electronAPI.startProcess('BetterGI.exe', ['startOneDragon', configName], bgiFolder);
             addLog('一条龙启动成功，进程 ID：' + pid, 'success');
@@ -4312,7 +4318,7 @@
             }
             const settings = matchedSchedule?.action?.config;
             if (!settings?.configName || !settings.jsFolder || settings.jsFolder === '未选择文件夹' ||
-                !getBgiFolderPath() || preparedRide || timerType === 'protection' || dragonLaunching) {
+                !getBgiFolderPath() || preparedRide || timerType === 'protection') {
                 sendMessageToServer({ ...reply, ready: false });
                 return;
             }
@@ -4447,8 +4453,10 @@
         }
 
         function resetPreparedRide() {
-            if (preparedRide) clearTimeout(preparedRide.timeout);
+            if (!preparedRide) return;
+            clearTimeout(preparedRide.timeout);
             preparedRide = null;
+            resumePendingDragonTask();
         }
 
         // 服务端在哈希不一致或无法协商时请求图片正文
@@ -4516,14 +4524,23 @@
             try {
                 await ride.images;
                 if (preparedRide !== ride) return;
-                if (timerType === 'protection' || dragonLaunching) throw new Error('本机正在启动其他任务');
+                if (timerType === 'protection') throw new Error('本机处于联机保护期');
+                if (activeDragonLaunch) {
+                    addLog('等待当前普通一条龙启动结束，再启动联机一条龙', 'info');
+                    // 普通配置启动失败由原任务报告，本车仍可尝试启动自己的配置。
+                    await activeDragonLaunch.catch(() => {});
+                    if (preparedRide !== ride) return;
+                }
                 clearTimeout(dragonTimer);
+                dragonTimer = null;
                 pendingDragonTask = null;
                 await executeDragonWithTimer({ configName: ride.configName, isRideTask: true,
                     closeGame: Boolean(document.getElementById('close-genshin-checkbox')?.checked), ride });
+                if (preparedRide !== ride) return;
                 currentRideIdentifier = ride.rideId;
                 ride.launchResult = { ...reply, success: true };
             } catch (error) {
+                if (preparedRide !== ride) return;
                 ride.launchResult = { ...reply, success: false, message: String(error.message || error) };
                 addLog('联机一条龙启动失败：' + ride.launchResult.message, 'error');
             }
