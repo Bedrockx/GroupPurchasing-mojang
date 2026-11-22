@@ -151,16 +151,16 @@ test('启动团购更新失败仍进入主界面，并保留失败结果', async
         showMainApp = () => logs.push({msg:'主界面'});
         setTimeout = fn => { fn(); return 1; };
     `);
-    await d.run("handleVersionInfo({data:{version:'2.2.0', groupPurchasingVersion:'2.8.0'}})");
+    await d.run("handleVersionInfo({data:{version:VERSION, groupPurchasingVersion:'2.8.0'}})");
     assert.equal(d.logs.some(row => row.msg.includes('更新失败：模拟失败')), true);
     assert.equal(d.logs.some(row => row.msg.includes('自动更新完成')), false);
     assert.equal(d.logs.some(row => row.msg === '主界面'), true);
 });
 
 function deferred() {
-    let resolve;
-    const promise = new Promise(done => { resolve = done; });
-    return { promise, resolve };
+    let resolve, reject;
+    const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+    return { promise, resolve, reject };
 }
 
 for (const transition of ['注销', '切号']) {
@@ -205,6 +205,160 @@ function rideDesktop() {
     d.api.listImageMetadata = async () => ({ success:true, files:[] });
     return { d, files };
 }
+
+function rideLaunchDesktop() {
+    const { d } = rideDesktop();
+    const operations = [];
+    const ordinaryStart = deferred();
+    const rideStart = deferred();
+    d.api.closeProcess = async name => { operations.push('关闭 ' + name); return true; };
+    d.api.startProcess = (name, [command, config], folder) => {
+        assert.deepEqual([name, command, folder], ['BetterGI.exe', 'startOneDragon', '测试BGI']);
+        operations.push('启动 ' + config);
+        return config === '联机等待' ? ordinaryStart.promise : rideStart.promise;
+    };
+    d.run("const depart = rideId => handleRideMessage2({rideId, seatUid:'1', requireLaunchAck:true})");
+    return { d, operations, ordinaryStart, rideStart };
+}
+
+for (const closeGame of [false, true]) {
+    test('普通一条龙启动期间可就绪，联机接手时' + (closeGame ? '关闭' : '保留') + '原神', async () => {
+        const { d, operations, ordinaryStart, rideStart } = rideLaunchDesktop();
+        d.run("addDragonTask('联机等待')");
+        await new Promise(setImmediate);
+        d.run(`document.getElementById('close-genshin-checkbox').checked = ${closeGame}`);
+        await d.run("prepare('本车')");
+        assert.deepEqual(d.sent.map(m => [m.type, m.ready]), [['ride-ready', true]]);
+        const launch = d.run("depart('本车')");
+        await new Promise(setImmediate);
+        const ordinaryOperations = ['关闭 BetterGI.exe', '启动 联机等待'];
+        assert.deepEqual(operations, ordinaryOperations);
+        assert.equal(d.sent.length, 1);
+
+        ordinaryStart.resolve(101);
+        await new Promise(setImmediate);
+        const expected = [...ordinaryOperations, '关闭 BetterGI.exe'];
+        if (closeGame) expected.push('关闭 YuanShen.exe');
+        expected.push('启动 联机');
+        assert.deepEqual(operations, expected);
+        assert.equal(d.sent.length, 1);
+        rideStart.resolve(102);
+        await launch;
+        assert.deepEqual(d.sent.filter(m => m.type === 'ride-started').map(m => [m.rideId, m.success]),
+            [['本车', true]]);
+    });
+}
+
+test('等普通启动期间取消发车，旧车不会关进程、启动游戏或回报启动结果', async () => {
+    const { d, operations, ordinaryStart, rideStart } = rideLaunchDesktop();
+    d.run("addDragonTask('联机等待')");
+    await new Promise(setImmediate);
+    d.run("document.getElementById('close-genshin-checkbox').checked = true");
+    await d.run("prepare('旧车')");
+    assert.equal(d.sent.at(-1).ready, true);
+    const oldLaunch = d.run("depart('旧车')");
+    await new Promise(setImmediate);
+    d.run("handleRideCancel({rideId:'旧车'})");
+    await d.run("prepare('新车')");
+    ordinaryStart.resolve(101);
+    await oldLaunch;
+    assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待']);
+    assert.deepEqual(d.sent.map(m => [m.type, m.rideId, m.ready]),
+        [['ride-ready', '旧车', true], ['ride-ready', '新车', true]]);
+    rideStart.resolve(102);
+    await d.run("depart('新车')");
+    assert.deepEqual(d.sent.filter(m => m.type === 'ride-started').map(m => [m.rideId, m.success]),
+        [['新车', true]]);
+});
+
+test('普通等待一条龙启动失败后联机仍按自己的进程结果确认', async () => {
+    const { d, operations, ordinaryStart, rideStart } = rideLaunchDesktop();
+    d.run("addDragonTask('联机等待')");
+    await new Promise(setImmediate);
+    await d.run("prepare('本车')");
+    const launch = d.run("depart('本车')");
+    await new Promise(setImmediate);
+    ordinaryStart.reject(new Error('模拟普通启动失败'));
+    rideStart.resolve(102);
+    await launch;
+    assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待', '关闭 BetterGI.exe', '启动 联机']);
+    assert.deepEqual(d.sent.map(m => [m.type, m.ready ?? m.success]), [['ride-ready', true], ['ride-started', true]]);
+});
+
+test('等待中的发车取消，当前普通启动失败后仍接续原来排队的普通任务', async () => {
+    const { d, operations, ordinaryStart, rideStart } = rideLaunchDesktop();
+    d.run("addDragonTask('联机等待'); addDragonTask('排队任务')");
+    await new Promise(setImmediate);
+    await d.run("prepare('旧车')");
+    const launch = d.run("depart('旧车')");
+    await new Promise(setImmediate);
+    d.run("handleRideCancel({rideId:'旧车'})");
+    await new Promise(setImmediate);
+    assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待']);
+    ordinaryStart.reject(new Error('模拟普通启动失败'));
+    rideStart.resolve(102);
+    await launch;
+    await new Promise(setImmediate);
+    assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待', '关闭 BetterGI.exe', '启动 排队任务']);
+    assert.deepEqual(d.sent.map(m => [m.type, m.rideId, m.ready]), [['ride-ready', '旧车', true]]);
+});
+
+for (const cancel of [true, false]) {
+    test('普通冷却在预留发车期间到期，' + (cancel ? '取消后恢复排队任务' : '发车成功后清除排队任务'), async () => {
+        const { d, operations, ordinaryStart, rideStart } = rideLaunchDesktop();
+        d.run(`
+            const timers = new Map();
+            setTimeout = (fn, ms) => {
+                const id = Symbol();
+                timers.set(id, { fn, ms });
+                return id;
+            };
+            clearTimeout = id => timers.delete(id);
+            const expireTimers = ms => {
+                for (const [id, timer] of [...timers]) {
+                    if (timer.ms === ms && timers.delete(id)) timer.fn();
+                }
+            };
+            addDragonTask('联机等待');
+            addDragonTask('排队任务');
+        `);
+        await new Promise(setImmediate);
+        await d.run("prepare('本车')");
+        assert.equal(d.sent.at(-1).ready, true);
+        ordinaryStart.resolve(101);
+        await new Promise(setImmediate);
+        d.advance(30000);
+        d.run('expireTimers(30000)');
+        await new Promise(setImmediate);
+        assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待']);
+
+        rideStart.resolve(102);
+        if (cancel) {
+            d.run("handleRideCancel({rideId:'本车'})");
+            await new Promise(setImmediate);
+            assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待', '关闭 BetterGI.exe', '启动 排队任务']);
+        } else {
+            await d.run("depart('本车')");
+            d.advance(120000);
+            d.run('expireTimers(120000)');
+            await new Promise(setImmediate);
+            assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机等待', '关闭 BetterGI.exe', '启动 联机']);
+        }
+    });
+}
+
+test('已有联机一条龙启动中和启动后的保护期均拒绝另一车就绪', async () => {
+    const { d, operations, rideStart } = rideLaunchDesktop();
+    d.run("startOnlineDragon('联机')");
+    await new Promise(setImmediate);
+    await d.run("prepare('启动中来车')");
+    rideStart.resolve(102);
+    await new Promise(setImmediate);
+    await d.run("prepare('保护期来车')");
+    assert.deepEqual(operations, ['关闭 BetterGI.exe', '启动 联机']);
+    assert.deepEqual(d.sent.map(m => [m.type, m.rideId, m.ready]),
+        [['ride-ready', '启动中来车', false], ['ride-ready', '保护期来车', false]]);
+});
 
 test('旧车扫描迟到，新车匹配信息已落盘后仍保持新车内容', async () => {
     const { d, files } = rideDesktop();
