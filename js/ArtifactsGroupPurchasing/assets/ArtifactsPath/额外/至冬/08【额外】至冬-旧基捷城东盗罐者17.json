@@ -9,7 +9,7 @@
     "bgi_version": "0.45.0",
     "description": "",
     "enable_monster_loot_split": false,
-    "last_modified_time": 1794942914693,
+    "last_modified_time": 1795114590466,
     "map_match_method": "SIFT",
     "map_name": "Teyvat",
     "name": "08【额外】至冬-旧基捷城东盗罐者17",
@@ -33,12 +33,12 @@
       "id": 2,
       "move_mode": "dash",
       "type": "path",
-      "x": 2744.1553,
-      "y": 9477.7061
+      "x": 2752.0391,
+      "y": 9475.3242
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 attack(0.02),keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "action_params": ";万叶 attack(0.02),keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
       "id": 3,
       "move_mode": "dash",
       "sync_point_id": "fight_1",
@@ -85,7 +85,7 @@
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 attack(0.02),keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "action_params": ";万叶 attack(0.02),keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
       "id": 8,
       "move_mode": "dash",
       "sync_point_id": "fight_3",
@@ -107,6 +107,15 @@
       "action": "",
       "action_params": "",
       "id": 10,
+      "move_mode": "jump",
+      "type": "path",
+      "x": 2664.4199,
+      "y": 9443.8281
+    },
+    {
+      "action": "",
+      "action_params": "",
+      "id": 11,
       "move_mode": "dash",
       "type": "path",
       "x": 2648.2598,
@@ -115,7 +124,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 11,
+      "id": 12,
       "move_mode": "walk",
       "type": "path",
       "x": 2650.8906,
@@ -124,7 +133,7 @@
     {
       "action": "combat_script",
       "action_params": ";茜特菈莉 attack(0.08),keypress(E),wait(0.1),keypress(E);莱依拉 attack(0.08),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.08),keypress(E),wait(0.1),keypress(E);尼可 attack(0.08),keypress(E),wait(0.1),keypress(E); ;",
-      "id": 12,
+      "id": 13,
       "move_mode": "dash",
       "type": "path",
       "x": 2663.0352,
@@ -132,8 +141,8 @@
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
-      "id": 13,
+      "action_params": ";万叶 keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "id": 14,
       "move_mode": "dash",
       "sync_point_id": "fight_5",
       "type": "target",
@@ -143,7 +152,7 @@
     {
       "action": "combat_script",
       "action_params": "wait(0.5)",
-      "id": 14,
+      "id": 15,
       "move_mode": "dash",
       "sync_point_id": "fight_6",
       "type": "target",
@@ -153,7 +162,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 15,
+      "id": 16,
       "move_mode": "dash",
       "type": "path",
       "x": 2664.8311,
@@ -162,7 +171,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 16,
+      "id": 17,
       "move_mode": "fly",
       "type": "path",
       "x": 2686.3594,
@@ -171,7 +180,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 17,
+      "id": 18,
       "move_mode": "fly",
       "type": "path",
       "x": 2675.665,
@@ -180,7 +189,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 18,
+      "id": 19,
       "move_mode": "dash",
       "type": "path",
       "x": 2663.7275,
@@ -189,7 +198,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 19,
+      "id": 20,
       "move_mode": "climb",
       "type": "path",
       "x": 2658.4746,
@@ -197,8 +206,8 @@
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 attack(0.02),keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
-      "id": 20,
+      "action_params": ";万叶 attack(0.02),keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "id": 21,
       "move_mode": "climb",
       "sync_point_id": "fight_7",
       "type": "target",
@@ -208,7 +217,7 @@
     {
       "action": "combat_script",
       "action_params": "wait(0.5)",
-      "id": 21,
+      "id": 22,
       "move_mode": "climb",
       "sync_point_id": "fight_8",
       "type": "target",
@@ -218,7 +227,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 22,
+      "id": 23,
       "move_mode": "dash",
       "type": "path",
       "x": 2684.2598,
@@ -227,7 +236,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 23,
+      "id": 24,
       "move_mode": "jump",
       "type": "path",
       "x": 2694.0332,
@@ -235,8 +244,8 @@
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 attack(0.02),keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
-      "id": 24,
+      "action_params": ";万叶 attack(0.02),keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "id": 25,
       "move_mode": "climb",
       "sync_point_id": "fight_9",
       "type": "target",
@@ -246,7 +255,7 @@
     {
       "action": "combat_script",
       "action_params": "wait(0.5)",
-      "id": 25,
+      "id": 26,
       "move_mode": "climb",
       "sync_point_id": "fight_10",
       "type": "target",
@@ -256,7 +265,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 26,
+      "id": 27,
       "move_mode": "jump",
       "type": "path",
       "x": 2693.2656,
@@ -265,7 +274,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 27,
+      "id": 28,
       "move_mode": "dash",
       "type": "path",
       "x": 2699.665,
@@ -274,7 +283,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 28,
+      "id": 29,
       "move_mode": "walk",
       "type": "path",
       "x": 2692.873,
@@ -283,7 +292,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 29,
+      "id": 30,
       "move_mode": "jump",
       "type": "path",
       "x": 2686.833,
@@ -292,19 +301,18 @@
     {
       "action": "combat_script",
       "action_params": ";茜特菈莉 attack(0.08),keypress(E),wait(0.1),keypress(E);莱依拉 attack(0.08),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.08),keypress(E),wait(0.1),keypress(E);尼可 attack(0.08),keypress(E),wait(0.1),keypress(E); ;",
-      "id": 30,
+      "id": 31,
       "move_mode": "walk",
-      "sync_point_id": "fight_11",
       "type": "target",
       "x": 2682.9443,
       "y": 9324.749
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 attack(0.02),keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
-      "id": 31,
+      "action_params": ";万叶 attack(0.02),keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "id": 32,
       "move_mode": "dash",
-      "sync_point_id": "fight_12",
+      "sync_point_id": "fight_11",
       "type": "target",
       "x": 2662.0781,
       "y": 9341.498
@@ -312,9 +320,9 @@
     {
       "action": "combat_script",
       "action_params": "wait(0.5)",
-      "id": 32,
+      "id": 33,
       "move_mode": "climb",
-      "sync_point_id": "fight_13",
+      "sync_point_id": "fight_12",
       "type": "target",
       "x": 2660.7559,
       "y": 9342.4053
@@ -322,7 +330,7 @@
     {
       "action": "",
       "action_params": "",
-      "id": 33,
+      "id": 34,
       "move_mode": "walk",
       "type": "path",
       "x": 2666.1211,
@@ -330,10 +338,10 @@
     },
     {
       "action": "combat_script",
-      "action_params": ";万叶 attack(0.02),keydown(E),keydown(S),wait(0.47),keyup(E),attack(0.2),keyup(S);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
-      "id": 34,
+      "action_params": ";万叶 attack(0.02),keydown(E),wait(0.47),keyup(E),attack(0.2);迪希雅 attack(0.05),keypress(E),wait(0.1),keypress(E);阿贝多 attack(0.05),keypress(E),wait(0.1),keypress(E);菈乌玛 attack(0.05),keypress(E),wait(0.1),keypress(E);少女 attack(0.05),keypress(E),wait(0.1),keypress(E);伊涅芙 attack(0.05),keypress(E),wait(0.1),keypress(E);茜特菈莉 attack(0.05),keypress(E),wait(0.1),keypress(E);凝光 attack(0.05),keypress(E),wait(0.1),keypress(E);云堇 attack(0.05),keypress(E),wait(0.1),keypress(E);久岐忍 attack(0.05),keypress(E),wait(0.1),keypress(E);五郎 attack(0.05),keypress(E),wait(0.1),keypress(E);北斗 attack(0.05),keypress(E),wait(0.1),keypress(E);砂糖 attack(0.05),keypress(E),wait(0.1),keypress(E);雷泽 attack(0.05),e(hold);琴 wait(0.2),keydown(E),wait(0.4),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,0),wait(0.2),moveby(1000,-3500),wait(1),keyup(E),wait(0.3),click(middle);wait(0.5)",
+      "id": 35,
       "move_mode": "dash",
-      "sync_point_id": "fight_14",
+      "sync_point_id": "fight_13",
       "type": "target",
       "x": 2666.4805,
       "y": 9324.3291
@@ -341,9 +349,9 @@
     {
       "action": "combat_script",
       "action_params": "wait(0.5)",
-      "id": 35,
+      "id": 36,
       "move_mode": "climb",
-      "sync_point_id": "fight_15",
+      "sync_point_id": "fight_14",
       "type": "target",
       "x": 2665.9678,
       "y": 9322.9072
