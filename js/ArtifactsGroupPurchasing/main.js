@@ -2,6 +2,7 @@ const runExtra = settings.runExtra || false;
 const runExtraSnezhnaya = settings.runExtraSnezhnaya || false;
 const useAllTargetImages = settings.useAllTargetImages === true || settings.useAllTargetImages === "true";
 const energySavingPlaceholder = settings.energySavingPlaceholder === true || settings.energySavingPlaceholder === "true";
+const energySavingKey = resolveEnergySavingKey();
 const leaveTeamRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/RecognitionObject/leaveTeam.png"));
 const scrollRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/拾取滚轮.png"), 1017, 496, 1093 - 581, 581 - 496);
 const kick2pRo = RecognitionObject.TemplateMatch(file.ReadImageMatSync("assets/RecognitionObject/kickButton.png"), 1520, 277, 230, 120);
@@ -34,11 +35,6 @@ let rideTime = new Date().toISOString(); // 记录上车时间
 let matchInfo;
 let hostEvidence;
 
-function readMatchInfo() {
-    if (!matchInfo) matchInfo = JSON.parse(file.ReadTextSync("匹配信息.json"));
-    return matchInfo;
-}
-
 const gainReportId = `gain-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 let commands = []; // 命令数组（全局变量）
 let runnedEnding = false;
@@ -47,6 +43,19 @@ let onlineRecord = {
     todayRecords: []
 };
 let skipLog = false;
+
+function readMatchInfo() {
+    if (!matchInfo) matchInfo = JSON.parse(file.ReadTextSync("匹配信息.json"));
+    return matchInfo;
+}
+
+// 节能占位：开书按键。默认 F2（多人界面，静止画面同样降帧），留空或未配置时回退 F2
+function resolveEnergySavingKey() {
+    const raw = settings.energySavingKey;
+    if (raw === null || raw === undefined) return "F2";
+    const key = String(raw).trim();
+    return key === "" ? "F2" : key;
+}
 
 (async function () {
     setGameMetrics(1920, 1080, 1);
@@ -460,16 +469,16 @@ async function runGroupPurchasing(runExtra) {
         let start = new Date();
         while (new Date() - start < 90 * 60 * 1000) {
             if (energySavingPlaceholder) {
-                // ===== 节能占位模式：低频探测，书被关只提示不重开 =====
+                // ===== 节能占位模式：低频探测，静止界面被关只提示不重开 =====
                 await sleep(15000);
-                // 书打开时 isMainUI() 恒为 false，变 true 说明书已关闭
+                // 静止界面（F2 多人界面 / 冒险之证等）打开时 isMainUI() 恒为 false，变 true 说明已被关闭
                 if (await isMainUI()) {
                     const sign = await getPlayerSign();
                     if (sign === 0) {
                         log.info("已回到单人世界，结束占位");
                         break;
                     }
-                    log.info("发现F1《冒险之证》被关闭，请手动打开");
+                    log.info(`发现节能界面（${energySavingKey}）已被关闭，请手动重新打开`);
                     log.info(`当前识别为${sign}P`);
                 }
             } else {
@@ -892,11 +901,11 @@ async function runGroupPurchasing(runExtra) {
         }
         log.info(`${folderName} 的全部路线已完成`);
 
-        // 节能占位模式：按 F1 打开《冒险之证》以降帧
+        // 节能占位模式：按开书键打开静止界面（默认 F2 多人界面，或用冒险之证）以降帧
         if (energySavingPlaceholder) {
-            await keyPress("F1");
+            await keyPress(energySavingKey);
             await sleep(1000);
-            log.info(`已开书，进入节能占位模式`);
+            log.info(`已按 ${energySavingKey} 打开静止界面，进入节能占位模式`);
         }
     }
 }
@@ -1819,6 +1828,12 @@ async function processArtifacts() {
             log.info(`当前总经验识别成功: ${newValue}`);
         } else {
             log.warn(`在指定区域未识别到有效数字: ${newValue}`);
+        }
+        if (newValue === null && initialValue !== null) {
+            const recheck = await numberTemplateMatch("assets/已储存经验数字", 1573, 885, 74, 36);
+            if (Number.isFinite(recheck) && recheck === initialValue) {
+                newValue = initialValue;
+            }
         }
 
         if (initialValue === null || newValue === null) {
